@@ -98,6 +98,7 @@ if __name__ == "__main__" and not ARGS.no_file_log:
     from logging_utils import setup_file_logging
     LOG_FILE = setup_file_logging(_ROOT, ARGS.log_file)
 
+import compare                                       # noqa: E402  A/B 对照
 import utils                                         # noqa: E402  同目录管道层
 from audio_timeline import AudioTimeline, SpeechRateEstimator  # noqa: E402
 from session_context import SessionBuffer            # noqa: E402
@@ -989,6 +990,19 @@ if ARGS.config:
 
 REPLY = CONFIG.get("reply")                           # 传给 utils 的回复函数
 
+#: A/B 对照的开关与两路配置（GET/POST /api/compare）。默认关；开了之后这一轮
+#: 不出声，两个面板并排出字——同一句话、同一份检索结果，只差 memory_context
+#: 注不注入。用户自己看差别（没有裁判，是刻意的）。
+COMPARE = compare.CompareState()
+
+
+def _set_compare(state) -> None:
+    global COMPARE
+    COMPARE = state
+    arms = " | ".join(f"{a.label}:{a.model or '默认'}{'+记忆' if a.memory else '无记忆'}"
+                      for a in state.arms)
+    print(f"[compare] {'开' if state.enabled else '关'}  {arms}", flush=True)
+
 # 声明式构造：from_config 是现有注入机制之上的糖（VoiceMem(embedding=fn, slots=fn,…)）。
 #: 每个 Memory Space 一个 VoiceMem 实例，按需建、建好留着。
 #:
@@ -1346,6 +1360,75 @@ def fill_tags(payload: dict, text: str, audio_path: str = "",
     return payload
 
 
+async def _announce_turn(pending, send) -> None:
+    """一轮开场：转写 + 这轮命中的记忆 + 后台补声学情绪。
+
+    三条控制流（llm_tts / realtime / 对照）说完同样这几句，所以收在一处——
+    之前是两份逐字重复的拷贝，加第三条时正好该合。
+
+    声学情绪**不在这儿算**。它要 2.3 秒（emotion2vec 跑整段音频），而这几行是
+    用户说完到助手开口之间最要紧的一段——实测这一步就吃掉了 4.5 秒里的一半，
+    算完还常常因为"把握不够"被丢掉，纯浪费。
+    先用文本语义那份（毫秒级）把标签发出去，声学放后台跑，可信了再补一条
+    tag_update 覆盖 UI 上的情绪。
+    """
+    await send({"type": "user_transcript", "text": pending.text})
+    note_hits(pending.result)      # 让脑图快照保证这几条在图上
+    await send({"type": "memory_hits",
+                **fill_tags(utils.hits_payload(pending.result, has_audio=audio_of,
+                                              cluster_of=hit_cluster),
+                            pending.text, pending.audio_path or "", acoustic=False)})
+    _kick_acoustic(send, pending.audio_path or "")
+
+
+async def _compare_shared_system(pending, context_session: str, context_space: str) -> str:
+    """两路面板**共用**的 system：人设 + 语言 + 会话历史。
+
+    只有 memory_context 一路一路不同——那才是要对照的变量。人设/语言/历史如果
+    两边不一致，屏幕上的差别就不只是「有没有记忆」了，这个对照就不作数。
+    """
+    parts = [_RT_PERSONA]
+    if pending.stranger:
+        parts.append(_STRANGER)
+    hist = _history_block(context_session, context_space or ACTIVE_SPACE)
+    if hist:
+        parts.append(hist)
+    if _lang_note():
+        parts.append(_lang_note())
+    return "\n\n".join(parts)
+
+
+async def _compare_turn(pending, send, owner, timeline=None, context_session="",
+                        context_space="") -> dict:
+    """对照这一轮：同一句话喂两路，一路注入记忆一路不注入，并排出字。
+
+    不出声（TTS 整条跳过），也不发 answer_*——前端那套字幕/播放是绑在播放时钟上的，
+    对照模式走自己的 cmp_* 消息，那边一行不用改。
+
+    记忆**只写一次**，走原来的 queue_remember_turn，拿 a 面板的回复。两路都挂了也
+    照样 ingest（agent_reply 为空）：用户刚说的那句话里的事实不该因为一个坏 key
+    就丢掉。
+    """
+    context_space = context_space or ACTIVE_SPACE
+    memory_vm = get_space(context_space)
+    system = await _compare_shared_system(pending, context_session, context_space)
+    # 陌生人那一轮不注入任何记忆（这库的主人不是他），两路就都拿不到——没得对照，
+    # 但也不能把主人的记忆念给陌生人听。
+    mem_ctx = "" if pending.stranger else (pending.memory_context or "")
+    result = await compare.fan_out(pending.text, mem_ctx, COMPARE.arms, send,
+                                   system=system)
+    reply = result.get("a", "")
+    history_turn_id = _push_history(context_session, context_space,
+                                    pending.text, reply)
+    queue_remember_turn(pending, reply, owner, history_turn_id,
+                        memory_vm=memory_vm)
+    if timeline is not None:
+        # 这一轮没有音频，但上下文确实存了。不置位的话时间线那边会以为本轮的
+        # 上下文丢了（见 llm_tts 收尾处同一行）。
+        timeline.context_saved = True
+    return result
+
+
 async def voicemem_llm_tts(pending, send, send_audio, owner, timeline,
                            said=None, context_session="", context_space="",
                            memory_vm=None):
@@ -1361,21 +1444,17 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, timeline,
     """
     memory_vm = memory_vm or vm
     context_space = context_space or ACTIVE_SPACE
-    await send({"type": "user_transcript", "text": pending.text})
-    # 声学情绪**不在这儿算**。它要 2.3 秒（emotion2vec 跑整段音频），而这几行是
-    # 用户说完到助手开口之间最要紧的一段——实测这一步就吃掉了 4.5 秒里的一半，
-    # 算完还常常因为"把握不够"被丢掉，纯浪费。
-    # 先用文本语义那份（毫秒级）把标签发出去，声学放后台跑，可信了再补一条
-    # tag_update 覆盖 UI 上的情绪。
-    note_hits(pending.result)      # 让脑图快照保证这几条在图上
-    await send({"type": "memory_hits",
-                **fill_tags(utils.hits_payload(pending.result, has_audio=audio_of,
-                                              cluster_of=hit_cluster),
-                            pending.text, pending.audio_path or "", acoustic=False)})
-    _kick_acoustic(send, pending.audio_path or "")
+    await _announce_turn(pending, send)
     if pending.replay:
         _note_replay(pending.replay)
         await send({"type": "play_memory", "memory_id": pending.replay})
+    if COMPARE.enabled:
+        # answer_start 之前就分岔：那条消息会重置前端播放、把 aiSpeaking 置真，
+        # 而对照这一轮根本不出声。
+        await _compare_turn(pending, send, owner, timeline,
+                            context_session=context_session,
+                            context_space=context_space)
+        return
     await send({"type": "answer_start", "output_id": timeline.output_id,
                 "sample_rate": timeline.sample_rate})
 
@@ -1564,13 +1643,7 @@ async def start_realtime_turn(pending, conn, send, timeline,
     OpenAI 的事件流只能有一个消费者，每轮各读各的会串台：上一轮被打断后残留的
     response.done 会被下一轮读到，当成自己说完了。
     """
-    await send({"type": "user_transcript", "text": pending.text})
-    note_hits(pending.result)      # 让脑图快照保证这几条在图上
-    await send({"type": "memory_hits",
-                **fill_tags(utils.hits_payload(pending.result, has_audio=audio_of,
-                                              cluster_of=hit_cluster),
-                            pending.text, pending.audio_path or "", acoustic=False)})
-    _kick_acoustic(send, pending.audio_path or "")
+    await _announce_turn(pending, send)
     if pending.replay:
         # 前端收下先记着，等这一轮回复播完再放——助手的回复是排队播的，
         # 提前放会跟人声叠在一起。
@@ -2595,6 +2668,18 @@ async def realtime_session(sock):
                         if BARGE_DEBUG:
                             print("[barge] 等旧 response 退出后再创建下一轮", flush=True)
                         await response_idle.wait()
+                    if COMPARE.enabled:
+                        # realtime 是**一条**音频流，两路面板装不进去，所以这一轮
+                        # 改走 chat-completions 的扇出（不出声）。
+                        # 缓冲里那段麦克风音频必须清掉：realtime 连接是常驻的，
+                        # 不 commit 也不 clear 的话它会一直攒着，等哪一轮关掉对照
+                        # 再 commit，前面攒的几轮会一起被念出来。
+                        await conn.input_audio_buffer.clear()
+                        await _announce_turn(pending, sock.send_json)
+                        await _compare_turn(pending, sock.send_json, owner,
+                                            context_session=context_session,
+                                            context_space=ACTIVE_SPACE)
+                        continue
                     context_space = ACTIVE_SPACE
                     memory_vm = vm
                     timeline = AudioTimeline(
@@ -3135,7 +3220,8 @@ def memory_snapshot(limit: int = 48) -> dict:
 app = utils.build_app(MODE, realtime_session if MODE == "realtime" else llm_tts_session,
                       lambda *a, **k: vm.classify(*a, **k), memory_snapshot, audio_of,
                       spaces=(list_spaces, create_space, use_space, lambda: ACTIVE_SPACE),
-                      set_lang=set_lang)
+                      set_lang=set_lang,
+                      compare=(lambda: COMPARE, _set_compare))
 
 
 if __name__ == "__main__":

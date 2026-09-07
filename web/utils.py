@@ -150,12 +150,18 @@ def hits_payload(result, has_audio=None, cluster_of=None):
 
 # ── FastAPI + WS 接线（仅接线，渲染都在 index.html）─────────────────────────────
 def build_app(mode, session, classify, snapshot=None, audio_of=None, spaces=None,
-              set_lang=None):
+              set_lang=None, compare=None):
     """session(sock)：run.py 传入的会话循环（llm_tts / realtime）。classify(query)：给脑图生长用。
     snapshot()：库里已有的记忆，前端打开页面时先把脑图铺满。
     spaces=(list_fn, create_fn, use_fn, active_fn)：Memory Space 的增/查/切换。
-    set_lang(lang)：界面切语言时同步给助手（回复语言 + 抽取语言）。"""
+    set_lang(lang)：界面切语言时同步给助手（回复语言 + 抽取语言）。
+    compare=(get_state, set_state)：A/B 对照的开关与两路配置。路由本体在
+    web/compare.py——那份不 import 本模块（torch/TTS 一并进来），所以能单测。"""
     app = FastAPI()
+
+    if compare:
+        from compare import register_routes
+        register_routes(app, *compare)
 
     @app.websocket("/ws")
     async def ws(sock: WebSocket):
