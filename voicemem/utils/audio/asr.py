@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import os
 import re
 
 import numpy as np
@@ -163,9 +164,18 @@ class FunASRStreamingASR:
 
 
 class Transcriber:
-    """SenseVoiceSmall 出最终文本（中英），比流式 ASR 更准，锁定一轮时用这个。"""
+    """SenseVoiceSmall 出最终文本（中英），比流式 ASR 更准，锁定一轮时用这个。
 
-    def __init__(self, device: str) -> None:
+    ``language`` 默认 ``auto``（也可用 ``VOICEMEM_ASR_LANGUAGE`` 配）。之前写死
+    ``zh``：SenseVoice 是多语模型，被钉在中文上时英文语音会被硬塞成汉字——
+    实测说 "hello how are you" 转出来是「你不知道还lohow areyou」。转错的文本
+    接着进抽取和检索，后面一路都是垃圾。SenseVoice 认的值：auto / zh / en /
+    yue / ja / ko / nospeech。"""
+
+    def __init__(self, device: str, language: str = "") -> None:
+        self.language = (language
+                         or os.environ.get("VOICEMEM_ASR_LANGUAGE", "")
+                         or "auto")
         from funasr import AutoModel        # 懒 import：只有用非流式精转写才需要 funasr
         from voicemem.utils.common.paths import hf_model
         _name = hf_model("emotion", "FunAudioLLM/SenseVoiceSmall", "asr")
@@ -174,7 +184,7 @@ class Transcriber:
                                trust_remote_code=False)
 
     def _generate(self, audio) -> str:
-        res = self.model.generate(input=audio, cache={}, language="zh",
+        res = self.model.generate(input=audio, cache={}, language=self.language,
                                   use_itn=True, ban_emo_unk=True)
         if not res:
             return ""
