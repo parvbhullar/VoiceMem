@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 
 import numpy as np
 
@@ -200,3 +201,112 @@ class Transcriber:
         emotion = next((SENSEVOICE_EMOTION_MAP[tag] for tag in tags
                         if tag in SENSEVOICE_EMOTION_MAP), "中性")
         return re.sub(r"<\|[^|]*\|>", "", raw).strip(), emotion
+
+
+# ── API 流式 ASR：不下模型，走 OpenAI 兼容的转写接口 ────────────────────────────
+
+def _wav_bytes(samples, rate: int = SAMPLE_RATE) -> bytes:
+    """float32 [-1,1] → 内存里的 16-bit WAV。转写接口要的是文件，不是裸 PCM。"""
+    import io
+    import wave
+    pcm = (np.clip(np.asarray(samples, dtype=np.float32), -1.0, 1.0) * 32767).astype(np.int16)
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(pcm.tobytes())
+    return buf.getvalue()
+
+
+class OpenAIStreamingASR:
+    """转写走 API，本地一个模型都不下。``VOICEMEM_ASR=openai`` 时启用。
+
+    为什么不是"攒完一轮再转一次"：``stream.py`` 判「说完了」的条件里有
+    ``self._text.strip()``——``feed()`` 一直返回空串的话这一轮永远不会结束，
+    ``flush()`` 也就永远不会被调用。而且投机预取吃的就是 partial 文本，没有
+    partial 就等于把这个 demo 的核心（说到一半就把记忆搜好）关掉了。
+
+    所以 partial 也走网络，但**同时只允许一个请求在飞**（single-flight）：
+    ``feed()`` 立刻返回上一次已经拿到的文本，新请求在后台线程里跑，回来了下一次
+    ``feed()`` 就能看到。说话人还在说的时候，这条路是完全非阻塞的。
+
+    ``flush()`` 是唯一一次同步等待：那一次的结果就是这一轮的最终文本。
+
+    代价说清楚：每 ``partial_every_s`` 秒一次网络请求（默认 0.9s，单飞所以慢的
+    时候自动降频），加收尾一次。多语言、自动判语种，中文/英文/印地语都能转——
+    这正是本地那两个模型做不到的地方。
+    """
+
+    def __init__(self, model: str = "", language: str = "",
+                 transcribe=None, partial_every_s: float = 0.9) -> None:
+        self.model = model or os.environ.get("VOICEMEM_ASR_MODEL", "") or "gpt-4o-mini-transcribe"
+        lang = (language or os.environ.get("VOICEMEM_ASR_LANGUAGE", "") or "auto").lower()
+        self.language = "" if lang in ("", "auto") else lang
+        self.partial_every_s = partial_every_s
+        self._transcribe = transcribe or self._api_transcribe
+        self._client = None
+        self._lock = threading.Lock()
+        self.reset()
+
+    # ── 网络那一半 ───────────────────────────────────────────────────────────
+    def _api_transcribe(self, wav: bytes) -> str:
+        if self._client is None:
+            from openai import OpenAI
+            from voicemem.llm_config import resolve_api_key, resolve_base_url
+            self._client = OpenAI(api_key=resolve_api_key(None),
+                                  base_url=resolve_base_url(None))
+        kw = {"language": self.language} if self.language else {}
+        r = self._client.audio.transcriptions.create(
+            model=self.model, file=("turn.wav", wav, "audio/wav"), **kw)
+        return (getattr(r, "text", "") or "").strip()
+
+    def _run(self, audio) -> None:
+        """后台线程：转写当前缓冲，成功了就更新 _text。失败不抛——一次 partial
+        丢了没关系，flush() 还会再转一次完整的。"""
+        try:
+            text = self._transcribe(_wav_bytes(audio))
+        except Exception as e:                       # noqa: BLE001
+            print(f"[asr] partial 转写失败（忽略）：{type(e).__name__}: {e}", flush=True)
+            return
+        with self._lock:
+            if text:
+                self._text = text
+
+    # ── 流式接口（跟另外两个 ASR 一致）────────────────────────────────────────
+    def feed(self, samples) -> str:
+        self._buf.append(np.asarray(samples, dtype=np.float32))
+        self._n += len(samples)
+        if self._inflight is None or not self._inflight.is_alive():
+            since = (self._n - self._asked_at) / SAMPLE_RATE
+            if since >= self.partial_every_s:
+                self._asked_at = self._n
+                audio = np.concatenate(self._buf)
+                self._inflight = threading.Thread(target=self._run, args=(audio,), daemon=True)
+                self._inflight.start()
+        with self._lock:
+            return self._text
+
+    def flush(self) -> str:
+        """这一轮的最终文本。唯一一次同步等待。"""
+        if not self._buf:
+            return self._text
+        audio = np.concatenate(self._buf)
+        if len(audio) < int(0.2 * SAMPLE_RATE):      # 太短，转了也是噪声
+            return self._text
+        try:
+            text = self._transcribe(_wav_bytes(audio))
+        except Exception as e:                       # noqa: BLE001
+            print(f"[asr] 收尾转写失败：{type(e).__name__}: {e}", flush=True)
+            return self._text
+        if text:
+            with self._lock:
+                self._text = text
+        return self._text
+
+    def reset(self) -> None:
+        self._buf: list = []
+        self._n = 0
+        self._asked_at = 0
+        self._inflight = None
+        self._text = ""

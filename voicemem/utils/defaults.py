@@ -42,9 +42,14 @@ def default_utils(base_url, memory_root):
         from voicemem.utils.audio.voiceprint.speaker_encoder import SpeakerEncoder
         return SpeakerEncoder(device="cpu")
     def asr():
-        # 默认 FunASR paraformer-zh-streaming（中文更准）；VOICEMEM_ASR=sherpa 回退到
-        # sherpa-onnx 流式 zipformer（中英双语、纯 onnx 不依赖 torch）。
-        if os.environ.get("VOICEMEM_ASR", "funasr").lower() == "sherpa":
+        # VOICEMEM_ASR=openai 走转写 API（不下模型、多语种，含印地语）；
+        # sherpa 走 sherpa-onnx 流式 zipformer（中英双语、纯 onnx 不依赖 torch）；
+        # 默认 FunASR paraformer-zh-streaming（**只认中文**，英文会被硬塞成汉字）。
+        _pick = os.environ.get("VOICEMEM_ASR", "funasr").lower()
+        if _pick == "openai":
+            from voicemem.utils.audio.asr import OpenAIStreamingASR
+            return OpenAIStreamingASR()
+        if _pick == "sherpa":
             from voicemem.utils.audio.asr import StreamingASR
             from voicemem.utils.common.paths import model_path
             return StreamingASR(str(model_path(
