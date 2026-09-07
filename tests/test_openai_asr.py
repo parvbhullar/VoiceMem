@@ -57,27 +57,44 @@ class WavEncodingTest(unittest.TestCase):
 
 
 class PartialTest(unittest.TestCase):
-    def test_feed_returns_empty_until_the_first_partial_lands(self):
-        asr = OpenAIStreamingASR(transcribe=lambda wav: "hello", partial_every_s=0.1)
+    def test_feed_does_not_block_on_the_request(self):
+        """The audio loop cannot wait on the network. The fake blocks until the
+        test releases it, so "the request is still in flight" is a real state
+        here rather than a race the fake might win."""
+        gate = threading.Event()
+
+        def blocking(wav):
+            gate.wait(2.0)
+            return "hello"
+
+        asr = OpenAIStreamingASR(transcribe=blocking, partial_every_s=0.1)
 
         first = asr.feed(_audio(0.2))          # fires the request, returns at once
 
-        self.assertEqual(first, "")
+        self.assertEqual(first, "")            # nothing has landed yet
+        gate.set()
         _settle(asr)
         self.assertEqual(asr.feed(_audio(0.01)), "hello")
 
     def test_only_one_request_is_in_flight_at_a_time(self):
+        """Without single-flight this is one request per feed, i.e. one per
+        audio frame at whatever rate the mic delivers."""
         calls = []
+        started = threading.Event()
         gate = threading.Event()
 
         def slow(wav):
             calls.append(len(wav))
-            gate.wait(1.0)
+            started.set()
+            gate.wait(2.0)
             return "text"
 
         asr = OpenAIStreamingASR(transcribe=slow, partial_every_s=0.01)
-        for _ in range(6):
-            asr.feed(_audio(0.1))              # would be 6 requests without single-flight
+        asr.feed(_audio(0.1))
+        self.assertTrue(started.wait(2.0), "first request never started")
+
+        for _ in range(5):                     # all of these must be skipped
+            asr.feed(_audio(0.1))
 
         self.assertEqual(len(calls), 1)
         gate.set()
