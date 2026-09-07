@@ -276,6 +276,47 @@ button{cursor:pointer;background:none;border:none}
   .rightpane{border-left:none;border-top:1px solid var(--line);min-height:70vh}
 }
 @media (prefers-reduced-motion:reduce){*{animation-duration:.001ms!important;transition-duration:.001ms!important}}
+
+/* ── A/B 对照 ────────────────────────────────────────────────────────────
+   两路面板并排。刻意不用左脑蓝/右脑粉——那两个颜色在这页里已经表示"哪半个脑"，
+   拿来表示"哪一路"会读成同一件事。有记忆的那路用薄荷绿描边，无记忆的那路留灰。 */
+.cmp-tg{font-size:11px;letter-spacing:.02em;padding:3px 9px;border-radius:99px;
+  border:1px solid var(--line-2);color:var(--txt-2);margin-left:auto}
+.cmp-tg:hover{background:var(--bg-hover);color:var(--txt)}
+.cmp-tg.on{background:var(--mint);border-color:var(--mint);color:#08150e;font-weight:600}
+.panel-h.has-tg{display:flex;align-items:center;gap:8px}
+.cmp{display:flex;flex-direction:column;gap:8px;min-height:0;flex:1}
+.cmp-cols{display:grid;grid-template-columns:1fr 1fr;gap:8px;min-height:0;flex:1}
+.cmp-col{display:flex;flex-direction:column;min-width:0;border:1px solid var(--line);
+  border-radius:var(--radius);background:var(--bg-panel);overflow:hidden}
+.cmp-col.mem{border-color:rgba(121,215,162,.45)}
+.cmp-h{display:flex;align-items:center;gap:6px;padding:6px 8px;
+  border-bottom:1px solid var(--line);background:rgba(255,255,255,.02)}
+.cmp-h .lab{font-size:11px;font-weight:700;color:var(--txt-3);letter-spacing:.06em}
+.cmp-col.mem .cmp-h .lab{color:var(--mint)}
+.cmp-model{flex:1;min-width:0;background:var(--bg-input);border:1px solid transparent;
+  border-radius:7px;padding:3px 7px;font-size:11px;color:var(--txt)}
+.cmp-model:focus{border-color:var(--line-2);outline:none}
+.cmp-mem{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--txt-2);
+  cursor:pointer;white-space:nowrap}
+.cmp-ms{font-size:10px;color:var(--txt-3);font-variant-numeric:tabular-nums}
+.cmp-body{flex:1;overflow-y:auto;padding:9px 10px;font-size:13px;line-height:1.62;
+  white-space:pre-wrap;word-break:break-word}
+.cmp-body.idle{color:var(--txt-3)}
+.cmp-body.err{color:var(--rose);font-size:12px}
+.cmp-ctx{border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--bg-dark);flex:none}
+.cmp-ctx>summary{padding:6px 10px;font-size:11px;color:var(--txt-2);cursor:pointer;
+  list-style:none;display:flex;gap:6px;align-items:center}
+.cmp-ctx>summary::-webkit-details-marker{display:none}
+.cmp-ctx>summary::before{content:'▸';color:var(--txt-3)}
+.cmp-ctx[open]>summary::before{content:'▾'}
+.cmp-ctx pre{margin:0;padding:0 10px 9px;font-size:11px;line-height:1.55;
+  color:var(--txt-2);white-space:pre-wrap;max-height:22vh;overflow-y:auto}
+.cmp-keys{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:6px 8px 8px}
+.cmp-keys input{background:var(--bg-input);border:1px solid transparent;border-radius:7px;
+  padding:3px 7px;font-size:11px;color:var(--txt);min-width:0}
+.cmp-keys input:focus{border-color:var(--line-2);outline:none}
 </style>
 </head>
 <body>
@@ -329,8 +370,54 @@ button{cursor:pointer;background:none;border:none}
     </div>
 
     <div class="panel p-out">
-      <div class="panel-h">AI 回复</div>
+      <div class="panel-h has-tg">AI 回复
+        <button class="cmp-tg" id="cmpTg" data-i18n-title="cmpTgTitle"
+                title="同一句话喂两路：一路注入记忆，一路不注入">⚖ A/B</button>
+      </div>
       <div class="reply idle" id="reply">这一轮还没有回复。</div>
+      <div class="cmp" id="cmp" hidden>
+        <div class="cmp-cols">
+      <div class="cmp-col mem" id="cmpColA">
+        <div class="cmp-h">
+          <span class="lab">A</span>
+          <input class="cmp-model" id="cmpModelA" data-i18n-ph="cmpModelPh"
+                 placeholder="默认模型" spellcheck="false">
+          <label class="cmp-mem"><input type="checkbox" id="cmpMemA" checked>
+            <span data-i18n="cmpMem">记忆</span></label>
+          <span class="cmp-ms" id="cmpMsA"></span>
+        </div>
+        <div class="cmp-keys">
+          <input id="cmpUrlA" data-i18n-ph="cmpUrlPh" placeholder="自建端点（可留空）"
+                 spellcheck="false">
+          <input id="cmpKeyA" type="password" data-i18n-ph="cmpKeyPh"
+                 placeholder="自带 key（可留空）" spellcheck="false" autocomplete="off">
+        </div>
+        <div class="cmp-body idle" id="cmpTxtA">等这一轮…</div>
+      </div>
+      <div class="cmp-col" id="cmpColB">
+        <div class="cmp-h">
+          <span class="lab">B</span>
+          <input class="cmp-model" id="cmpModelB" data-i18n-ph="cmpModelPh"
+                 placeholder="默认模型" spellcheck="false">
+          <label class="cmp-mem"><input type="checkbox" id="cmpMemB">
+            <span data-i18n="cmpMem">记忆</span></label>
+          <span class="cmp-ms" id="cmpMsB"></span>
+        </div>
+        <div class="cmp-keys">
+          <input id="cmpUrlB" data-i18n-ph="cmpUrlPh" placeholder="自建端点（可留空）"
+                 spellcheck="false">
+          <input id="cmpKeyB" type="password" data-i18n-ph="cmpKeyPh"
+                 placeholder="自带 key（可留空）" spellcheck="false" autocomplete="off">
+        </div>
+        <div class="cmp-body idle" id="cmpTxtB">等这一轮…</div>
+      </div>
+        </div>
+        <details class="cmp-ctx">
+          <summary><span data-i18n="cmpCtx">注入的记忆上下文</span>
+            <span class="cmp-ms" id="cmpCtxN"></span></summary>
+          <pre id="cmpCtx"></pre>
+        </details>
+      </div>
       <div class="out-foot">
         <div class="voice" id="voice">
           <div class="ear"><span class="ring"></span></div>
@@ -481,6 +568,10 @@ const I18N = {
   zh: {
     chat:'对话', memspace:'Memory Space', liveInput:'流式输入 · Live input',
     you:'你', waitingYou:'等待你说话…', noReplyYet:'这一轮还没有回复。',
+    cmpTitle:'A/B 对照', cmpTgTitle:'同一句话喂两路：一路注入记忆，一路不注入。开了这一轮不出声，两边并排出字。',
+    cmpMem:'记忆', cmpModelPh:'默认模型', cmpWaiting:'等这一轮…',
+    cmpCtx:'注入的记忆上下文', cmpCtxEmpty:'这一轮没检索到任何记忆——两边拿到的东西一样。',
+    cmpKeyPh:'自带 key（可留空）', cmpUrlPh:'自建端点（可留空）',
     talkStart:'开始对话', talkEnd:'结束对话', pause:'暂停', resume:'继续',
     ended:'已结束。',
     idle:'待机', listening:'正在听', replying:'正在回复', paused:'已暂停',
@@ -529,6 +620,10 @@ const I18N = {
   en: {
     chat:'Chat', memspace:'Memory Space', liveInput:'Live input',
     you:'You', waitingYou:'Waiting for you to speak…', noReplyYet:'No reply yet.',
+    cmpTitle:'A/B compare', cmpTgTitle:'Same utterance to two arms: one with the retrieved memory injected, one without. A compare turn is silent — both replies stream as text.',
+    cmpMem:'memory', cmpModelPh:'server default', cmpWaiting:'waiting for this turn…',
+    cmpCtx:'Injected memory context', cmpCtxEmpty:'Nothing retrieved this turn — both arms got the same thing.',
+    cmpKeyPh:'own key (optional)', cmpUrlPh:'own endpoint (optional)',
     talkStart:'Start talking', talkEnd:'End session', pause:'Pause', resume:'Resume',
     ended:'Session ended.',
     idle:'Idle', listening:'Listening', replying:'Replying', paused:'Paused',
@@ -1348,6 +1443,86 @@ function renderRecall(side,items){
     li.append(a,b); ul.appendChild(li);
   }
 }
+
+/* ── A/B 对照 ──────────────────────────────────────────────────────────────
+   同一句话喂两路：一路把检索到的记忆注进 system，一路不注。人设/语言/会话历史
+   两边一模一样（后端 _compare_shared_system），所以屏幕上的差别只可能来自记忆。
+   没有裁判——自己看。
+
+   状态**不挂在 session 上**：这是个一眼看完就走的视图，切会话时把上一轮的两路
+   留在屏幕上只会让人分不清哪一轮是哪一轮。 */
+const CMP={ on:false, ctx:'',
+            a:{text:'',ms:0,err:''}, b:{text:'',ms:0,err:''} };
+
+function cmpArms(){
+  return ['A','B'].map(u=>({ label:u.toLowerCase(),
+    model:$('cmpModel'+u).value.trim(),
+    memory:$('cmpMem'+u).checked,
+    base_url:$('cmpUrl'+u).value.trim(),
+    api_key:$('cmpKey'+u).value }));
+}
+
+/* 后端是这份配置的唯一权威：POST 回来的才画上去，不本地乐观更新——否则 400 之后
+   屏幕上显示的是一份后端并没有在用的配置，对照结果就无从解释。 */
+async function cmpPost(enabled){
+  try{
+    const r=await fetch('/api/compare',{ method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ enabled, arms:cmpArms() }) });
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){ toast('compare: '+(d.detail||r.status)); return; }
+    cmpApply(d);
+  }catch(e){ toast('compare: '+e.message); }
+}
+
+function cmpApply(d){
+  CMP.on=!!d.enabled;
+  for(const a of (d.arms||[])){
+    const u=(a.label||'').toUpperCase();
+    if(!$('cmpModel'+u)) continue;
+    // 正在打字的那个框不要被覆盖（change 事件是失焦时才发的）
+    if($('cmpModel'+u)!==document.activeElement) $('cmpModel'+u).value=a.model||'';
+    if($('cmpUrl'+u)!==document.activeElement) $('cmpUrl'+u).value=a.base_url||'';
+    $('cmpMem'+u).checked=!!a.memory;
+    $('cmpCol'+u).classList.toggle('mem',!!a.memory);
+  }
+  $('cmpTg').classList.toggle('on',CMP.on);
+  $('cmp').hidden=!CMP.on;
+  // 对照这一轮不发 answer_*，单路那块会一直停在"还没有回复"，留着只会误导。
+  $('reply').hidden=CMP.on;
+  renderCmp();
+}
+
+function cmpReset(){
+  CMP.ctx=''; CMP.a={text:'',ms:0,err:''}; CMP.b={text:'',ms:0,err:''};
+}
+
+function renderCmp(){
+  for(const u of ['A','B']){
+    const st=CMP[u.toLowerCase()], el=$('cmpTxt'+u);
+    if(!el) continue;
+    if(st.err){ el.className='cmp-body err'; el.textContent=st.err; }
+    else if(st.text){ el.className='cmp-body'; el.textContent=st.text; }
+    else { el.className='cmp-body idle'; el.textContent=i18n('cmpWaiting'); }
+    $('cmpMs'+u).textContent=st.ms?st.ms+'ms':'';
+  }
+  // 注入的原文照抄给用户看。"记忆帮了什么"只有看见那几行才说得清。
+  $('cmpCtx').textContent=CMP.ctx||i18n('cmpCtxEmpty');
+  $('cmpCtxN').textContent=CMP.ctx?CMP.ctx.length+' chars':'';
+}
+
+async function cmpLoad(){
+  try{ const r=await fetch('/api/compare'); if(r.ok) cmpApply(await r.json()); }
+  catch(e){ /* 后端没起来：开关就留在关着，页面照常用 */ }
+}
+
+$('cmpTg').addEventListener('click',()=>cmpPost(!CMP.on));
+for(const u of ['A','B']){
+  $('cmpMem'+u).addEventListener('change',()=>cmpPost(CMP.on));
+  for(const f of ['cmpModel','cmpUrl','cmpKey'])
+    $(f+u).addEventListener('change',()=>cmpPost(CMP.on));
+}
+
 function renderAll(){
   renderSpaces(); renderSessions(); renderChat();
   renderIO(currentSession()||{ui:blankUI()});
@@ -2100,6 +2275,26 @@ function handle(m){
       liveReply+=m.text;
       setSpokenCaptionTarget(liveReply); break;
 
+    case 'cmp_ctx':
+      // 一轮的开头。两路的 cmp_start 紧跟在后面，所以在这儿清上一轮。
+      cmpReset(); CMP.ctx=m.context||''; renderCmp(); break;
+
+    case 'cmp_start': {
+      const st=CMP[m.panel]; if(st){ st.text=''; st.err=''; st.ms=0; }
+      renderCmp(); break;
+    }
+
+    case 'cmp_delta': {
+      const st=CMP[m.panel]; if(st) st.text+=(m.text||'');
+      renderCmp(); break;
+    }
+
+    case 'cmp_done': {
+      const st=CMP[m.panel];
+      if(st){ st.text=m.text||st.text; st.ms=m.ms||0; st.err=m.error||''; }
+      renderCmp(); break;
+    }
+
     case 'answer_pause':
       pausePlaybackForBarge(); setVoice('user'); break;
 
@@ -2328,6 +2523,7 @@ renderAll();
 // 里还只是个空壳。切到别的空间再切回来反倒有内容（switchSpace 里调了
 // loadMemories），看着像"第一次进来会丢记忆"。
 loadSpaces().then(loadMemories);
+cmpLoad();
 fetch('/api/lang',{method:'POST',headers:{'Content-Type':'application/json'},
                    body:JSON.stringify({lang:LANG})}).catch(()=>{});
 })();

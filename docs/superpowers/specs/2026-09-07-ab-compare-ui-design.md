@@ -102,8 +102,14 @@ per arm, runs both generators concurrently, and emits `cmp_start` / `cmp_delta`
 / `cmp_done` per panel as tokens arrive. It returns
 `{"a": text, "b": text, "latency_ms": {"a": int, "b": int}, "errors": {...}}`.
 
-Both arms get the **same** `system` (the demo persona `_RT_PERSONA`). Differing
-personas would make the comparison dishonest.
+Both arms get the **same** `system`: persona (`_RT_PERSONA`) + language note +
+session-history block — everything that is identical for the two arms. Only
+`memory_context` differs, so the on-screen difference can only come from the
+memory. Sharing the persona has a consequence worth knowing before demoing:
+the persona tells the model it is this user's companion, so the **no-memory arm
+confabulates rather than admitting ignorance** (observed: "your cat is about
+three years old", then "about six" on a re-run). That is the honest baseline —
+same prompt, no memory — and it is the difference the demo is meant to show.
 
 `ctx_for(arm)` is `memory_context if arm.memory else ""`. Note the existing
 `_NO_MEMORY_NOTE` fallback (`web/run.py:298`) is **not** applied to a
@@ -174,8 +180,11 @@ Existing `answer_*`, `memory_hits`, `user_transcript`, `partial_transcript` and
   model name, 401, endpoint down) produces `cmp_done{panel, error}` for that
   panel; the other arm continues and completes normally.
 - If both arms fail, additionally send the existing `{"type": "error"}` so the
-  page's current error toast fires, and skip ingestion for that turn (no reply
-  to remember).
+  page's current error toast fires. The turn is **still ingested**, with an
+  empty agent reply: the facts in what the user just said must not be lost
+  because of one bad key, and an empty `agent_reply` is exactly what
+  `Memory.remember(text)` does. (This reverses an earlier draft of this spec
+  that skipped ingestion.)
 - `POST /api/compare` rejects a payload with a non-string model or a missing
   panel label with HTTP 400 and leaves the previous state intact.
 - A `memory=True` arm with an empty `memory_context` (nothing retrieved) is not
@@ -214,18 +223,45 @@ async generator providers, so no network and no model downloads.
 8. A `memory=True` arm with `memory_context == ""` still calls its provider with
    `""` and does not substitute `_NO_MEMORY_NOTE`.
 
-Manual verification: run `bash run_demo.sh`, toggle Compare, set panel A memory
-on / panel B memory off with the same model, speak a turn that depends on a
-stored fact, and confirm panel A uses the fact while panel B asks for it. Then
-confirm the memory space gained exactly one turn (one user utterance, one agent
-reply) for that turn.
+End-to-end verification actually run (server on 8787, `gpt-4o-mini` both arms,
+typed turns over `/ws`):
+
+1. `POST /api/compare` enables compare; `GET` reports it; an unknown panel is a
+   400 and leaves the previous state in place.
+2. A statement turn ("My cat is called Mocha and she is three years old") with
+   both arms memory-off streams two replies, emits **zero** `answer_*` messages,
+   and is ingested once — `/api/memories` then holds "User has a cat named
+   Mocha who is three years old."
+3. Asking "How old is my cat again?" with panel A memory-on sends a non-empty
+   `cmp_ctx` ("factual memory CONTEXT … - [2026-09-07] User has a cat named
+   Mocha who is three years old.") and panel A answers "Mocha is three years
+   old."
+4. The same question with both arms memory-off produces two different invented
+   ages across runs, confirming no memory leaks into a memory-off arm.
+
+Not yet verified in a browser: this machine has no Playwright browser installed
+and the disk is tight, so the page was checked by parsing every inline
+`<script>` with `node --check` (both blocks parse) and asserting the served HTML
+contains every element id the compare JS references. The toggle has not been
+clicked by a real browser.
 
 ## File-by-file change list
 
 | File | Change |
 |---|---|
 | `web/compare.py` | new — `Arm`, `CompareState`, `fan_out`, `sanitize` |
-| `web/run.py` | `COMPARE` state; compare branch in `voicemem_llm_tts`; realtime divert; pass `compare=` into `build_app` |
-| `web/utils.py` | `build_app` gains the optional `compare` param and the two `/api/compare` routes |
-| `web/voicemem.html` | toggle, compare section, 4 `cmp_*` handlers, one render fn |
-| `tests/test_compare.py` | new — 8 unit tests above |
+| `web/run.py` | `COMPARE` state + `_set_compare`; `_compare_shared_system`; `_compare_turn`; branch in `voicemem_llm_tts`; realtime divert; `_announce_turn` extracted; pass `compare=` into `build_app` |
+| `web/utils.py` | `build_app` gains the optional `compare` param and delegates to `compare.register_routes` |
+| `web/voicemem.html` | toggle, compare section (per-panel model / memory / base_url / api_key), 4 `cmp_*` handlers, `renderCmp`, i18n keys, CSS |
+| `tests/test_compare.py` | new — 20 unit tests (`git add -f`: `tests/` is gitignored, matching the two already-tracked test files) |
+
+Two changes to the plan above, made while implementing:
+
+* The routes live in `web/compare.py` (`register_routes`) rather than being
+  written inline in `build_app`. `web/utils.py` imports torch and the TTS stack,
+  so routes defined there cannot be unit-tested without loading models; in
+  `compare.py` they run against a bare `FastAPI()` app in milliseconds.
+* `_announce_turn` was extracted. The transcript + `memory_hits` +
+  acoustic-emotion block was already duplicated verbatim between
+  `voicemem_llm_tts` and `start_realtime_turn`; the compare path would have
+  made a third copy.
