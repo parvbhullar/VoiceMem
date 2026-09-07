@@ -280,13 +280,22 @@ button{cursor:pointer;background:none;border:none}
 /* ── A/B 对照 ────────────────────────────────────────────────────────────
    两路面板并排。刻意不用左脑蓝/右脑粉——那两个颜色在这页里已经表示"哪半个脑"，
    拿来表示"哪一路"会读成同一件事。有记忆的那路用薄荷绿描边，无记忆的那路留灰。 */
+/* panel-h 的 ::after 是那条占满剩余宽度的细线（flex:1），DOM 顺序在按钮之后，
+   所以不排一下 order 的话线会跑到按钮右边。要的是「标题 — 线 — 按钮」。 */
 .cmp-tg{font-size:11px;letter-spacing:.02em;padding:3px 9px;border-radius:99px;
-  border:1px solid var(--line-2);color:var(--txt-2);margin-left:auto}
+  border:1px solid var(--line-2);color:var(--txt-2);order:2;flex:0 0 auto}
+.panel-h.has-tg::after{order:1;margin-right:8px}
 .cmp-tg:hover{background:var(--bg-hover);color:var(--txt)}
 .cmp-tg.on{background:var(--mint);border-color:var(--mint);color:#08150e;font-weight:600}
 .panel-h.has-tg{display:flex;align-items:center;gap:8px}
 .cmp{display:flex;flex-direction:column;gap:8px;min-height:0;flex:1}
-.cmp-cols{display:grid;grid-template-columns:1fr 1fr;gap:8px;min-height:0;flex:1}
+/* 两路各自要够读一段回复。不给下限的话，中列高度不够时 flex 会把它们压到几
+   像素——1440x900 实测压到 64px、1280x720 压到 5px，字全在 overflow:hidden
+   里面，看起来就是"面板空的"。所以给 cols 一个地板，让不够的时候是中列滚动，
+   不是面板消失。中列只在对照打开时可滚（.center.cmp-on），默认布局一点不动。 */
+.cmp-cols{display:grid;grid-template-columns:1fr 1fr;gap:8px;flex:1;min-height:190px}
+.center.cmp-on{overflow-y:auto}
+.p-out.cmp-on{flex:1 1 auto;min-height:380px}
 .cmp-col{display:flex;flex-direction:column;min-width:0;border:1px solid var(--line);
   border-radius:var(--radius);background:var(--bg-panel);overflow:hidden}
 .cmp-col.mem{border-color:rgba(121,215,162,.45)}
@@ -572,6 +581,7 @@ const I18N = {
     cmpMem:'记忆', cmpModelPh:'默认模型', cmpWaiting:'等这一轮…',
     cmpCtx:'注入的记忆上下文', cmpCtxEmpty:'这一轮没检索到任何记忆——两边拿到的东西一样。',
     cmpKeyPh:'自带 key（可留空）', cmpUrlPh:'自建端点（可留空）',
+    cmpCtxNobody:'两路都没开记忆，这段没进任何 prompt',
     talkStart:'开始对话', talkEnd:'结束对话', pause:'暂停', resume:'继续',
     ended:'已结束。',
     idle:'待机', listening:'正在听', replying:'正在回复', paused:'已暂停',
@@ -624,6 +634,7 @@ const I18N = {
     cmpMem:'memory', cmpModelPh:'server default', cmpWaiting:'waiting for this turn…',
     cmpCtx:'Injected memory context', cmpCtxEmpty:'Nothing retrieved this turn — both arms got the same thing.',
     cmpKeyPh:'own key (optional)', cmpUrlPh:'own endpoint (optional)',
+    cmpCtxNobody:'neither arm has memory on — this went into no prompt',
     talkStart:'Start talking', talkEnd:'End session', pause:'Pause', resume:'Resume',
     ended:'Session ended.',
     idle:'Idle', listening:'Listening', replying:'Replying', paused:'Paused',
@@ -1488,6 +1499,10 @@ function cmpApply(d){
   }
   $('cmpTg').classList.toggle('on',CMP.on);
   $('cmp').hidden=!CMP.on;
+  // 中列默认是「按视口分高度、不滚动」。对照打开时那点高度装不下两路，所以只在
+  // 这个模式下让中列可滚、并给这块面板一个够用的下限。
+  document.querySelector('.center').classList.toggle('cmp-on',CMP.on);
+  document.querySelector('.p-out').classList.toggle('cmp-on',CMP.on);
   // 对照这一轮不发 answer_*，单路那块会一直停在"还没有回复"，留着只会误导。
   $('reply').hidden=CMP.on;
   renderCmp();
@@ -1508,7 +1523,11 @@ function renderCmp(){
   }
   // 注入的原文照抄给用户看。"记忆帮了什么"只有看见那几行才说得清。
   $('cmpCtx').textContent=CMP.ctx||i18n('cmpCtxEmpty');
-  $('cmpCtxN').textContent=CMP.ctx?CMP.ctx.length+' chars':'';
+  // 检索是**每轮都做**的，跟哪一路开没开记忆无关——所以两路都关着的时候这里
+  // 照样有内容，而它一个字都没进任何 prompt。不写清楚给了谁，这个标题就在骗人。
+  const to=['A','B'].filter(u=>$('cmpMem'+u).checked).join('+');
+  $('cmpCtxN').textContent = !CMP.ctx ? ''
+    : CMP.ctx.length+' chars → '+(to||i18n('cmpCtxNobody'));
 }
 
 async function cmpLoad(){

@@ -239,11 +239,36 @@ typed turns over `/ws`):
 4. The same question with both arms memory-off produces two different invented
    ages across runs, confirming no memory leaks into a memory-off arm.
 
-Not yet verified in a browser: this machine has no Playwright browser installed
-and the disk is tight, so the page was checked by parsing every inline
-`<script>` with `node --check` (both blocks parse) and asserting the served HTML
-contains every element id the compare JS references. The toggle has not been
-clicked by a real browser.
+Browser verification (headless Chromium 149 via patchright, 1280x720, real ws
+turns against the running server):
+
+5. Toggle round-trip: `#cmp` shows, `#reply` goes `display:none`, panel A gains
+   the `mem` class, and `GET /api/compare` reports `enabled: true`; clicking
+   again reverses all of it. Zero console errors, zero failed requests.
+6. A full turn with panel A memory-on renders "Mocha is three years old." beside
+   panel B's "Your cat is nine years old.", with the context badge reading
+   `134 chars → A`.
+7. With both arms memory-off the badge reads "neither arm has memory on — this
+   went into no prompt", and the two arms invent different ages (5 and 3; across
+   six raw-ws runs: 6, 4, 7, 3, 7, "college"). That variance is what rules out a
+   memory leak into a memory-off arm — the baseline confabulates.
+
+Two notes for anyone driving this headlessly: Chromium 149 blocks `ws://localhost`
+from a page under Local Network Access checks, so a browser-driven turn needs
+`--disable-features=LocalNetworkAccessChecks`; and the page has no microphone, so
+turns were typed into `#textIn` after clicking `#talkBtn`.
+
+Layout was measured rather than eyeballed, because the first version collapsed:
+`.center` is a fixed-height flex column, so the two arms were squeezed to 64px at
+1440x900 and 5px at 1280x720, with the text inside `overflow:hidden`. Fixed with
+a `min-height` floor on `.cmp-cols` plus a `cmp-on` class that makes the middle
+column scrollable only while compare is open. Re-measured: arms are 190-240px tall
+at 1280x720, 1440x900 and 1600x1000, with no page overflow and the footer still
+on screen.
+
+Known gap: `POST /api/compare` from outside the page (curl, a second tab) changes
+the server state but does not update an already-open page — the page syncs on
+boot and on its own actions only. There is no cross-client sync requirement.
 
 ## File-by-file change list
 
