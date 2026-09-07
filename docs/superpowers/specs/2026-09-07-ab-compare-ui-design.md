@@ -266,6 +266,20 @@ column scrollable only while compare is open. Re-measured: arms are 190-240px ta
 at 1280x720, 1440x900 and 1600x1000, with no page overflow and the footer still
 on screen.
 
+A second layout bug turned up only once the page was looked at on a real screen:
+`.cmp` was `flex:1`, i.e. `flex:1 1 0%`, so it shrank *below its own content*.
+Because `.cmp-cols` has a 190px floor, the context block then overflowed `.cmp`
+and landed on top of `.out-foot` — "Injected memory context" rendered on the same
+line as the Start-talking button. Reproduced at 1920x1080 and 1440x900, fixed
+with `flex:1 0 auto` (grow, never shrink under content) and re-measured at
+1280x720 / 1440x900 / 1920x1080 / 1920x1130: no overflow and no overlap anywhere,
+arms 190-319px.
+
+The page now defaults to English (`localStorage 'vm-lang' || 'en'`); the top-bar
+selector still switches to 中文 and the choice persists. `renderCmp()` was added
+to the language-switch handler — the compare placeholders are not part of
+`renderAll()`, so they previously stayed in the old language until the next turn.
+
 Known gap: `POST /api/compare` from outside the page (curl, a second tab) changes
 the server state but does not update an already-open page — the page syncs on
 boot and on its own actions only. There is no cross-client sync requirement.

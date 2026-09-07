@@ -288,7 +288,11 @@ button{cursor:pointer;background:none;border:none}
 .cmp-tg:hover{background:var(--bg-hover);color:var(--txt)}
 .cmp-tg.on{background:var(--mint);border-color:var(--mint);color:#08150e;font-weight:600}
 .panel-h.has-tg{display:flex;align-items:center;gap:8px}
-.cmp{display:flex;flex-direction:column;gap:8px;min-height:0;flex:1}
+/* flex:1 是 flex:1 1 0%——会缩到比内容还小。cols 有 190px 地板，缩过头之后 ctx
+   就溢出 .cmp、压在 .out-foot 上（1920x1080 和 1440x900 实测都会，看起来就是
+   「注入的记忆上下文」和「开始对话」挤在同一行）。
+   1 0 auto：可以长，但绝不缩到内容以下；装不下时由 .center.cmp-on 滚。 */
+.cmp{display:flex;flex-direction:column;gap:8px;min-height:0;flex:1 0 auto}
 /* 两路各自要够读一段回复。不给下限的话，中列高度不够时 flex 会把它们压到几
    像素——1440x900 实测压到 64px、1280x720 压到 5px，字全在 overflow:hidden
    里面，看起来就是"面板空的"。所以给 cols 一个地板，让不够的时候是中列滚动，
@@ -681,7 +685,7 @@ const I18N = {
     disconnected:'{0}. Disconnected.',
   },
 };
-let LANG = localStorage.getItem('vm-lang') || 'zh';
+let LANG = localStorage.getItem('vm-lang') || 'en';
 function i18n(key, ...args){
   const s = (I18N[LANG] && I18N[LANG][key]) || (I18N.zh[key]) || key;
   return args.length ? s.replace(/\{(\d+)\}/g, (m,i)=> args[i] !== undefined ? args[i] : m) : s;
@@ -2519,6 +2523,7 @@ if($('langSel')){
     localStorage.setItem('vm-lang', LANG);
     applyLang();
     renderAll();                       // 动态文案（侧栏、空状态、标签）跟着重画
+    renderCmp();                       // 对照那两格的占位文案不在 renderAll 里
     fillSpaceSel();
     buildGraph(activeSpace);           // 脑图上那十个分区标签只在重建时才会换语言
     loadMemories();
