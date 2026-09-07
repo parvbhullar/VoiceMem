@@ -368,3 +368,45 @@ Note for future browser work: patchright evaluates in an isolated world, so
 `page.evaluate` cannot read the page's own globals (`window.VMBrain`, `CMP`) — they
 read as `undefined` even though the page is fine. Verify through the DOM instead;
 canvas animation was checked by diffing `canvas.toDataURL()` across a turn.
+
+
+## Round three: the Chinese that survived the language switch
+
+Picking EN still left ten-odd Chinese strings on screen: the sidebar's "对话"
+label, the speaker chip ("你", `speaker 7 · recognized as "你"`), the type-here
+placeholder, the "Top-K 召回" and "AI 回复" panel headers, both recall column
+headings, the brain legend, and the Idle / Pause / Start-talking row.
+
+Two separate causes:
+
+* **Markup with no `data-i18n`.** Those nodes were never in the translation pass,
+  so `applyLang()` walked straight past them. Fixed by adding `data-i18n` /
+  `-ph` / `-title` (and a new `-aria`, which `applyLang` now handles) to every
+  one of them, with nine new keys: `dialogue`, `searchChats`, `typeHint`,
+  `topk`, `aiReply`, `langTitle`, `dlScopeTitle`, `langChinese`, `langEnglish`.
+  Elements that own child nodes — the sidebar label with its count span, the AI
+  reply header with the compare toggle, the two legend swatches — needed the
+  text wrapped in its own span first: `data-i18n` assigns `innerHTML`, so
+  tagging the parent would have deleted the child.
+* **Chinese string literals in JS.** `'你'` was the hardcoded fallback speaker
+  name in five places (`blankUI`, `addTurn`, `renderIO`, the export, the
+  `user_transcript` handler); all now call `i18n('you')`. `SPK_COLOR` is keyed by
+  the speaker's display name, so it needed the Hindi form as a third key.
+
+Two latent bugs turned up in the same sweep:
+
+* `SLOT_DESC` fell back to **Chinese** for any unknown language
+  (`SLOT_DESC_I18N[LANG] || SLOT_DESC_I18N.zh`), so picking हिंदी would have put
+  Chinese on the ten most prominent labels in the brain graph. Fallback is now
+  `en`, and a `hi` block was added.
+* `KIND_CN` called `i18n()` once at load, so node-type labels kept the language
+  the page started in. It is a Proxy now, resolved per read.
+
+The Chinese fallback text in the HTML source was also replaced with English, so
+the pre-JS paint is English rather than a flash of Chinese.
+
+Verified by walking the rendered DOM in both languages — every visible text node
+plus every `placeholder` / `title` / `aria-label` on a visible element — looking
+for CJK: zero hits in EN, zero in हिंदी, no console errors in either. All three
+tables are at 101 keys with matching `{0}` placeholder counts, and neither the
+`en` nor the `hi` table contains any CJK.

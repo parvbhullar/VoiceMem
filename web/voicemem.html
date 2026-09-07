@@ -346,20 +346,23 @@ button{cursor:pointer;background:none;border:none}
   <!-- ① 侧栏：Memory Space + 该空间下的对话 -->
   <aside class="sidebar">
     <div class="side-head">
-      <button class="ico" id="btnCollapse" title="收起侧栏" aria-label="收起侧栏">
+      <button class="ico" id="btnCollapse" data-i18n-title="collapse" data-i18n-aria="collapse"
+        title="Collapse sidebar" aria-label="Collapse sidebar">
         <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M9.5 4v16"/></svg>
       </button>
       <span class="grow"></span>
-      <button class="ico" id="btnSearch" title="搜索对话 (⌘K)" aria-label="搜索对话">
+      <button class="ico" id="btnSearch" data-i18n-title="searchChats" data-i18n-aria="searchChats"
+        title="Search chats" aria-label="Search chats">
         <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
       </button>
-      <button class="ico" id="btnNew" title="新对话" aria-label="新对话">
+      <button class="ico" id="btnNew" data-i18n-title="newChat" data-i18n-aria="newChat"
+        title="New chat" aria-label="New chat">
         <svg viewBox="0 0 24 24"><path d="M4 20h4l10-10a2.5 2.5 0 0 0-3.5-3.5L4.5 16.5V20z"/><path d="M13.5 7.5 16.5 10.5"/></svg>
       </button>
     </div>
-    <div class="side-search" id="sideSearch"><input id="searchIn" placeholder="搜索对话" spellcheck="false" /></div>
+    <div class="side-search" id="sideSearch"><input id="searchIn" data-i18n-ph="searchChats" placeholder="Search chats" spellcheck="false" /></div>
     <div class="side-scroll">
-      <div class="side-label">对话<span class="c" id="sessCount"></span></div>
+      <div class="side-label"><span data-i18n="dialogue">Dialogue</span><span class="c" id="sessCount"></span></div>
       <ul class="sess" id="sessList"></ul>
     </div>
     <div class="side-foot">VOICEMEM</div>
@@ -370,32 +373,33 @@ button{cursor:pointer;background:none;border:none}
     <canvas id="orb" width="264" height="264" aria-hidden="true"></canvas>
 
     <div class="panel p-in">
-      <div class="panel-h" data-i18n="liveInput">流式输入 · Live input</div>
+      <div class="panel-h" data-i18n="liveInput">Live input</div>
       <div class="spk" id="spk">
-        <span class="av" id="spkAv">你</span>
-        <span class="nm" id="spkNm">你</span>
-        <span class="id" id="spkId" data-i18n="voiceMatched">speaker 0 · 声纹已匹配</span>
+        <span class="av" id="spkAv">Y</span>
+        <span class="nm" id="spkNm">You</span>
+        <span class="id" id="spkId" data-i18n="voiceMatched">speaker 0 · voice matched</span>
         <span class="lv" id="spkLv"><i></i><i></i><i></i><i></i><i></i></span>
       </div>
-      <div class="live-text idle" id="liveInput" data-i18n="waitingYou">等待你说话…</div>
-      <input id="textIn" class="textin" placeholder="或直接打字回车" />
+      <div class="live-text idle" id="liveInput" data-i18n="waitingYou">Waiting for you to speak…</div>
+      <input id="textIn" class="textin" data-i18n-ph="typeHint"
+             placeholder="Or just type and press Enter" />
       <div class="tags" id="tags"></div>
     </div>
 
     <div class="panel p-recall">
-      <div class="panel-h">Top-K 召回</div>
+      <div class="panel-h" data-i18n="topk">Top-K recall</div>
       <div class="recall-cols">
-        <div class="rc l"><div class="rc-h">左脑 · 事实</div><ul id="recallL"></ul></div>
-        <div class="rc r"><div class="rc-h">右脑 · 画像</div><ul id="recallR"></ul></div>
+        <div class="rc l"><div class="rc-h" data-i18n="leftFacts">Left · Facts</div><ul id="recallL"></ul></div>
+        <div class="rc r"><div class="rc-h" data-i18n="rightProfile">Right · Profile</div><ul id="recallR"></ul></div>
       </div>
     </div>
 
     <div class="panel p-out">
-      <div class="panel-h has-tg">AI 回复
+      <div class="panel-h has-tg"><span data-i18n="aiReply">AI reply</span>
         <button class="cmp-tg" id="cmpTg" data-i18n-title="cmpTgTitle"
-                title="同一句话喂两路：一路注入记忆，一路不注入">⚖ A/B</button>
+                title="Same utterance to two arms: one with memory, one without">⚖ A/B</button>
       </div>
-      <div class="reply idle" id="reply">这一轮还没有回复。</div>
+      <div class="reply idle" id="reply" data-i18n="noReplyYet">No reply yet.</div>
       <div class="cmp" id="cmp" hidden>
         <div class="cmp-cols">
       <div class="cmp-col mem" id="cmpColA">
@@ -415,7 +419,7 @@ button{cursor:pointer;background:none;border:none}
           <input id="cmpKeyA" type="password" data-i18n-ph="cmpKeyPh"
                  placeholder="own key" spellcheck="false" autocomplete="off">
         </div>
-        <div class="cmp-body idle" id="cmpTxtA">等这一轮…</div>
+        <div class="cmp-body idle" id="cmpTxtA">waiting for this turn…</div>
       </div>
       <div class="cmp-col" id="cmpColB">
         <div class="cmp-h">
@@ -434,11 +438,11 @@ button{cursor:pointer;background:none;border:none}
           <input id="cmpKeyB" type="password" data-i18n-ph="cmpKeyPh"
                  placeholder="own key" spellcheck="false" autocomplete="off">
         </div>
-        <div class="cmp-body idle" id="cmpTxtB">等这一轮…</div>
+        <div class="cmp-body idle" id="cmpTxtB">waiting for this turn…</div>
       </div>
         </div>
         <details class="cmp-ctx">
-          <summary><span data-i18n="cmpCtx">注入的记忆上下文</span>
+          <summary><span data-i18n="cmpCtx">Injected memory context</span>
             <span class="cmp-ms" id="cmpCtxN"></span></summary>
           <pre id="cmpCtx"></pre>
         </details>
@@ -447,11 +451,11 @@ button{cursor:pointer;background:none;border:none}
         <div class="voice" id="voice">
           <div class="ear"><span class="ring"></span></div>
           <canvas id="wave"></canvas>
-          <span class="lab" id="voiceLab">待机</span>
+          <span class="lab" id="voiceLab" data-i18n="idle">Idle</span>
         </div>
         <div class="btns">
-          <button class="btn" id="pauseBtn" disabled>暂停</button>
-          <button class="btn primary" id="talkBtn">开始对话</button>
+          <button class="btn" id="pauseBtn" data-i18n="pause" disabled>Pause</button>
+          <button class="btn primary" id="talkBtn" data-i18n="talkStart">Start talking</button>
         </div>
       </div>
     </div>
@@ -463,25 +467,25 @@ button{cursor:pointer;background:none;border:none}
       <div class="seg-gone"></div>
       <div class="export">
         <span class="pill space" id="spaceBadge" data-i18n-title="spaceBadgeTitle"
-              title="当前 Memory Space —— 换一个，脑图和记忆都跟着换">
+              title="Current Memory Space — switch it and the graph switches too">
           <svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
           <span id="spaceBadgeName">Demo</span>
         </span>
         <select class="sel" id="spaceSel" data-i18n-title="spaceSelTitle"
-                title="切换 Memory Space"></select>
+                title="Switch Memory Space"></select>
         <button class="btn sm" id="newSpaceBtn" data-i18n-title="spaceNewTitle"
-                title="新建一个 Memory Space">+</button>
-        <select class="sel" id="langSel" title="Language / 界面与助手语言">
+                title="New Memory Space">+</button>
+        <select class="sel" id="langSel" data-i18n-title="langTitle" title="Language">
           <option value="en">EN</option>
           <option value="hi">हिंदी</option>
         </select>
-        <select class="sel" id="dlScope" title="选择导出范围">
-          <option value="all" data-i18n="dlAll">本空间全部记忆</option>
-          <option value="left" data-i18n="dlLeft">左脑 · 事实</option>
-          <option value="right" data-i18n="dlRight">右脑 · 画像</option>
-          <option value="chat" data-i18n="dlChat">当前对话</option>
+        <select class="sel" id="dlScope" data-i18n-title="dlScopeTitle" title="What to download">
+          <option value="all" data-i18n="dlAll">All memories in this space</option>
+          <option value="left" data-i18n="dlLeft">Left · Facts</option>
+          <option value="right" data-i18n="dlRight">Right · Profile</option>
+          <option value="chat" data-i18n="dlChat">This conversation</option>
         </select>
-        <button class="btn sm" id="dlBtn" data-i18n="download">下载</button>
+        <button class="btn sm" id="dlBtn" data-i18n="download">Download</button>
       </div>
     </div>
 
@@ -489,7 +493,7 @@ button{cursor:pointer;background:none;border:none}
       <div class="track" id="track">
         <div class="pane">
           <div class="chat-head">
-            <span class="ttl" id="chatTitle">新对话</span>
+            <span class="ttl" id="chatTitle" data-i18n="newChat">New chat</span>
           </div>
           <div class="chat" id="chatLog"></div>
         </div>
@@ -498,8 +502,8 @@ button{cursor:pointer;background:none;border:none}
             <img id="brain" alt="" src="./images/background.webp" />
             <canvas id="fx"></canvas>
             <div class="legend">
-              <span><i style="background:#6ba7f0"></i>左脑 · 事实</span>
-              <span><i style="background:#ef7bab"></i>右脑 · 画像</span>
+              <span><i style="background:#6ba7f0"></i><span data-i18n="leftFacts">Left · Facts</span></span>
+              <span><i style="background:#ef7bab"></i><span data-i18n="rightProfile">Right · Profile</span></span>
             </div>
             <div id="card" aria-hidden="true">
               <div class="eb"><span class="sw" id="c-sw"></span><span class="kd" id="c-kd">entity</span><span class="id" id="c-id">#0000</span></div>
@@ -516,37 +520,37 @@ button{cursor:pointer;background:none;border:none}
 <!-- 新对话：必须先选 Memory Space -->
 <div class="mask" id="mask">
   <div class="modal">
-    <h3 data-i18n="newChat">新对话</h3>
-    <p data-i18n="pickSpaceHint">先选一个 Memory Space。对话创建后所属空间不可更改。</p>
+    <h3 data-i18n="newChat">New chat</h3>
+    <p data-i18n="pickSpaceHint">Pick a Memory Space first. A chat cannot move to another space later.</p>
     <div class="pick" id="pick"></div>
     <div class="newspace" id="newSpaceRow">
-      <input id="newSpaceName" data-i18n-ph="spaceNamePh" placeholder="新空间的名字" maxlength="20" spellcheck="false" />
-      <button class="btn sm" id="newSpaceAdd" data-i18n="spaceCreate">创建空间</button>
+      <input id="newSpaceName" data-i18n-ph="spaceNamePh" placeholder="Name the new space" maxlength="20" spellcheck="false" />
+      <button class="btn sm" id="newSpaceAdd" data-i18n="spaceCreate">Create space</button>
     </div>
     <div class="modal-foot">
-      <button class="btn" id="mCancel" data-i18n="cancel">取消</button>
-      <button class="btn primary" id="mCreate" data-i18n="chatCreate">创建对话</button>
+      <button class="btn" id="mCancel" data-i18n="cancel">Cancel</button>
+      <button class="btn primary" id="mCreate" data-i18n="chatCreate">Create chat</button>
     </div>
   </div>
 </div>
 <!-- 新建 Memory Space。独立一个弹窗，不跟「新对话」那个抢 #mask -->
 <div class="mask" id="spaceMask">
   <div class="modal">
-    <h3 data-i18n="spaceNewTitle">新建 Memory Space</h3>
-    <p data-i18n="spaceNewHint">起个名字。磁盘上会出现同名文件夹，记忆从零开始长。</p>
+    <h3 data-i18n="spaceNewTitle">New Memory Space</h3>
+    <p data-i18n="spaceNewHint">Give it a name. A folder appears on disk and memories start from zero.</p>
     <div class="newspace">
-      <input id="spaceNewName" data-i18n-ph="spaceNamePh" placeholder="新空间的名字"
+      <input id="spaceNewName" data-i18n-ph="spaceNamePh" placeholder="Name the new space"
              maxlength="20" spellcheck="false" />
       <!-- 语言在**建的时候**定一次，之后不能改：记忆和回复都跟着它。一个库里
            中英混存会让一半记忆检索不到（检索按向量做，中文问句离英文记忆很远）。 -->
       <select id="spaceNewLang">
         <option value="en">English</option>
-        <option value="zh">中文</option>
+        <option value="zh" data-i18n="langChinese">Chinese</option>
       </select>
     </div>
     <div class="modal-foot">
-      <button class="btn" id="spaceNewCancel" data-i18n="cancel">取消</button>
-      <button class="btn primary" id="spaceNewOk" data-i18n="spaceCreate">创建空间</button>
+      <button class="btn" id="spaceNewCancel" data-i18n="cancel">Cancel</button>
+      <button class="btn primary" id="spaceNewOk" data-i18n="spaceCreate">Create space</button>
     </div>
   </div>
 </div>
@@ -588,6 +592,10 @@ button{cursor:pointer;background:none;border:none}
 const I18N = {
   zh: {
     chat:'对话', memspace:'Memory Space', liveInput:'流式输入 · Live input',
+    dialogue:'对话', searchChats:'搜索对话', typeHint:'或直接打字回车',
+    topk:'Top-K 召回', aiReply:'AI 回复',
+    langTitle:'语言 / Language', dlScopeTitle:'选择导出范围',
+    langChinese:'中文', langEnglish:'English',
     you:'你', waitingYou:'等待你说话…', noReplyYet:'这一轮还没有回复。',
     cmpTitle:'A/B 对照', cmpTgTitle:'同一句话喂两路：一路注入记忆，一路不注入。开了这一轮不出声，两边并排出字。',
     cmpMem:'记忆', cmpModelPh:'默认模型', cmpWaiting:'等这一轮…',
@@ -643,6 +651,10 @@ const I18N = {
   },
   hi: {
     chat:'चैट', memspace:'मेमोरी स्पेस', liveInput:'लाइव इनपुट',
+    dialogue:'बातचीत', searchChats:'चैट खोजें', typeHint:'या टाइप करके Enter दबाएँ',
+    topk:'Top-K खोज', aiReply:'AI का जवाब',
+    langTitle:'भाषा / Language', dlScopeTitle:'क्या डाउनलोड करना है',
+    langChinese:'चीनी', langEnglish:'अंग्रेज़ी',
     you:'आप', waitingYou:'आपके बोलने का इंतज़ार…', noReplyYet:'इस बार कोई जवाब नहीं।',
     cmpTitle:'A/B तुलना', cmpTgTitle:'एक ही बात दो तरफ़ जाती है: एक में निकाली गई मेमोरी डाली जाती है, दूसरे में नहीं। तुलना वाली बारी में आवाज़ नहीं आती — दोनों जवाब टेक्स्ट में आते हैं।',
     cmpMem:'मेमोरी', cmpModelPh:'सर्वर डिफ़ॉल्ट', cmpWaiting:'इस बारी का इंतज़ार…',
@@ -698,6 +710,10 @@ const I18N = {
   },
   en: {
     chat:'Chat', memspace:'Memory Space', liveInput:'Live input',
+    dialogue:'Dialogue', searchChats:'Search chats', typeHint:'Or just type and press Enter',
+    topk:'Top-K recall', aiReply:'AI reply',
+    langTitle:'Language', dlScopeTitle:'What to download',
+    langChinese:'Chinese', langEnglish:'English',
     you:'You', waitingYou:'Waiting for you to speak…', noReplyYet:'No reply yet.',
     cmpTitle:'A/B compare', cmpTgTitle:'Same utterance to two arms: one with the retrieved memory injected, one without. A compare turn is silent — both replies stream as text.',
     cmpMem:'memory', cmpModelPh:'server default', cmpWaiting:'waiting for this turn…',
@@ -768,6 +784,8 @@ function applyLang(){
     el.placeholder = i18n(el.dataset.i18nPh);
   for(const el of document.querySelectorAll('[data-i18n-title]'))
     el.title = i18n(el.dataset.i18nTitle);
+  for(const el of document.querySelectorAll('[data-i18n-aria]'))
+    el.setAttribute('aria-label', i18n(el.dataset.i18nAria));
 }
 /* ══════════════════════════════════════════════════════════════════════
    A. 脑图 —— 节点全部长在两个半球轮廓里面
@@ -796,6 +814,18 @@ const SLOT_DESC_I18N = {
     personality:'性格 · 稳定的行为倾向与应对方式',
     preference:'偏好 · 内容与沟通上的个人喜好',
   },
+  hi: {
+    work:'काम · करियर / प्रोजेक्ट / सहकर्मी / मीटिंग',
+    health:'सेहत · कसरत / खाना / नींद / शरीर',
+    relationships:'रिश्ते · परिवार / दोस्त / प्यार / मेल-जोल',
+    finance:'पैसा · कमाई / खर्च / किराया / निवेश',
+    goals:'लक्ष्य · योजना / भविष्य / ख़ुद को बेहतर करना',
+    daily_life:'रोज़मर्रा · आदतें / आना-जाना / जीने का तरीक़ा',
+    knowledge:'ज्ञान · पढ़ाई / किताबें / हुनर',
+    emotion:'भावना · अभी का और पहले का मन',
+    personality:'व्यक्तित्व · पक्की आदतें और निपटने के तरीक़े',
+    preference:'पसंद · बातचीत और चीज़ों में निजी रुचि',
+  },
   en: {
     work:'Work · career / projects / colleagues / meetings',
     health:'Health · exercise / food / sleep / body',
@@ -810,14 +840,17 @@ const SLOT_DESC_I18N = {
   },
 };
 const SLOT_DESC = new Proxy({}, {
-  get:(_,k)=> (SLOT_DESC_I18N[LANG]||SLOT_DESC_I18N.zh)[k],
-  has:(_,k)=> k in SLOT_DESC_I18N.zh,
-  ownKeys:()=> Reflect.ownKeys(SLOT_DESC_I18N.zh),
+  // 回落到 en，不是 zh：LANG='hi' 时回落到中文，脑图上最显眼的那十个字就成了中文。
+  get:(_,k)=> (SLOT_DESC_I18N[LANG]||SLOT_DESC_I18N.en)[k],
+  has:(_,k)=> k in SLOT_DESC_I18N.en,
+  ownKeys:()=> Reflect.ownKeys(SLOT_DESC_I18N.en),
   getOwnPropertyDescriptor:()=>({enumerable:true, configurable:true}),
 });
 const PAL = { entity:'#6ba7f0', emotion:'#ef7bab', exper:'#f0a35f',
               prefer:'#79d7a2', label:'#ffffff', user:'#d766ad' };
-const KIND_CN = { entity:i18n('factsShort'), emotion:i18n('emotion'), exper:i18n('personality'), prefer:i18n('preference') };
+// 加载时算一次的话，切语言之后节点类型标签还是旧语言。按需算。
+const KIND_CN = new Proxy({}, { get:(_,k)=>({ entity:i18n('factsShort'),
+  emotion:i18n('emotion'), exper:i18n('personality'), prefer:i18n('preference') })[k] });
 const RPX = { entity:3.0, emotion:5.0, exper:4.6, prefer:4.8, user:8.0 };
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -1252,7 +1285,7 @@ const SPACES = {};
 const SPACE_IDS=[];
 
 /* ── 会话 ─────────────────────────────────────────────────────────── */
-function blankUI(){ return { input:'', reply:'', speaker:'你',
+function blankUI(){ return { input:'', reply:'', speaker:i18n('you'),
   tags:{emo:'',ent:'',sch:''}, recallL:[], recallR:[] }; }
 let sessions=[], currentId=0, nextId=1, activeSpace='demo', searchQ='';
 
@@ -1485,7 +1518,7 @@ function renderChat(){
     const w=document.createElement('div');
     w.className='turn '+(turn.role==='user'?'user':'ai');
     const who=document.createElement('div'); who.className='who';
-    who.textContent=turn.role==='user'?(turn.speaker||'你'):'VoiceMem';
+    who.textContent=turn.role==='user'?(turn.speaker||i18n('you')):'VoiceMem';
     const said=document.createElement('div'); said.className='said'; said.textContent=turn.text;
     w.append(who,said); box.appendChild(w);
   }
@@ -1501,7 +1534,8 @@ function chip(kind,label,val){
 }
 // 说话人配色。'你'/'You' 是 blankUI() 里写死的默认说话人；其余按声纹认出来的
 // 其余按声纹认出来的人名统一用一个兜底色，不再预置演示用的人名。
-const SPK_COLOR={'你':'#6ba7f0','You':'#6ba7f0'};
+// 说话人名字就是这张表的键，所以三种语言的「你」都要在里面。
+const SPK_COLOR={'你':'#6ba7f0','You':'#6ba7f0','आप':'#6ba7f0'};
 function renderIO(s){
   const li=$('liveInput');
   if(s.ui.input){ li.classList.remove('idle'); li.textContent=s.ui.input; }
@@ -1512,7 +1546,7 @@ function renderIO(s){
   const box=$('tags'); box.innerHTML='';
   box.append(chip('emo','emotion',s.ui.tags.emo),chip('ent','entity',s.ui.tags.ent),
              chip('sch','schema',s.ui.tags.sch));
-  const spk=s.ui.speaker||'你';
+  const spk=s.ui.speaker||i18n('you');
   $('spkNm').textContent=spk;
   $('spkAv').textContent=spk.slice(0,1);
   $('spkAv').style.background=SPK_COLOR[spk]||'#9b8cf0';
@@ -1724,7 +1758,7 @@ $('dlBtn').addEventListener('click',async()=>{
     const s=currentSession();
     if(!s||!s.turns.length){ toast(i18n('emptyChat')); return; }
     const md='# '+s.title+'\n\n> Memory Space: '+sp.name+'\n\n'+
-      s.turns.map(t=>(t.role==='user'?('**'+(t.speaker||'你')+'**\n\n'):'**VoiceMem**\n\n')+t.text)
+      s.turns.map(t=>(t.role==='user'?('**'+(t.speaker||i18n('you'))+'**\n\n'):'**VoiceMem**\n\n')+t.text)
         .join('\n\n---\n\n');
     saveFile(md,'voicemem-'+sp.id+'-chat-'+stamp()+'.md','text/markdown');
     toast(i18n('downloadedChat')); return;
@@ -2342,7 +2376,7 @@ function handle(m){
       // 不清的话，说一句抽不出东西的话（「啦啦啦」），标签栏还挂着上一句的实体。
       s.ui.tags={emo:'',ent:'',sch:''};
       lvOn=false; s.ui.input=m.text; paint(s);
-      addTurn(s,'user',m.text,s.ui.speaker||'你');
+      addTurn(s,'user',m.text,s.ui.speaker||i18n('you'));
       window.VMBrain.think([]);          // 检索结果还没回来，先让脑子动起来
       break;
 
