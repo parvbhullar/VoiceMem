@@ -57,9 +57,14 @@ class CompareState:
 
     Defaults are the interesting comparison: panel A with memory, panel B
     without, both on the server's default model.
+
+    ``enabled`` defaults to **True**: showing both replies is the point of the
+    demo, and needing to find a toggle first is exactly the confusion this is
+    meant to remove. Switching it off puts the page back to one reply with
+    voice.
     """
 
-    enabled: bool = False
+    enabled: bool = True
     arms: tuple[Arm, Arm] = (Arm("a", memory=True), Arm("b", memory=False))
 
 
@@ -164,6 +169,23 @@ def context_for(arm: Arm, memory_context: str) -> str:
     return memory_context if arm.memory else ""
 
 
+def client_gone(exc: BaseException) -> bool:
+    """Is this exception "the viewer closed the tab", rather than a real fault?
+
+    A disconnect must not be reported as a panel failure: doing that logged two
+    bogus arm errors and then raised ``RuntimeError('Cannot call "send" once a
+    close message has been sent.')`` with a full traceback, because the
+    both-arms-failed branch went on to report the turn-level error on the dead
+    socket. Starlette signals the close two different ways depending on whether
+    we notice it on a receive or on a send, so both are matched here.
+    """
+    from starlette.websockets import WebSocketDisconnect
+    if isinstance(exc, WebSocketDisconnect):
+        return True
+    return (isinstance(exc, RuntimeError)
+            and "close message has been sent" in str(exc))
+
+
 async def _run_arm(arm: Arm, text: str, memory_context: str, send, provider) -> dict:
     """Stream one arm. Never raises — a dead arm must not take down the turn."""
     await send({"type": "cmp_start", "panel": arm.label,
@@ -178,6 +200,8 @@ async def _run_arm(arm: Arm, text: str, memory_context: str, send, provider) -> 
     except asyncio.CancelledError:
         raise
     except Exception as e:  # noqa: BLE001 -- surfaced to the panel, not raised
+        if client_gone(e):
+            raise            # nobody left to show a panel error to
         error = f"{type(e).__name__}: {e}"
         print(f"[compare] panel {arm.label} failed: {error}", flush=True)
     ms = int((time.monotonic() - started) * 1000)
@@ -199,8 +223,16 @@ async def fan_out(text: str, memory_context: str, arms: tuple[Arm, Arm], send,
     provider = provider or default_provider(system)
     await send({"type": "cmp_ctx", "context": memory_context,
                 "chars": len(memory_context)})
-    outcomes = await asyncio.gather(
-        *(_run_arm(arm, text, memory_context, send, provider) for arm in arms))
+    # return_exceptions so one arm's disconnect does not cancel the other
+    # mid-await; the disconnect is then re-raised below, after both have
+    # settled, so the ws handler sees it as the normal end of the connection.
+    settled = await asyncio.gather(
+        *(_run_arm(arm, text, memory_context, send, provider) for arm in arms),
+        return_exceptions=True)
+    for o in settled:
+        if isinstance(o, BaseException):
+            raise o
+    outcomes = settled
 
     result: dict = {"latency_ms": {}, "errors": {}}
     for o in outcomes:

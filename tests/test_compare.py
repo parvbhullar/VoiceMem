@@ -132,6 +132,80 @@ class ArmFailureTest(unittest.TestCase):
         self.assertTrue(any(m["type"] == "error" for m in sent))
 
 
+class ClientGoneTest(unittest.TestCase):
+    """A viewer closing the tab mid-turn is not an arm failure.
+
+    Swallowing it made the server log two bogus panel errors and then raise
+    RuntimeError('Cannot call "send" once a close message has been sent.') with
+    a full traceback, because fan_out still tried to report the turn-level
+    error on the dead socket.
+    """
+
+    def _send_that_dies_mid_stream(self, exc):
+        """Succeeds for cmp_ctx / cmp_start, dies on the first delta.
+
+        That is the shape of a real disconnect: the turn has already begun
+        streaming when the viewer closes the tab. A send that fails on the
+        very first message never reaches the code path that was broken.
+        """
+        sent = []
+
+        async def send(msg):
+            if msg["type"] == "cmp_delta":
+                raise exc
+            sent.append(msg)
+        return send, sent
+
+    def test_a_disconnect_mid_stream_propagates_instead_of_becoming_an_arm_error(self):
+        from starlette.websockets import WebSocketDisconnect
+        arms = (Arm("a", memory=True), Arm("b", memory=False))
+        send, _ = self._send_that_dies_mid_stream(WebSocketDisconnect(1001))
+
+        with self.assertRaises(WebSocketDisconnect):
+            asyncio.run(fan_out("hi", "ctx", arms, send,
+                                provider=lambda arm: _provider(["x", "y"])))
+
+    def test_a_closed_socket_runtimeerror_mid_stream_propagates_too(self):
+        arms = (Arm("a", memory=True), Arm("b", memory=False))
+        exc = RuntimeError('Cannot call "send" once a close message has been sent.')
+        send, _ = self._send_that_dies_mid_stream(exc)
+
+        with self.assertRaises(RuntimeError):
+            asyncio.run(fan_out("hi", "ctx", arms, send,
+                                provider=lambda arm: _provider(["x", "y"])))
+
+    def test_a_disconnect_does_not_report_a_turn_level_error_on_the_dead_socket(self):
+        """The crash was the follow-up send, not the disconnect itself."""
+        from starlette.websockets import WebSocketDisconnect
+        arms = (Arm("a", memory=True), Arm("b", memory=False))
+        send, sent = self._send_that_dies_mid_stream(WebSocketDisconnect(1001))
+
+        with self.assertRaises(WebSocketDisconnect):
+            asyncio.run(fan_out("hi", "ctx", arms, send,
+                                provider=lambda arm: _provider(["x", "y"])))
+
+        self.assertFalse([m for m in sent if m["type"] == "error"])
+        self.assertFalse([m for m in sent if m["type"] == "cmp_done"])
+
+    def test_an_unrelated_runtimeerror_from_send_is_not_treated_as_a_disconnect(self):
+        """Only the closed-socket message counts; other RuntimeErrors are bugs
+        we still want surfaced per panel rather than silently reclassified."""
+        arms = (Arm("a", memory=True), Arm("b", memory=False))
+        sent = []
+
+        async def send(msg):
+            sent.append(msg)
+            if msg["type"] == "cmp_delta":
+                raise RuntimeError("json encoding blew up")
+
+        result = asyncio.run(fan_out("hi", "ctx", arms, send,
+                                     provider=lambda arm: _provider(["x"])))
+
+        self.assertEqual(len(result["errors"]), 2)
+        self.assertIn("json encoding blew up", result["errors"]["a"])
+        self.assertTrue(any(m["type"] == "error" for m in sent))
+
+
 class SecretsTest(unittest.TestCase):
     def test_repr_does_not_leak_the_api_key(self):
         arm = Arm("a", model="gpt-4o", api_key="sk-supersecret")
@@ -214,12 +288,20 @@ class ApiTest(unittest.TestCase):
         self.state = state
 
     def test_get_returns_the_default_state(self):
+        """Compare is ON by default: the demo's whole point is the two replies
+        side by side, so it must not need a click to appear."""
         body = self.client.get("/api/compare").json()
 
-        self.assertFalse(body["enabled"])
+        self.assertTrue(body["enabled"])
         self.assertEqual([a["label"] for a in body["arms"]], ["a", "b"])
         self.assertTrue(body["arms"][0]["memory"])
         self.assertFalse(body["arms"][1]["memory"])
+
+    def test_compare_can_be_switched_off(self):
+        body = self.client.post("/api/compare", json={"enabled": False}).json()
+
+        self.assertFalse(body["enabled"])
+        self.assertFalse(self.state.enabled)
 
     def test_post_enables_compare_and_updates_one_arm(self):
         body = self.client.post("/api/compare", json={

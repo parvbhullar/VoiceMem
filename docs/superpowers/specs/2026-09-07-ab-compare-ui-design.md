@@ -304,3 +304,67 @@ Two changes to the plan above, made while implementing:
   acoustic-emotion block was already duplicated verbatim between
   `voicemem_llm_tts` and `start_realtime_turn`; the compare path would have
   made a third copy.
+
+
+## Round two: the UI was unreadable
+
+Feedback after the first build was "I can't understand any of it". Five changes,
+all of them about the demo explaining itself:
+
+1. **Compare is on by default** (`CompareState.enabled = True`). Both replies are
+   the point; needing to find a toggle first was the confusion. Switching it off
+   returns the page to one reply with voice.
+2. **The panels say what they are** — "With VoiceMem" / "Without VoiceMem" — instead
+   of "A" / "B" plus a `memory` checkbox. The model, endpoint, key and the memory
+   switch moved behind a ⚙ per panel, so the default view is two labels and two
+   replies. The configurability is unchanged, just no longer the first thing shown.
+3. **The Chat / Memory Space tab is gone.** The right pane is always the brain
+   (`.track` pinned to its second screen). The compare panels already show both
+   replies in the middle column, so a chat log on the right was a third copy of the
+   same turn. The conversation list in the left sidebar stays.
+4. **The brain reacts to every turn.** `VMBrain.beam(left, right)` only draws when
+   *both* hemispheres have hits, so an empty space or a facts-only turn looked
+   inert. Added `VMBrain.think(ids)`, which pulses the `you` node and beams from it
+   to whatever was hit; it fires on `user_transcript` (before retrieval returns) and
+   on `memory_hits` when only one side matched.
+5. **English + Hindi** instead of English + Chinese. A 92-key `hi` block was added
+   (verified at parity with `en`, including `{0}` placeholder counts) and the
+   selector now offers EN / हिंदी. The `zh` block stays in the file so a browser
+   with `vm-lang=zh` in localStorage still works, and the language handler also
+   calls `renderCmp()` and `syncButtons()` — neither the compare placeholders nor
+   the Start/End button are `data-i18n` driven, so both used to keep the old
+   language until the next turn.
+
+Hindi replies work through `_lang_note()`, which now prefers `UI_LANG` over
+`SPACE_LANG`. That split is deliberate: what the assistant *says* is switchable per
+turn, while what gets *stored* is a property of the memory space, fixed at creation
+(`voicemem/lang.py` supports only `en`/`zh`). So Hindi replies come out of an
+English memory space and nothing mixes languages inside one vector store. Verified:
+`तेरी बिल्ली मोचा तीन साल की है।` from the memory arm against
+`तुम्हारी बिल्ली लगभग चार साल पुरानी है` from the baseline.
+
+### A crash found by closing the tab
+
+Disconnecting mid-turn left this in the log:
+
+```
+[compare] panel b failed: WebSocketDisconnect:
+[compare] panel a failed: RuntimeError: Cannot call "send" once a close message has been sent.
+Traceback (most recent call last): ...
+```
+
+`_run_arm` caught every `Exception`, so a disconnect became a panel error, and then
+the both-arms-failed branch tried to report the turn-level error on the closed
+socket. `compare.client_gone(exc)` now recognises both shapes Starlette uses
+(`WebSocketDisconnect`, and `RuntimeError` mentioning a sent close message);
+`_run_arm` re-raises those, and `fan_out` gathers with `return_exceptions=True` so
+one arm's disconnect cannot cancel the other mid-await before the exception is
+re-raised for the ws handler to treat as a normal close. Four tests cover it,
+including one asserting an unrelated `RuntimeError` is still reported per panel
+rather than reclassified as a disconnect. Re-verified: a deliberate mid-turn
+disconnect now leaves zero tracebacks and zero panel errors in the log.
+
+Note for future browser work: patchright evaluates in an isolated world, so
+`page.evaluate` cannot read the page's own globals (`window.VMBrain`, `CMP`) — they
+read as `undefined` even though the page is fine. Verify through the DOM instead;
+canvas animation was checked by diffing `canvas.toDataURL()` across a turn.

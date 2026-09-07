@@ -305,8 +305,16 @@ button{cursor:pointer;background:none;border:none}
 .cmp-col.mem{border-color:rgba(121,215,162,.45)}
 .cmp-h{display:flex;align-items:center;gap:6px;padding:6px 8px;
   border-bottom:1px solid var(--line);background:rgba(255,255,255,.02)}
-.cmp-h .lab{font-size:11px;font-weight:700;color:var(--txt-3);letter-spacing:.06em}
+.cmp-h .lab{font-size:11px;font-weight:700;color:var(--txt-3);letter-spacing:.04em;
+  flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cmp-col.mem .cmp-h .lab{color:var(--mint)}
+/* model / endpoint / key 收到齿轮后面：默认视图只剩「哪一路」和回复本身。
+   配置还在，只是不再是第一眼看到的东西——那正是之前看不懂的原因。 */
+.cmp-gear{font-size:11px;color:var(--txt-3);padding:0 2px;line-height:1;flex:0 0 auto}
+.cmp-gear:hover,.cmp-gear.on{color:var(--txt)}
+.cmp-keys{grid-template-columns:1fr;gap:5px}
+.cmp-keys .cmp-model{width:100%}
+.seg-gone{flex:1}
 .cmp-model{flex:1;min-width:0;background:var(--bg-input);border:1px solid transparent;
   border-radius:7px;padding:3px 7px;font-size:11px;color:var(--txt)}
 .cmp-model:focus{border-color:var(--line-2);outline:none}
@@ -326,7 +334,7 @@ button{cursor:pointer;background:none;border:none}
 .cmp-ctx[open]>summary::before{content:'▾'}
 .cmp-ctx pre{margin:0;padding:0 10px 9px;font-size:11px;line-height:1.55;
   color:var(--txt-2);white-space:pre-wrap;max-height:22vh;overflow-y:auto}
-.cmp-keys{display:grid;grid-template-columns:1fr 1fr;gap:6px;padding:6px 8px 8px}
+.cmp-keys{display:grid;padding:6px 8px 8px}
 .cmp-keys input{background:var(--bg-input);border:1px solid transparent;border-radius:7px;
   padding:3px 7px;font-size:11px;color:var(--txt);min-width:0}
 .cmp-keys input:focus{border-color:var(--line-2);outline:none}
@@ -392,35 +400,39 @@ button{cursor:pointer;background:none;border:none}
         <div class="cmp-cols">
       <div class="cmp-col mem" id="cmpColA">
         <div class="cmp-h">
-          <span class="lab">A</span>
-          <input class="cmp-model" id="cmpModelA" data-i18n-ph="cmpModelPh"
-                 placeholder="默认模型" spellcheck="false">
-          <label class="cmp-mem"><input type="checkbox" id="cmpMemA" checked>
-            <span data-i18n="cmpMem">记忆</span></label>
+          <span class="lab" data-i18n="cmpWith">With VoiceMem</span>
           <span class="cmp-ms" id="cmpMsA"></span>
+          <button class="cmp-gear" id="cmpGearA" data-i18n-title="cmpGearTitle"
+                  title="model / endpoint / key">⚙</button>
         </div>
-        <div class="cmp-keys">
-          <input id="cmpUrlA" data-i18n-ph="cmpUrlPh" placeholder="自建端点（可留空）"
+        <div class="cmp-keys" id="cmpAdvA" hidden>
+          <input class="cmp-model" id="cmpModelA" data-i18n-ph="cmpModelPh"
+                 placeholder="server default" spellcheck="false">
+          <label class="cmp-mem"><input type="checkbox" id="cmpMemA" checked>
+            <span data-i18n="cmpMem">memory</span></label>
+          <input id="cmpUrlA" data-i18n-ph="cmpUrlPh" placeholder="own endpoint"
                  spellcheck="false">
           <input id="cmpKeyA" type="password" data-i18n-ph="cmpKeyPh"
-                 placeholder="自带 key（可留空）" spellcheck="false" autocomplete="off">
+                 placeholder="own key" spellcheck="false" autocomplete="off">
         </div>
         <div class="cmp-body idle" id="cmpTxtA">等这一轮…</div>
       </div>
       <div class="cmp-col" id="cmpColB">
         <div class="cmp-h">
-          <span class="lab">B</span>
-          <input class="cmp-model" id="cmpModelB" data-i18n-ph="cmpModelPh"
-                 placeholder="默认模型" spellcheck="false">
-          <label class="cmp-mem"><input type="checkbox" id="cmpMemB">
-            <span data-i18n="cmpMem">记忆</span></label>
+          <span class="lab" data-i18n="cmpWithout">Without VoiceMem</span>
           <span class="cmp-ms" id="cmpMsB"></span>
+          <button class="cmp-gear" id="cmpGearB" data-i18n-title="cmpGearTitle"
+                  title="model / endpoint / key">⚙</button>
         </div>
-        <div class="cmp-keys">
-          <input id="cmpUrlB" data-i18n-ph="cmpUrlPh" placeholder="自建端点（可留空）"
+        <div class="cmp-keys" id="cmpAdvB" hidden>
+          <input class="cmp-model" id="cmpModelB" data-i18n-ph="cmpModelPh"
+                 placeholder="server default" spellcheck="false">
+          <label class="cmp-mem"><input type="checkbox" id="cmpMemB">
+            <span data-i18n="cmpMem">memory</span></label>
+          <input id="cmpUrlB" data-i18n-ph="cmpUrlPh" placeholder="own endpoint"
                  spellcheck="false">
           <input id="cmpKeyB" type="password" data-i18n-ph="cmpKeyPh"
-                 placeholder="自带 key（可留空）" spellcheck="false" autocomplete="off">
+                 placeholder="own key" spellcheck="false" autocomplete="off">
         </div>
         <div class="cmp-body idle" id="cmpTxtB">等这一轮…</div>
       </div>
@@ -448,11 +460,7 @@ button{cursor:pointer;background:none;border:none}
   <!-- ③ Chat / Memory Space -->
   <section class="rightpane">
     <div class="topbar">
-      <div class="seg" id="seg">
-        <span class="seg-thumb"></span>
-        <button data-v="chat" class="on" data-i18n="chat">Chat</button>
-        <button data-v="mem" data-i18n="memspace">Memory Space</button>
-      </div>
+      <div class="seg-gone"></div>
       <div class="export">
         <span class="pill space" id="spaceBadge" data-i18n-title="spaceBadgeTitle"
               title="当前 Memory Space —— 换一个，脑图和记忆都跟着换">
@@ -464,8 +472,8 @@ button{cursor:pointer;background:none;border:none}
         <button class="btn sm" id="newSpaceBtn" data-i18n-title="spaceNewTitle"
                 title="新建一个 Memory Space">+</button>
         <select class="sel" id="langSel" title="Language / 界面与助手语言">
-          <option value="zh">中文</option>
           <option value="en">EN</option>
+          <option value="hi">हिंदी</option>
         </select>
         <select class="sel" id="dlScope" title="选择导出范围">
           <option value="all" data-i18n="dlAll">本空间全部记忆</option>
@@ -586,6 +594,8 @@ const I18N = {
     cmpCtx:'注入的记忆上下文', cmpCtxEmpty:'这一轮没检索到任何记忆——两边拿到的东西一样。',
     cmpKeyPh:'自带 key（可留空）', cmpUrlPh:'自建端点（可留空）',
     cmpCtxNobody:'两路都没开记忆，这段没进任何 prompt',
+    cmpWith:'带 VoiceMem', cmpWithout:'不带 VoiceMem',
+    cmpGearTitle:'模型 / 端点 / key',
     talkStart:'开始对话', talkEnd:'结束对话', pause:'暂停', resume:'继续',
     ended:'已结束。',
     idle:'待机', listening:'正在听', replying:'正在回复', paused:'已暂停',
@@ -631,6 +641,61 @@ const I18N = {
     cantConnect:'连不上 {0}，确认 python web/run.py 在跑。',
     disconnected:'{0}。已断开。',
   },
+  hi: {
+    chat:'चैट', memspace:'मेमोरी स्पेस', liveInput:'लाइव इनपुट',
+    you:'आप', waitingYou:'आपके बोलने का इंतज़ार…', noReplyYet:'इस बार कोई जवाब नहीं।',
+    cmpTitle:'A/B तुलना', cmpTgTitle:'एक ही बात दो तरफ़ जाती है: एक में निकाली गई मेमोरी डाली जाती है, दूसरे में नहीं। तुलना वाली बारी में आवाज़ नहीं आती — दोनों जवाब टेक्स्ट में आते हैं।',
+    cmpMem:'मेमोरी', cmpModelPh:'सर्वर डिफ़ॉल्ट', cmpWaiting:'इस बारी का इंतज़ार…',
+    cmpCtx:'डाली गई मेमोरी', cmpCtxEmpty:'इस बार कुछ नहीं मिला — दोनों को एक ही चीज़ मिली।',
+    cmpKeyPh:'अपनी key (ज़रूरी नहीं)', cmpUrlPh:'अपना endpoint (ज़रूरी नहीं)',
+    cmpCtxNobody:'किसी भी तरफ़ मेमोरी चालू नहीं — यह किसी prompt में नहीं गया',
+    cmpWith:'VoiceMem के साथ', cmpWithout:'VoiceMem के बिना',
+    cmpGearTitle:'model / endpoint / key',
+    talkStart:'बात शुरू करें', talkEnd:'बंद करें', pause:'रोकें', resume:'जारी रखें',
+    ended:'सेशन ख़त्म।',
+    idle:'खाली', listening:'सुन रहा है', replying:'जवाब दे रहा है', paused:'रुका हुआ',
+    left:'बायाँ दिमाग़', right:'दायाँ दिमाग़', factsShort:'तथ्य', profileShort:'प्रोफ़ाइल',
+    leftFacts:'बायाँ · तथ्य', rightProfile:'दायाँ · प्रोफ़ाइल',
+    emotion:'भावना', personality:'व्यक्तित्व', preference:'पसंद',
+    newChat:'नई चैट', expand:'साइडबार खोलें', collapse:'साइडबार समेटें',
+    download:'डाउनलोड', dlAll:'इस स्पेस की सारी मेमोरी', dlLeft:'बायाँ · तथ्य',
+    dlRight:'दायाँ · प्रोफ़ाइल', dlChat:'यह बातचीत',
+    spaceNamePh:'नए स्पेस का नाम', spaceCreate:'स्पेस बनाएँ', spaceCreating:'बन रहा है…',
+    chatCreate:'चैट बनाएँ', cancel:'रद्द करें',
+    pickSpaceHint:'पहले एक मेमोरी स्पेस चुनें। चैट बाद में दूसरे स्पेस में नहीं जा सकती।',
+    ownerNote:'इस मेमोरी ग्राफ़ के मालिक — हर मेमोरी आप से जुड़ी है।',
+    waitRetrieve:'खोज का इंतज़ार…', noHitThisTurn:'इस बार कुछ नहीं मिला',
+    notConnected:'जुड़ा नहीं है (“बात शुरू करें” दबाएँ)',
+    noChatInSpace:'इस स्पेस में अभी कोई चैट नहीं। ऊपर दाईं तरफ़ से शुरू करें।',
+    noMatchInSpace:'इस स्पेस में कोई मिलती चैट नहीं।',
+    emptyChat:'यह चैट अभी खाली है।',
+    noMemInSpace:'इस स्पेस में अभी कोई मेमोरी नहीं।',
+    needName:'पहले नाम दें', nameTaken:'यह नाम पहले से है',
+    nameBad:'नाम ठीक नहीं', createFailed:'बन नहीं पाया',
+    micUnsupported:'इस ब्राउज़र में माइक नहीं चलेगा (https या localhost चाहिए)।',
+    backendGone:'बैकएंड से नाता टूट गया।',
+    switching:'“{0}” पर जा रहे हैं…', switched:'अब “{0}” में', switchFailed:'बदल नहीं पाया',
+    created:'“{0}” बन गया',
+    turnsN:'{0} बारी', memN:'{0} मेमोरी',
+    andMore:'…और {0}',
+    spaceStat:'{0} तथ्य · {1} प्रोफ़ाइल नोट',
+    badgeStat:'{0} (L{1}/R{2})',
+    startHint:'<b>बातचीत शुरू करें</b>यह चैट {0} में है। कुछ बोलें, या बाईं तरफ़ टाइप करें।',
+    createdIn:'{0} में बना। चैट दूसरे स्पेस में नहीं जा सकती।',
+    downloadedChat:'बातचीत डाउनलोड हो गई।', downloadedN:'{0} मेमोरी डाउनलोड हुईं ({1}).',
+    rbInternalOnly:'इस बार {0} दायाँ-दिमाग़ हिट, सब अंदरूनी नोट',
+    voiceMatched:'speaker 0 · आवाज़ पहचानी गई', voiceKnown:' · “{0}” के रूप में पहचाना',
+    mySpace:'मेरा बनाया', diskSpace:'डिस्क पर',
+    spaceBadgeTitle:'मौजूदा मेमोरी स्पेस — बदलें तो ग्राफ़ भी बदल जाता है',
+    spaceSelTitle:'मेमोरी स्पेस बदलें',
+    spaceNewTitle:'नया मेमोरी स्पेस',
+    spaceNewHint:'एक नाम दें। डिस्क पर फ़ोल्डर बनेगा और मेमोरी शून्य से शुरू होगी।',
+    spaceStat3:'{0} तथ्य · {1} प्रोफ़ाइल नोट · {2} चैट',
+    connected:'जुड़ गया ({0}) — सिमुलेशन बंद।',
+    micFailed:'माइक नहीं मिला: {0}',
+    cantConnect:'{0} तक नहीं पहुँच पाए। देखें कि python web/run.py चल रहा है।',
+    disconnected:'{0}. नाता टूट गया।',
+  },
   en: {
     chat:'Chat', memspace:'Memory Space', liveInput:'Live input',
     you:'You', waitingYou:'Waiting for you to speak…', noReplyYet:'No reply yet.',
@@ -639,6 +704,8 @@ const I18N = {
     cmpCtx:'Injected memory context', cmpCtxEmpty:'Nothing retrieved this turn — both arms got the same thing.',
     cmpKeyPh:'own key (optional)', cmpUrlPh:'own endpoint (optional)',
     cmpCtxNobody:'neither arm has memory on — this went into no prompt',
+    cmpWith:'With VoiceMem', cmpWithout:'Without VoiceMem',
+    cmpGearTitle:'model / endpoint / key',
     talkStart:'Start talking', talkEnd:'End session', pause:'Pause', resume:'Resume',
     ended:'Session ended.',
     idle:'Idle', listening:'Listening', replying:'Replying', paused:'Paused',
@@ -685,7 +752,9 @@ const I18N = {
     disconnected:'{0}. Disconnected.',
   },
 };
-let LANG = localStorage.getItem('vm-lang') || 'en';
+const LANGS = ['en','hi','zh'];   // zh 不在选择器里了，但存过它的浏览器仍然能用
+let LANG = LANGS.includes(localStorage.getItem('vm-lang')) ?
+           localStorage.getItem('vm-lang') : 'en';
 function i18n(key, ...args){
   const s = (I18N[LANG] && I18N[LANG][key]) || (I18N.zh[key]) || key;
   return args.length ? s.replace(/\{(\d+)\}/g, (m,i)=> args[i] !== undefined ? args[i] : m) : s;
@@ -1144,6 +1213,17 @@ return {
   },
   beam(from,to){ BEAM=[]; for(const a of from) for(const b of to) if(N[a]&&N[b]) BEAM.push({a:a,b:b});
                  if(BEAM.length) PULSE.t=-PULSE.trail; },
+  /* 说完一轮就让脑子动一下。beam(左,右) 要两边都有命中才画得出线——空库或者
+     只命中左脑的那些轮，右边一条线都没有，看起来就是"脑图没反应"。
+     think() 从 you 节点往命中的节点打光；一个都没命中时至少让 you 自己脉冲，
+     这样"它在想"这件事永远看得见。 */
+  think(ids){
+    const now=nowT(), hit=(ids||[]).filter(i=>N[i]);
+    if(N[USER]){ N[USER].hit=1; N[USER].hitT=now; }
+    BEAM=[];
+    for(const i of hit) BEAM.push({a:USER,b:i});
+    PULSE.t=-PULSE.trail;
+  },
   clear(){ for(const n of N){ n.hit=0; n.act=0; } BEAM=[]; },
   // 调试用：把节点坐标倒出来（控制台 VMBrain.__dump()）
   __dump(){ return N.map(n=>({id:n.id,side:n.side,kind:n.kind,cluster:n.cluster,
@@ -1541,6 +1621,12 @@ async function cmpLoad(){
 
 $('cmpTg').addEventListener('click',()=>cmpPost(!CMP.on));
 for(const u of ['A','B']){
+  $('cmpGear'+u).addEventListener('click',()=>{
+    const box=$('cmpAdv'+u); box.hidden=!box.hidden;
+    $('cmpGear'+u).classList.toggle('on',!box.hidden);
+  });
+}
+for(const u of ['A','B']){
   $('cmpMem'+u).addEventListener('change',()=>cmpPost(CMP.on));
   for(const f of ['cmpModel','cmpUrl','cmpKey'])
     $(f+u).addEventListener('change',()=>cmpPost(CMP.on));
@@ -1616,13 +1702,12 @@ $('mCreate').addEventListener('click',()=>{
 });
 
 /* ── Chat / Memory Space 滑块 ─────────────────────────────────────── */
-const seg=$('seg'), track=$('track');
-seg.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
-  const mem=b.dataset.v==='mem';
-  seg.classList.toggle('mem',mem); track.classList.toggle('mem',mem);
-  seg.querySelectorAll('button').forEach(o=>o.classList.toggle('on',o===b));
-  if(mem) setTimeout(window.VMBrain.resize,60);
-}));
+/* Chat / Memory Space 的切换删了：右栏只做脑图。对照面板已经把两路回复都摊在
+   中栏了，右边再放一份聊天记录就是同一件事的第三个副本。会话列表还在左侧栏。
+   .track 本来是两屏横向滑动的容器，这里直接钉在第二屏。 */
+const track=$('track');
+track.classList.add('mem');
+setTimeout(window.VMBrain.resize,60);
 
 /* ── 导出 ─────────────────────────────────────────────────────────── */
 function saveFile(text,name,mime){
@@ -2257,7 +2342,9 @@ function handle(m){
       // 不清的话，说一句抽不出东西的话（「啦啦啦」），标签栏还挂着上一句的实体。
       s.ui.tags={emo:'',ent:'',sch:''};
       lvOn=false; s.ui.input=m.text; paint(s);
-      addTurn(s,'user',m.text,s.ui.speaker||'你'); break;
+      addTurn(s,'user',m.text,s.ui.speaker||'你');
+      window.VMBrain.think([]);          // 检索结果还没回来，先让脑子动起来
+      break;
 
     case 'memory_hits': {
       const L=m.left_brain||[], R=m.right_brain_hits||[];
@@ -2276,7 +2363,10 @@ function handle(m){
                   ' 节点；本轮命中 左'+li.length+'/右'+ri.length+
                   (ri.length?'':'  ← 右脑没有可亮的节点'));
       window.VMBrain.highlight(li.concat(ri));
-      window.VMBrain.beam(li,ri);
+      // 左右都有命中时保留原来的「左脑→右脑」光束；否则从 you 往命中的那些
+      // 节点打光，这样只命中一边的轮次照样看得见东西在动。
+      if(li.length&&ri.length) window.VMBrain.beam(li,ri);
+      else window.VMBrain.think(li.concat(ri));
       break;
     }
 
@@ -2519,11 +2609,12 @@ syncButtons();
 if($('langSel')){
   $('langSel').value = LANG;
   $('langSel').addEventListener('change', async e=>{
-    LANG = e.target.value === 'en' ? 'en' : 'zh';
+    LANG = LANGS.includes(e.target.value) ? e.target.value : 'en';
     localStorage.setItem('vm-lang', LANG);
     applyLang();
     renderAll();                       // 动态文案（侧栏、空状态、标签）跟着重画
     renderCmp();                       // 对照那两格的占位文案不在 renderAll 里
+    syncButtons();                     // 开始/结束、暂停/继续是按 live 状态写的文案
     fillSpaceSel();
     buildGraph(activeSpace);           // 脑图上那十个分区标签只在重建时才会换语言
     loadMemories();

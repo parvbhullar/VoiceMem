@@ -242,6 +242,9 @@ UI_LANG = ARGS.lang          # 界面语言。右上角随时可切，跟记忆/
 _LANG_NOTE = {
     "zh": "全程用中文回复，即使用户用别的语言问你。",
     "en": "Always reply in English, even if the user writes in another language.",
+    "hi": "Always reply in Hindi (Devanagari script), even if the user writes in "
+          "another language. Keep it natural spoken Hindi, not literary Hindi; "
+          "English technical words are fine where a Hindi speaker would use them.",
 }
 
 
@@ -287,13 +290,21 @@ def set_lang(lang: str) -> None:
     英文记忆库。
     """
     global UI_LANG
-    UI_LANG = "en" if str(lang).lower().startswith("en") else "zh"
+    v = str(lang).lower()
+    UI_LANG = v if v in _LANG_NOTE else "en"
     print(f"[lang] 界面切到 {UI_LANG}（空间「{ACTIVE_SPACE}」仍是 {SPACE_LANG}）",
           flush=True)
 
 
 def _lang_note() -> str:
-    return _LANG_NOTE.get(SPACE_LANG, _LANG_NOTE["en"])
+    """助手**说**什么语言。
+
+    回落链：界面语言 → 空间语言 → en。界面语言优先是刻意的：说什么语言是每轮
+    都能改的（右上角一点就换），而**存**什么语言是库的属性、建库时定死（见
+    SPACE_LANG）。印地语就是这么支持的——回复走印地语，记忆仍按空间语言抽取
+    （voicemem/lang.py 的 SUPPORTED 只有 en/zh），一个库里不会中印英混存。
+    """
+    return _LANG_NOTE.get(UI_LANG) or _LANG_NOTE.get(SPACE_LANG) or _LANG_NOTE["en"]
 
 
 _NO_MEMORY_NOTE = (
