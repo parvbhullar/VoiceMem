@@ -45,7 +45,12 @@ Non-goals (explicitly out of the first cut):
 
 3. **`realtime` mode is one audio stream.** It cannot carry two arms. When
    compare is on, the turn is served by the chat-completions fan-out regardless
-   of `--mode`.
+   of `--mode`. The realtime connection stays open but its input buffer must be
+   cleared per diverted turn (`conn.input_audio_buffer.clear()`, present in the
+   installed openai 3.8.0 SDK) — otherwise the uncommitted mic audio piles up
+   and the next non-compare commit replays earlier turns. This is why compare
+   does not require restarting the server in `--mode llm_tts`, which matters
+   because `run_demo.sh` defaults to realtime.
 
 4. **The frontend reply renderer is coupled to the playback clock.**
    `answer_start/_delta/_done` in `web/voicemem.html:2085-2109` drive spoken
@@ -109,11 +114,20 @@ at all, not an LLM told it has no memories.
 
 - Module-level `COMPARE = compare.CompareState()`.
 - In `voicemem_llm_tts()`: if `COMPARE.enabled`, send `cmp_ctx`, call
-  `compare.fan_out(...)`, skip the TTS queue / timeline / `answer_*` sends, then
-  fall through to the existing `_push_history` + `queue_remember_turn(pending,
-  replies["a"], owner, history_turn_id, memory_vm=memory_vm)`.
-- In `realtime_session()`: when `COMPARE.enabled`, divert the turn to the
-  `voicemem_llm_tts` fan-out path instead of opening a realtime turn.
+  `compare.fan_out(...)`, skip the TTS queue, the `synth`/`speak` tasks and all
+  `answer_*` sends, then fall through to the existing `_push_history` +
+  `queue_remember_turn(pending, replies["a"], owner, history_turn_id,
+  memory_vm=memory_vm)`. The `timeline` object is left empty (no
+  `append_audio` / `append_text`) but still gets `context_saved = True` at the
+  end, mirroring `web/run.py:1555`, so the timeline bookkeeping cannot conclude
+  the turn's context was lost.
+- In `realtime_session()`, at the single turn dispatch site
+  (`web/run.py:2611`): when `COMPARE.enabled`, `await
+  conn.input_audio_buffer.clear()`, skip the `AudioTimeline` creation and the
+  `turn.update(live=True, ...)` registration (the event pump's completion
+  handler keys off `turn["pending"]` and must not see a compare turn), run
+  `compare.fan_out(...)`, then call `_push_history` and `queue_remember_turn`
+  inline. `response_idle` is left set — no realtime response is created.
 - `build_app(..., compare=(get_fn, set_fn))` gains:
   - `GET /api/compare` → `{"enabled": bool, "arms": [{label, model, memory, base_url, has_key}]}`
     (never returns the key itself)
@@ -197,6 +211,8 @@ async generator providers, so no network and no model downloads.
 6. `repr(Arm(api_key="sk-secret"))` does not contain `sk-secret`.
 7. `CompareState` round-trips through the sanitize function used by
    `GET /api/compare` without exposing `api_key`.
+8. A `memory=True` arm with `memory_context == ""` still calls its provider with
+   `""` and does not substitute `_NO_MEMORY_NOTE`.
 
 Manual verification: run `bash run_demo.sh`, toggle Compare, set panel A memory
 on / panel B memory off with the same model, speak a turn that depends on a
@@ -212,4 +228,4 @@ reply) for that turn.
 | `web/run.py` | `COMPARE` state; compare branch in `voicemem_llm_tts`; realtime divert; pass `compare=` into `build_app` |
 | `web/utils.py` | `build_app` gains the optional `compare` param and the two `/api/compare` routes |
 | `web/voicemem.html` | toggle, compare section, 4 `cmp_*` handlers, one render fn |
-| `tests/test_compare.py` | new — 7 unit tests above |
+| `tests/test_compare.py` | new — 8 unit tests above |
