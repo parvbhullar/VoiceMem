@@ -35,18 +35,13 @@ button{cursor:pointer;background:none;border:none}
    窗口真放不下时才让两列压到 minmax 的下限。 */
 #app{
   position:fixed;inset:0;display:grid;
-  grid-template-columns:264px minmax(340px,420px) minmax(380px,1fr);
+  grid-template-columns:minmax(340px,420px) minmax(560px,1fr);
   transition:grid-template-columns .3s cubic-bezier(.2,.8,.2,1);
 }
-#app.collapsed{grid-template-columns:56px minmax(340px,420px) minmax(380px,1fr)}
 
 /* ── 侧栏 ─────────────────────────────────────────────────────────── */
 .sidebar{display:flex;flex-direction:column;min-width:0;background:var(--bg-side);
   border-right:1px solid var(--line)}
-#app.collapsed .sidebar{background:transparent;border-right:none}
-#app.collapsed .side-scroll,#app.collapsed .side-search,#app.collapsed .side-foot{display:none}
-#app.collapsed .side-head{flex-direction:column;gap:4px;padding:10px 0}
-#app.collapsed .side-head .grow{display:none}
 .side-head{display:flex;align-items:center;gap:4px;padding:10px 8px}
 .side-head .grow{flex:1}
 .ico{width:34px;height:34px;flex:0 0 34px;border-radius:8px;display:flex;
@@ -292,14 +287,14 @@ button{cursor:pointer;background:none;border:none}
    就溢出 .cmp、压在 .out-foot 上（1920x1080 和 1440x900 实测都会，看起来就是
    「注入的记忆上下文」和「开始对话」挤在同一行）。
    1 0 auto：可以长，但绝不缩到内容以下；装不下时由 .center.cmp-on 滚。 */
-.cmp{display:flex;flex-direction:column;gap:8px;min-height:0;flex:1 0 auto}
+.cmp{display:flex;flex-direction:column;gap:8px;min-height:0;flex:0 0 auto}
 /* 两路各自要够读一段回复。不给下限的话，中列高度不够时 flex 会把它们压到几
    像素——1440x900 实测压到 64px、1280x720 压到 5px，字全在 overflow:hidden
    里面，看起来就是"面板空的"。所以给 cols 一个地板，让不够的时候是中列滚动，
    不是面板消失。中列只在对照打开时可滚（.center.cmp-on），默认布局一点不动。 */
-.cmp-cols{display:grid;grid-template-columns:1fr 1fr;gap:8px;flex:1;min-height:190px}
+.cmp-cols{display:grid;grid-template-columns:1fr 1fr;gap:8px;flex:0 0 auto}
 .center.cmp-on{overflow-y:auto}
-.p-out.cmp-on{flex:1 1 auto;min-height:380px}
+.p-out.cmp-on{flex:0 0 auto}
 .cmp-col{display:flex;flex-direction:column;min-width:0;border:1px solid var(--line);
   border-radius:var(--radius);background:var(--bg-panel);overflow:hidden}
 .cmp-col.mem{border-color:rgba(121,215,162,.45)}
@@ -343,7 +338,8 @@ button{cursor:pointer;background:none;border:none}
 .rsplit{display:flex;flex-direction:column;height:100%;min-height:0}
 /* 脑图给固定的 42%：它是背景信息，不该跟着流的长短变高。min-height 保底，
    窗口很矮时也还看得出是个脑子。 */
-.brainpart{flex:0 0 42%;min-height:220px;position:relative;min-width:0}
+.brainpart{flex:0 0 42%;min-height:220px;position:relative;min-width:0;
+  display:flex;flex-direction:column}
 .feedpart{flex:1 1 auto;display:flex;flex-direction:column;min-height:0;
   border-top:1px solid var(--line)}
 
@@ -387,31 +383,6 @@ button{cursor:pointer;background:none;border:none}
 </head>
 <body>
 <div id="app">
-
-  <!-- ① 侧栏：Memory Space + 该空间下的对话 -->
-  <aside class="sidebar">
-    <div class="side-head">
-      <button class="ico" id="btnCollapse" data-i18n-title="collapse" data-i18n-aria="collapse"
-        title="Collapse sidebar" aria-label="Collapse sidebar">
-        <svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M9.5 4v16"/></svg>
-      </button>
-      <span class="grow"></span>
-      <button class="ico" id="btnSearch" data-i18n-title="searchChats" data-i18n-aria="searchChats"
-        title="Search chats" aria-label="Search chats">
-        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></svg>
-      </button>
-      <button class="ico" id="btnNew" data-i18n-title="newChat" data-i18n-aria="newChat"
-        title="New chat" aria-label="New chat">
-        <svg viewBox="0 0 24 24"><path d="M4 20h4l10-10a2.5 2.5 0 0 0-3.5-3.5L4.5 16.5V20z"/><path d="M13.5 7.5 16.5 10.5"/></svg>
-      </button>
-    </div>
-    <div class="side-search" id="sideSearch"><input id="searchIn" data-i18n-ph="searchChats" placeholder="Search chats" spellcheck="false" /></div>
-    <div class="side-scroll">
-      <div class="side-label"><span data-i18n="dialogue">Dialogue</span><span class="c" id="sessCount"></span></div>
-      <ul class="sess" id="sessList"></ul>
-    </div>
-    <div class="side-foot">VOICEMEM</div>
-  </aside>
 
   <!-- ② 实时对话 -->
   <section class="center">
@@ -511,6 +482,8 @@ button{cursor:pointer;background:none;border:none}
     <div class="topbar">
       <div class="seg-gone"></div>
       <div class="export">
+        <button class="btn sm" id="btnNew" data-i18n-title="newChat"
+                title="New chat" data-i18n="newChat">New chat</button>
         <select class="sel" id="langSel" data-i18n-title="langTitle" title="Language">
           <option value="en">EN</option>
           <option value="hi">हिंदी</option>
@@ -1386,12 +1359,13 @@ function renderSpaces(){
   }
 }
 function renderSessions(){
-  const ul=$('sessList'); ul.innerHTML='';
+  const ul=$('sessList'); if(!ul) return;      // 侧栏删了，没有容器可渲染
+  ul.innerHTML='';
   const q=searchQ.trim().toLowerCase();
   let list=spaceSessions(activeSpace);
   if(q) list=list.filter(s=>s.title.toLowerCase().includes(q)||
                             s.turns.some(t=>t.text.toLowerCase().includes(q)));
-  $('sessCount').textContent=SPACES[activeSpace].name+' · '+list.length;
+  if($('sessCount')) $('sessCount').textContent=SPACES[activeSpace].name+' · '+list.length;
   if(!list.length){
     const d=document.createElement('div'); d.className='side-empty';
     d.textContent=q?i18n('noMatchInSpace'):i18n('noChatInSpace');
@@ -1677,33 +1651,13 @@ function renderAll(){
   renderIO(currentSession()||{ui:blankUI()});
 }
 
-/* ── 侧栏交互 ─────────────────────────────────────────────────────── */
-$('btnCollapse').addEventListener('click',()=>{
-  const c=app.classList.toggle('collapsed');
-  $('btnCollapse').title=c?i18n('expand'):i18n('collapse');
-});
-$('btnSearch').addEventListener('click',()=>{
-  app.classList.remove('collapsed');
-  const w=$('sideSearch'), open=w.classList.toggle('open');
-  if(open) $('searchIn').focus(); else { $('searchIn').value=''; searchQ=''; renderSessions(); }
-});
-$('searchIn').addEventListener('input',e=>{ searchQ=e.target.value; renderSessions(); });
-if($('spaceList')) $('spaceList').addEventListener('click',e=>{
-  const li=e.target.closest('li[data-space]'); if(li) switchSpace(li.dataset.space);
-});
-$('sessList').addEventListener('click',e=>{
-  const li=e.target.closest('li[data-id]'); if(li) selectSession(Number(li.dataset.id));
-});
-document.addEventListener('keydown',e=>{
-  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){
-    e.preventDefault(); app.classList.remove('collapsed');
-    $('sideSearch').classList.add('open'); $('searchIn').focus();
-  }
-});
-
-/* ── 新对话：必须先选空间 ─────────────────────────────────────────── */
+/* ── 新对话 ───────────────────────────────────────────────────────── */
+/* 侧栏删了（折叠、搜索、会话列表那几个监听跟着走）：里面只有一份会话列表，
+   而每一轮现在都留在右栏的对照流里，那 264px 给流用更值。
+   注意这不是「顺手清理」：$('btnCollapse') 这种取不到元素就抛错，脚本一断，
+   后面所有 addEventListener 都不会挂上——包括「开始对话」，表现是按钮点了
+   没反应。所以删元素必须连着删它的监听。 */
 $('btnNew').addEventListener('click',()=>{
-  app.classList.remove('collapsed');
   createSession(activeSpace);
   $('textIn').focus();
 });
