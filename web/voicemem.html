@@ -466,10 +466,6 @@ button{cursor:pointer;background:none;border:none}
     <div class="topbar">
       <div class="seg-gone"></div>
       <div class="export">
-        <select class="sel" id="spaceSel" data-i18n-title="spaceSelTitle"
-                title="Switch Memory Space"></select>
-        <button class="btn sm" id="newSpaceBtn" data-i18n-title="spaceNewTitle"
-                title="New Memory Space">+</button>
         <select class="sel" id="langSel" data-i18n-title="langTitle" title="Language">
           <option value="en">EN</option>
           <option value="hi">हिंदी</option>
@@ -512,43 +508,6 @@ button{cursor:pointer;background:none;border:none}
   </section>
 </div>
 
-<!-- 新对话：必须先选 Memory Space -->
-<div class="mask" id="mask">
-  <div class="modal">
-    <h3 data-i18n="newChat">New chat</h3>
-    <p data-i18n="pickSpaceHint">Pick a Memory Space first. A chat cannot move to another space later.</p>
-    <div class="pick" id="pick"></div>
-    <div class="newspace" id="newSpaceRow">
-      <input id="newSpaceName" data-i18n-ph="spaceNamePh" placeholder="Name the new space" maxlength="20" spellcheck="false" />
-      <button class="btn sm" id="newSpaceAdd" data-i18n="spaceCreate">Create space</button>
-    </div>
-    <div class="modal-foot">
-      <button class="btn" id="mCancel" data-i18n="cancel">Cancel</button>
-      <button class="btn primary" id="mCreate" data-i18n="chatCreate">Create chat</button>
-    </div>
-  </div>
-</div>
-<!-- 新建 Memory Space。独立一个弹窗，不跟「新对话」那个抢 #mask -->
-<div class="mask" id="spaceMask">
-  <div class="modal">
-    <h3 data-i18n="spaceNewTitle">New Memory Space</h3>
-    <p data-i18n="spaceNewHint">Give it a name. A folder appears on disk and memories start from zero.</p>
-    <div class="newspace">
-      <input id="spaceNewName" data-i18n-ph="spaceNamePh" placeholder="Name the new space"
-             maxlength="20" spellcheck="false" />
-      <!-- 语言在**建的时候**定一次，之后不能改：记忆和回复都跟着它。一个库里
-           中英混存会让一半记忆检索不到（检索按向量做，中文问句离英文记忆很远）。 -->
-      <select id="spaceNewLang">
-        <option value="en">English</option>
-        <option value="zh" data-i18n="langChinese">Chinese</option>
-      </select>
-    </div>
-    <div class="modal-foot">
-      <button class="btn" id="spaceNewCancel" data-i18n="cancel">Cancel</button>
-      <button class="btn primary" id="spaceNewOk" data-i18n="spaceCreate">Create space</button>
-    </div>
-  </div>
-</div>
 <div id="toast"></div>
 
 <script>
@@ -589,10 +548,8 @@ const I18N = {
     chat:'对话', memspace:'Memory Space', liveInput:'流式输入 · Live input',
     dialogue:'对话', searchChats:'搜索对话', typeHint:'或直接打字回车',
     topk:'Top-K 召回', aiReply:'AI 回复',
-    langTitle:'语言 / Language', dlScopeTitle:'选择导出范围',
-    langChinese:'中文', langEnglish:'English',
-    you:'你', waitingYou:'等待你说话…', noReplyYet:'这一轮还没有回复。',
-    cmpTitle:'A/B 对照', cmpTgTitle:'同一句话喂两路：一路注入记忆，一路不注入。开了这一轮不出声，两边并排出字。',
+    langTitle:'语言 / Language', dlScopeTitle:'选择导出范围', langEnglish:'English',
+    you:'你', waitingYou:'等待你说话…', noReplyYet:'这一轮还没有回复。', cmpTgTitle:'同一句话喂两路：一路注入记忆，一路不注入。开了这一轮不出声，两边并排出字。',
     cmpMem:'记忆', cmpModelPh:'默认模型', cmpWaiting:'等这一轮…',
     cmpCtx:'注入的记忆上下文', cmpCtxEmpty:'这一轮没检索到任何记忆——两边拿到的东西一样。',
     cmpKeyPh:'自带 key（可留空）', cmpUrlPh:'自建端点（可留空）',
@@ -607,10 +564,7 @@ const I18N = {
     emotion:'情绪', personality:'性格', preference:'偏好',
     newChat:'新对话', expand:'展开侧栏', collapse:'收起侧栏',
     download:'下载', dlAll:'本空间全部记忆', dlLeft:'左脑 · 事实',
-    dlRight:'右脑 · 画像', dlChat:'当前对话',
-    spaceNamePh:'新空间的名字', spaceCreate:'创建空间', spaceCreating:'创建中…',
-    chatCreate:'创建对话', cancel:'取消',
-    pickSpaceHint:'先选一个 Memory Space。对话创建后所属空间不可更改。',
+    dlRight:'右脑 · 画像', dlChat:'当前对话', spaceCreate:'创建空间', spaceCreating:'创建中…', cancel:'取消',
     ownerNote:'这张记忆图谱的主人，所有记忆都锚定在你身上。',
     waitRetrieve:'等待检索…', noHitThisTurn:'本轮无命中',
     notConnected:'未连接后端（点「开始对话」）',
@@ -634,9 +588,6 @@ const I18N = {
     rbInternalOnly:'本轮右脑命中 {0} 条，全是内部笔记',
     voiceMatched:'speaker 0 · 声纹已匹配', voiceKnown:' · 已识别为「{0}」',
     mySpace:'我创建的空间', diskSpace:'磁盘上的空间',
-    spaceSelTitle:'切换 Memory Space',
-    spaceNewTitle:'新建 Memory Space',
-    spaceNewHint:'起个名字。磁盘上会出现同名文件夹，记忆从零开始长。',
     spaceStat3:'{0} 条事实 · {1} 条画像 · {2} 个对话',
     connected:'已连上后端（{0}）',
     micFailed:'拿不到麦克风：{0}',
@@ -647,10 +598,8 @@ const I18N = {
     chat:'चैट', memspace:'मेमोरी स्पेस', liveInput:'लाइव इनपुट',
     dialogue:'बातचीत', searchChats:'चैट खोजें', typeHint:'या टाइप करके Enter दबाएँ',
     topk:'Top-K खोज', aiReply:'AI का जवाब',
-    langTitle:'भाषा / Language', dlScopeTitle:'क्या डाउनलोड करना है',
-    langChinese:'चीनी', langEnglish:'अंग्रेज़ी',
-    you:'आप', waitingYou:'आपके बोलने का इंतज़ार…', noReplyYet:'इस बार कोई जवाब नहीं।',
-    cmpTitle:'A/B तुलना', cmpTgTitle:'एक ही बात दो तरफ़ जाती है: एक में निकाली गई मेमोरी डाली जाती है, दूसरे में नहीं। तुलना वाली बारी में आवाज़ नहीं आती — दोनों जवाब टेक्स्ट में आते हैं।',
+    langTitle:'भाषा / Language', dlScopeTitle:'क्या डाउनलोड करना है', langEnglish:'अंग्रेज़ी',
+    you:'आप', waitingYou:'आपके बोलने का इंतज़ार…', noReplyYet:'इस बार कोई जवाब नहीं।', cmpTgTitle:'एक ही बात दो तरफ़ जाती है: एक में निकाली गई मेमोरी डाली जाती है, दूसरे में नहीं। तुलना वाली बारी में आवाज़ नहीं आती — दोनों जवाब टेक्स्ट में आते हैं।',
     cmpMem:'मेमोरी', cmpModelPh:'सर्वर डिफ़ॉल्ट', cmpWaiting:'इस बारी का इंतज़ार…',
     cmpCtx:'डाली गई मेमोरी', cmpCtxEmpty:'इस बार कुछ नहीं मिला — दोनों को एक ही चीज़ मिली।',
     cmpKeyPh:'अपनी key (ज़रूरी नहीं)', cmpUrlPh:'अपना endpoint (ज़रूरी नहीं)',
@@ -665,10 +614,7 @@ const I18N = {
     emotion:'भावना', personality:'व्यक्तित्व', preference:'पसंद',
     newChat:'नई चैट', expand:'साइडबार खोलें', collapse:'साइडबार समेटें',
     download:'डाउनलोड', dlAll:'इस स्पेस की सारी मेमोरी', dlLeft:'बायाँ · तथ्य',
-    dlRight:'दायाँ · प्रोफ़ाइल', dlChat:'यह बातचीत',
-    spaceNamePh:'नए स्पेस का नाम', spaceCreate:'स्पेस बनाएँ', spaceCreating:'बन रहा है…',
-    chatCreate:'चैट बनाएँ', cancel:'रद्द करें',
-    pickSpaceHint:'पहले एक मेमोरी स्पेस चुनें। चैट बाद में दूसरे स्पेस में नहीं जा सकती।',
+    dlRight:'दायाँ · प्रोफ़ाइल', dlChat:'यह बातचीत', spaceCreate:'स्पेस बनाएँ', spaceCreating:'बन रहा है…', cancel:'रद्द करें',
     ownerNote:'इस मेमोरी ग्राफ़ के मालिक — हर मेमोरी आप से जुड़ी है।',
     waitRetrieve:'खोज का इंतज़ार…', noHitThisTurn:'इस बार कुछ नहीं मिला',
     notConnected:'जुड़ा नहीं है (“बात शुरू करें” दबाएँ)',
@@ -692,9 +638,6 @@ const I18N = {
     rbInternalOnly:'इस बार {0} दायाँ-दिमाग़ हिट, सब अंदरूनी नोट',
     voiceMatched:'speaker 0 · आवाज़ पहचानी गई', voiceKnown:' · “{0}” के रूप में पहचाना',
     mySpace:'मेरा बनाया', diskSpace:'डिस्क पर',
-    spaceSelTitle:'मेमोरी स्पेस बदलें',
-    spaceNewTitle:'नया मेमोरी स्पेस',
-    spaceNewHint:'एक नाम दें। डिस्क पर फ़ोल्डर बनेगा और मेमोरी शून्य से शुरू होगी।',
     spaceStat3:'{0} तथ्य · {1} प्रोफ़ाइल नोट · {2} चैट',
     connected:'जुड़ गया ({0}) — सिमुलेशन बंद।',
     micFailed:'माइक नहीं मिला: {0}',
@@ -705,10 +648,8 @@ const I18N = {
     chat:'Chat', memspace:'Memory Space', liveInput:'Live input',
     dialogue:'Dialogue', searchChats:'Search chats', typeHint:'Or just type and press Enter',
     topk:'Top-K recall', aiReply:'AI reply',
-    langTitle:'Language', dlScopeTitle:'What to download',
-    langChinese:'Chinese', langEnglish:'English',
-    you:'You', waitingYou:'Waiting for you to speak…', noReplyYet:'No reply yet.',
-    cmpTitle:'A/B compare', cmpTgTitle:'Same utterance to two arms: one with the retrieved memory injected, one without. A compare turn is silent — both replies stream as text.',
+    langTitle:'Language', dlScopeTitle:'What to download', langEnglish:'English',
+    you:'You', waitingYou:'Waiting for you to speak…', noReplyYet:'No reply yet.', cmpTgTitle:'Same utterance to two arms: one with the retrieved memory injected, one without. A compare turn is silent — both replies stream as text.',
     cmpMem:'memory', cmpModelPh:'server default', cmpWaiting:'waiting for this turn…',
     cmpCtx:'Injected memory context', cmpCtxEmpty:'Nothing retrieved this turn — both arms got the same thing.',
     cmpKeyPh:'own key (optional)', cmpUrlPh:'own endpoint (optional)',
@@ -723,10 +664,7 @@ const I18N = {
     emotion:'Emotion', personality:'Personality', preference:'Preference',
     newChat:'New chat', expand:'Expand sidebar', collapse:'Collapse sidebar',
     download:'Download', dlAll:'All memories in this space', dlLeft:'Left · Facts',
-    dlRight:'Right · Profile', dlChat:'This conversation',
-    spaceNamePh:'Name the new space', spaceCreate:'Create space', spaceCreating:'Creating…',
-    chatCreate:'Create chat', cancel:'Cancel',
-    pickSpaceHint:'Pick a Memory Space first. A chat cannot move to another space later.',
+    dlRight:'Right · Profile', dlChat:'This conversation', spaceCreate:'Create space', spaceCreating:'Creating…', cancel:'Cancel',
     ownerNote:'The owner of this memory graph — every memory is anchored to you.',
     waitRetrieve:'Waiting for retrieval…', noHitThisTurn:'Nothing matched this turn',
     notConnected:'Not connected (hit “Start talking”)',
@@ -750,9 +688,6 @@ const I18N = {
     rbInternalOnly:'{0} right-brain hits this turn, all internal notes',
     voiceMatched:'speaker 0 · voice matched', voiceKnown:' · recognized as “{0}”',
     mySpace:'Created by me', diskSpace:'On disk',
-    spaceSelTitle:'Switch Memory Space',
-    spaceNewTitle:'New Memory Space',
-    spaceNewHint:'Give it a name. A folder appears on disk and memories start from zero.',
     spaceStat3:'{0} facts · {1} profile notes · {2} chats',
     connected:'Connected ({0}) — simulation stopped.',
     micFailed:'No microphone: {0}',
@@ -1349,69 +1284,6 @@ if($('spaceSel')) $('spaceSel').addEventListener('change',e=>switchSpace(e.targe
 
 /* 右上角那个「+」：起个名字 → 磁盘上出现文件夹 → 直接切过去开始用。
    独立的弹窗，不跟「新对话」抢 #mask（那个还得先选空间才能建对话）。 */
-function openSpaceNew(){
-  const el=$('spaceNewName'); if(el){ el.value=''; }
-  const lg=$('spaceNewLang'); if(lg){ lg.value='en'; }   // 默认英文
-  $('spaceMask').classList.add('on');
-  setTimeout(()=>el&&el.focus(),50);
-}
-function closeSpaceNew(){ $('spaceMask').classList.remove('on'); }
-
-async function doCreateSpace(){
-  const el=$('spaceNewName'), name=(el.value||'').trim();
-  if(!name){ toast(i18n('needName')); el.focus(); return; }
-  const btn=$('spaceNewOk'); btn.disabled=true; btn.textContent=i18n('spaceCreating');
-  const id=await createSpace(name, ($('spaceNewLang')||{}).value||'en');
-  btn.disabled=false; btn.textContent=i18n('spaceCreate');
-  if(!id) return;                       // createSpace 里已经 toast 过原因了
-  closeSpaceNew();
-  fillSpaceSel();
-  await switchSpace(id);                // 建完直接切过去，省一步
-  toast(i18n('created', name));
-}
-if($('newSpaceBtn'))    $('newSpaceBtn').addEventListener('click', openSpaceNew);
-if($('spaceNewCancel')) $('spaceNewCancel').addEventListener('click', closeSpaceNew);
-if($('spaceNewOk'))     $('spaceNewOk').addEventListener('click', doCreateSpace);
-if($('spaceNewName'))   $('spaceNewName').addEventListener('keydown',e=>{
-  if(e.key==='Enter') doCreateSpace();
-  if(e.key==='Escape') closeSpaceNew();
-});
-if($('spaceMask')) $('spaceMask').addEventListener('click',e=>{
-  if(e.target===$('spaceMask')) closeSpaceNew();     // 点遮罩关掉
-});
-
-/* 新建一个空的 Memory Space —— 磁盘上出现这个名字的文件夹，记忆从零开始长 */
-async function createSpace(name, language){
-  const r=await fetch('/api/spaces',{method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({name, language:language||'en'})});
-  if(!r.ok){
-    const msg=r.status===409?i18n('nameTaken'):(r.status===400?i18n('nameBad'):i18n('createFailed'));
-    toast(msg); return '';
-  }
-  const it=await r.json();
-  if(!SPACES[it.id]){
-    SPACES[it.id]={ id:it.id, name:it.name, desc:i18n('mySpace'),
-                    left:[], right:[], sessions:[], count:0 };
-    SPACE_IDS.push(it.id);
-  }
-  return it.id;
-}
-
-/* 切到另一个空间：后端换实例（实测 ~2.3s，模型是进程内复用的），前端重铺脑图 */
-async function switchSpace(id){
-  if(!id || id===activeSpace) return;
-  toast(i18n('switching', SPACES[id]?SPACES[id].name:id));
-  try{
-    const r=await fetch('/api/spaces/'+encodeURIComponent(id)+'/use',{method:'POST'});
-    if(!r.ok){ toast(i18n('switchFailed')); return; }
-  }catch(e){ toast(i18n('switchFailed')); return; }
-  activeSpace=id;
-  fillSpaceSel(); renderSpaces(); renderSessions();
-  await loadMemories();                 // 重新拉这个空间的记忆铺脑图
-  toast(i18n('switched', SPACES[id]?SPACES[id].name:id));
-}
-
 /* ── 脑图：按空间铺记忆 ───────────────────────────────────────────── */
 const CLUSTER_KIND={emotion:'emotion',personality:'exper',preference:'prefer'};
 function buildGraph(sid){
@@ -1696,43 +1568,10 @@ document.addEventListener('keydown',e=>{
 });
 
 /* ── 新对话：必须先选空间 ─────────────────────────────────────────── */
-let pickSpace=activeSpace;
-function openModal(){
-  pickSpace=activeSpace;
-  const box=$('pick'); box.innerHTML='';
-  for(const sid of SPACE_IDS){
-    const sp=SPACES[sid], b=document.createElement('button');
-    b.dataset.space=sid; if(sid===pickSpace) b.className='on';
-    b.innerHTML='<span class="dot"></span><span><span class="nm">'+sp.name+'</span>'+
-      '<span class="sub">'+sp.desc+' · '+i18n('spaceStat', sp.left.length, sp.right.length)+'</span></span>';
-    box.appendChild(b);
-  }
-  $('mask').classList.add('on');
-}
-$('btnNew').addEventListener('click',()=>{ app.classList.remove('collapsed'); openModal(); });
-
-/* 弹窗里那个「创建空间」：建完直接选中它，接着点「创建对话」就能在新空间里说话 */
-if($('newSpaceAdd')) $('newSpaceAdd').addEventListener('click',async()=>{
-  const el=$('newSpaceName'), name=(el.value||'').trim();
-  if(!name){ toast(i18n('needName')); el.focus(); return; }
-  const btn=$('newSpaceAdd'); btn.disabled=true; btn.textContent=i18n('spaceCreating');
-  const id=await createSpace(name, ($('spaceNewLang')||{}).value||'en');
-  btn.disabled=false; btn.textContent=i18n('spaceCreate');
-  if(!id) return;
-  el.value=''; pickSpace=id; openModal();
-  toast(i18n('created', name));
-});
-$('pick').addEventListener('click',e=>{
-  const b=e.target.closest('button[data-space]'); if(!b) return;
-  pickSpace=b.dataset.space;
-  $('pick').querySelectorAll('button').forEach(o=>o.classList.toggle('on',o===b));
-});
-$('mCancel').addEventListener('click',()=>$('mask').classList.remove('on'));
-$('mask').addEventListener('click',e=>{ if(e.target===$('mask')) $('mask').classList.remove('on'); });
-$('mCreate').addEventListener('click',()=>{
-  $('mask').classList.remove('on');
-  createSession(pickSpace);
-  toast(i18n('createdIn', SPACES[pickSpace].name));
+$('btnNew').addEventListener('click',()=>{
+  app.classList.remove('collapsed');
+  createSession(activeSpace);
+  $('textIn').focus();
 });
 
 /* ── Chat / Memory Space 滑块 ─────────────────────────────────────── */
