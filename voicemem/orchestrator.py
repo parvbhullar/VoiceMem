@@ -1203,7 +1203,7 @@ class Orchestrator:
                     _notify_complete(self._finish_ingest(ctx))
                 except Exception as e:
                     import traceback
-                    print(f"[ingest] 这一轮没能入库（{type(e).__name__}: {e}）\n"
+                    print(f"[ingest] this turn could not be stored ({type(e).__name__}: {e})\n"
                           f"{traceback.format_exc()}", flush=True)
                     _notify_complete({"error": str(e), "persistent_memory_created": False})
 

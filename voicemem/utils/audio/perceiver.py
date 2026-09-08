@@ -853,7 +853,7 @@ class AudioPerceiver:
         # 属性了（AttributeError: 'NoneType' object has no attribute 'action'）。
         elif audio_path and not result.memory_ids:
             why = "这一轮没有入库任何事实"
-            print(f"  [music] 没打 tune 标签：{why}", flush=True)
+            print(f"  [music] no tune tag: {why}", flush=True)
 
         # 异常环境音记忆：破碎声/警报/尖叫——第一次出现就值得记一笔，每次检测到
         # 都打标签 + 生成一条记忆事实。独立警报事实的写入不依赖 result.memory_ids

@@ -78,7 +78,7 @@ def setup_file_logging(root: Path, requested: str = "") -> Path:
 
     atexit.register(close)
 
-    print(f"[log] 文件：{path}", flush=True)
+    print(f"[log] file: {path}", flush=True)
     print(f"[log] Python={platform.python_version()} pid={os.getpid()} cwd={Path.cwd()}",
           flush=True)
     return path

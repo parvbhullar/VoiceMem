@@ -686,7 +686,7 @@ def ingest_voice_input(
         **(extra_metadata or {}),
     }
     memory_ids = repo.append_extracted(extracted, user_id=user_id, extra_metadata=meta)
-    print(f"[ingest] 入库 {len(memory_ids or [])} 条：{[m.text[:20] for m in extracted][:3]}", flush=True)
+    print(f"[ingest] stored {len(memory_ids or [])}: {[m.text[:20] for m in extracted][:3]}", flush=True)
 
     # 预分类 slot 写入 memory_tags
     slotv2_hints = map_voice_slots_to_slotv2(vi.slots)

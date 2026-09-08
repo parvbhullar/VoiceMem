@@ -192,7 +192,7 @@ class VoiceMem:
             except Exception as e:                 # 少装了可选依赖 / 模型没下载
                 label = f"{name} 跳过（{type(e).__name__}）"
             done[0] += 1
-            draw(label if done[0] < total else "模型就绪", finished=True)
+            draw(label if done[0] < total else "models ready", finished=True)
 
         step("embedding / slot 分类", lambda: self.classify("你好"))
         if not audio:
