@@ -1882,16 +1882,15 @@ $('textIn').addEventListener('keydown',e=>{
   e.target.value='';
   // 还没有任何会话时 currentSession() 是 null——删掉演示数据之后，页面一打开就是
   // 这个状态。以前这里直接读 s.space，一打字就 TypeError，整个脚本停在这儿。
-  let s=currentSession();
-  if(live&&ws&&ws.readyState===1){          // 连着后端就走真的
-    if(!s) s=createSession(activeSpace);
-    s.ui.input=t; s.ui.speaker=i18n('you'); paint(s);
+  const send=()=>{
+    let s2=currentSession() || createSession(activeSpace);
+    s2.ui.input=t; s2.ui.speaker=i18n('you'); paint(s2);
     ws.send(JSON.stringify({type:'user_text',text:t}));
-    return;
-  }
-  // 没连后端就别自己编一个回复——那正是以前让人分不清"真记住了"和"演出来的"
-  // 的地方。如实说要先连上。
-  toast(i18n('notConnected'));
+  };
+  if(live&&ws&&ws.readyState===1){ send(); return; }   // 已经连着
+  // 还没连：自己连一条（不开麦），连上之后再把这句发出去。以前这里只弹一句
+  // 「未连接」，用户得先去点「开始对话」——打字明明不需要麦克风。
+  goLive({withMic:false}, send);
 });
 
 /* ── 真实后端 ─────────────────────────────────────────────────────── */
@@ -2586,12 +2585,15 @@ function endLive(note){
   aiSpeaking=false; syncButtons(); setVoice('idle');
   if(note) toast(note);
 }
-talkBtn.addEventListener('click',async()=>{
-  if(live){ endLive(i18n('ended')); return; }
-  if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
-    toast(i18n('micUnsupported')); return; }
-  ensurePlayback();               // 必须在这个 click 里建，见 ensurePlayback 注释
-  try{ ws=new WebSocket(WS_URL); }catch(e){ toast(i18n('cantConnect', WS_HOST)); return; }
+/* 连后端。``withMic`` 决定要不要顺手开麦克风。
+   拆开是因为**打字轮根本不需要麦克风**：以前连接只由「开始对话」这一个按钮建，
+   于是页面一打开在输入框里打字回车，只会弹一句「未连接」——框子看着能用，按了
+   没反应。打字本身就是个用户手势，够资格建 AudioContext，所以这条路也能出声。 */
+function goLive({withMic}={withMic:true}, onReady){
+  if(withMic && (!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)){
+    toast(i18n('micUnsupported')); return false; }
+  ensurePlayback();               // 必须在用户手势里建，见 ensurePlayback 注释
+  try{ ws=new WebSocket(WS_URL); }catch(e){ toast(i18n('cantConnect', WS_HOST)); return false; }
   ws.binaryType='arraybuffer';
   ws.onopen=async()=>{
     live=true;
@@ -2601,9 +2603,12 @@ talkBtn.addEventListener('click',async()=>{
     ensureSpaceObj(activeSpace);
     createSession(activeSpace);
     await loadMemories();
-    syncButtons(); setVoice('user');
-    try{ await startMic(); }
-    catch(e){ endLive(i18n('disconnected', i18n('micFailed', e.name))); }
+    syncButtons(); setVoice(withMic?'user':'idle');
+    if(withMic){
+      try{ await startMic(); }
+      catch(e){ endLive(i18n('disconnected', i18n('micFailed', e.name))); return; }
+    }
+    if(onReady) onReady();
   };
   ws.onmessage=ev=>{
     if(ev.data instanceof ArrayBuffer){
@@ -2620,6 +2625,11 @@ talkBtn.addEventListener('click',async()=>{
   };
   ws.onclose=()=>{ endLive(i18n('backendGone')); };
   ws.onerror=()=>{ toast(i18n('cantConnect', WS_HOST)); };
+  return true;
+}
+talkBtn.addEventListener('click',()=>{
+  if(live){ endLive(i18n('ended')); return; }
+  goLive({withMic:true});
 });
 pauseBtn.addEventListener('click',()=>{
   if(!live) return;
