@@ -321,11 +321,11 @@ button{cursor:pointer;background:none;border:none}
 .cmp-mem{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--txt-2);
   cursor:pointer;white-space:nowrap}
 .cmp-ms{font-size:10px;color:var(--txt-3);font-variant-numeric:tabular-nums}
-.cmp-body{flex:1;overflow-y:auto;padding:9px 10px;font-size:13px;line-height:1.62;
+.cmp-body{display:none;flex:1;overflow-y:auto;padding:9px 10px;font-size:13px;line-height:1.62;
   white-space:pre-wrap;word-break:break-word}
 .cmp-body.idle{color:var(--txt-3)}
 .cmp-body.err{color:var(--rose);font-size:12px}
-.cmp-ctx{border:1px solid var(--line);border-radius:var(--radius);
+.cmp-ctx{display:none;border:1px solid var(--line);border-radius:var(--radius);
   background:var(--bg-dark);flex:none}
 .cmp-ctx>summary{padding:6px 10px;font-size:11px;color:var(--txt-2);cursor:pointer;
   list-style:none;display:flex;gap:6px;align-items:center}
@@ -338,6 +338,51 @@ button{cursor:pointer;background:none;border:none}
 .cmp-keys input{background:var(--bg-input);border:1px solid transparent;border-radius:7px;
   padding:3px 7px;font-size:11px;color:var(--txt);min-width:0}
 .cmp-keys input:focus{border-color:var(--line-2);outline:none}
+
+/* ── 右栏上下切：脑图 + 逐轮对照流 ──────────────────────────────────────── */
+.rsplit{display:flex;flex-direction:column;height:100%;min-height:0}
+/* 脑图给固定的 42%：它是背景信息，不该跟着流的长短变高。min-height 保底，
+   窗口很矮时也还看得出是个脑子。 */
+.brainpart{flex:0 0 42%;min-height:220px;position:relative;min-width:0}
+.feedpart{flex:1 1 auto;display:flex;flex-direction:column;min-height:0;
+  border-top:1px solid var(--line)}
+
+/* ── 一轮 = 用户那句 + 两路并排 ─────────────────────────────────────────── */
+.turn{padding:2px 0 10px;border-bottom:1px solid var(--line)}
+.turn-said{display:flex;justify-content:center;margin-bottom:12px}
+.turn-said span{background:var(--bg-input);border-radius:99px;padding:5px 14px;
+  font-size:12.5px;color:var(--txt-2);max-width:76%;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.turn-said b{color:var(--txt-3);font-weight:600;letter-spacing:.06em;
+  font-size:10.5px;margin-right:7px;text-transform:uppercase}
+.turn-cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.tc{border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--bg-panel);overflow:hidden;min-width:0}
+.tc.mem{border-color:rgba(121,215,162,.45)}
+.tc-h{display:flex;align-items:center;gap:8px;padding:6px 10px;
+  border-bottom:1px solid var(--line);background:rgba(255,255,255,.02)}
+.tc-h .who{font-size:10.5px;font-weight:700;letter-spacing:.05em;
+  color:var(--txt-3);text-transform:uppercase;flex:1;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tc.mem .tc-h .who{color:var(--mint)}
+/* TTFB 是主角，总时长次要。看的人感觉到的是「等了多久才出第一个字」。 */
+.tc-h .ttfb{font-size:11px;color:var(--txt);font-variant-numeric:tabular-nums}
+.tc.mem .tc-h .ttfb{color:var(--mint)}
+.tc-h .tot{font-size:10px;color:var(--txt-3);font-variant-numeric:tabular-nums}
+.tc-body{padding:10px 12px;font-size:13px;line-height:1.62;white-space:pre-wrap;
+  word-break:break-word;min-height:44px}
+.tc-body.idle{color:var(--txt-3)}
+.tc-body.err{color:var(--rose);font-size:12px}
+.turn-ctx{margin:10px 0 12px;border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--bg-dark)}
+.turn-ctx>summary{padding:5px 10px;font-size:11px;color:var(--txt-2);cursor:pointer;
+  list-style:none;display:flex;gap:6px;align-items:center}
+.turn-ctx>summary::-webkit-details-marker{display:none}
+.turn-ctx>summary::before{content:'▸';color:var(--txt-3)}
+.turn-ctx[open]>summary::before{content:'▾'}
+.turn-ctx pre{margin:0;padding:0 10px 8px;font-size:11px;line-height:1.55;
+  color:var(--txt-2);white-space:pre-wrap;max-height:20vh;overflow-y:auto}
+@media (max-width:1100px){ .turn-cols{grid-template-columns:1fr} }
 </style>
 </head>
 <body>
@@ -480,15 +525,13 @@ button{cursor:pointer;background:none;border:none}
       </div>
     </div>
 
+    <!-- 上下切：脑图在上（固定高度），下面是逐轮的对照流。原来这里是左右滑动的
+         两屏（chat / brain），只能看一个；而这个 demo 要的恰好是「一边看脑子在
+         哪儿亮，一边往回翻前面几轮」。#chatLog 就是那个流的容器，addTurn() 往里
+         append，所以旧的轮次自己就留在上面了。 -->
     <div class="viewport">
-      <div class="track" id="track">
-        <div class="pane">
-          <div class="chat-head">
-            <span class="ttl" id="chatTitle" data-i18n="newChat">New chat</span>
-          </div>
-          <div class="chat" id="chatLog"></div>
-        </div>
-        <div class="pane">
+      <div class="rsplit">
+        <div class="brainpart">
           <div class="brainwrap" id="brainwrap">
             <img id="brain" alt="" src="./images/background.webp" />
             <canvas id="fx"></canvas>
@@ -502,6 +545,12 @@ button{cursor:pointer;background:none;border:none}
               <div class="ft"><span id="c-src">—</span></div>
             </div>
           </div>
+        </div>
+        <div class="feedpart">
+          <div class="chat-head">
+            <span class="ttl" id="chatTitle" data-i18n="newChat">New chat</span>
+          </div>
+          <div class="chat" id="chatLog"></div>
         </div>
       </div>
     </div>
@@ -1509,7 +1558,9 @@ function renderCmp(){
     if(st.err){ el.className='cmp-body err'; el.textContent=st.err; }
     else if(st.text){ el.className='cmp-body'; el.textContent=st.text; }
     else { el.className='cmp-body idle'; el.textContent=i18n('cmpWaiting'); }
-    $('cmpMs'+u).textContent=st.ms?st.ms+'ms':'';
+    // TTFB 优先：总时长跟着答案长短走，话多的那一路看着更慢，哪怕它先开口。
+    $('cmpMs'+u).textContent = (st.ttfb!==undefined&&st.ttfb!==null) ? st.ttfb+'ms'
+                             : (st.ms?st.ms+'ms':'');
   }
   // 注入的原文照抄给用户看。"记忆帮了什么"只有看见那几行才说得清。
   $('cmpCtx').textContent=CMP.ctx||i18n('cmpCtxEmpty');
@@ -1536,6 +1587,89 @@ for(const u of ['A','B']){
   $('cmpMem'+u).addEventListener('change',()=>cmpPost(CMP.on));
   for(const f of ['cmpModel','cmpUrl','cmpKey'])
     $(f+u).addEventListener('change',()=>cmpPost(CMP.on));
+}
+
+
+/* ── 逐轮对照流（右栏下半）────────────────────────────────────────────────
+   以前只有中栏那两格，永远只显示**最后一轮**——上一轮说了什么、两路当时怎么
+   答的，说完就没了，没法往回翻。现在每一轮往 #chatLog append 一块：用户那句
+   居中，下面两路并排，各自带 TTFB。旧的轮次留在上面，往上滚就能看。 */
+let FEED=null;                     // 当前这一轮的 DOM 引用
+
+function feedNewTurn(said){
+  const box=$('chatLog'); if(!box) return null;
+  const wrap=document.createElement('div'); wrap.className='turn';
+
+  const line=document.createElement('div'); line.className='turn-said';
+  const bub=document.createElement('span');
+  const tag=document.createElement('b'); tag.textContent=i18n('you');
+  bub.append(tag, document.createTextNode(said||''));
+  bub.title=said||'';
+  line.appendChild(bub); wrap.appendChild(line);
+
+  const cols=document.createElement('div'); cols.className='turn-cols';
+  const cards={};
+  for(const panel of ['a','b']){
+    const card=document.createElement('div'); card.className='tc';
+    const h=document.createElement('div'); h.className='tc-h';
+    const who=document.createElement('span'); who.className='who';
+    const ttfb=document.createElement('span'); ttfb.className='ttfb';
+    const tot=document.createElement('span'); tot.className='tot';
+    h.append(who,ttfb,tot);
+    const body=document.createElement('div');
+    body.className='tc-body idle'; body.textContent=i18n('cmpWaiting');
+    card.append(h,body); cols.appendChild(card);
+    cards[panel]={card,who,ttfb,tot,body,text:''};
+  }
+  wrap.appendChild(cols);
+
+  const det=document.createElement('details'); det.className='turn-ctx';
+  const sum=document.createElement('summary');
+  const lbl=document.createElement('span'); lbl.textContent=i18n('cmpCtx');
+  const cnt=document.createElement('span'); cnt.className='tot';
+  sum.append(lbl,cnt);
+  const pre=document.createElement('pre');
+  det.append(sum,pre); wrap.appendChild(det);
+
+  box.appendChild(wrap);
+  box.scrollTop=box.scrollHeight;
+  return {wrap,cards,ctxCount:cnt,ctxPre:pre,ctxDet:det};
+}
+
+function feedCtx(text){
+  if(!FEED) return;
+  FEED.ctxPre.textContent=text||i18n('cmpCtxEmpty');
+  FEED.ctxCount.textContent=text?(text.length+' chars'):'';
+}
+
+function feedStart(panel,memory){
+  if(!FEED||!FEED.cards[panel]) return;
+  const c=FEED.cards[panel];
+  c.text=''; c.body.className='tc-body idle'; c.body.textContent=i18n('cmpWaiting');
+  c.ttfb.textContent=''; c.tot.textContent='';
+  // 标题跟着服务端说的这一路有没有记忆走，跟中栏那两格同一个道理
+  c.who.textContent=i18n(memory?'cmpWith':'cmpWithout');
+  c.card.classList.toggle('mem',!!memory);
+}
+
+function feedDelta(panel,text,ttfb){
+  if(!FEED||!FEED.cards[panel]) return;
+  const c=FEED.cards[panel], box=$('chatLog');
+  const atBottom = box && (box.scrollHeight-box.scrollTop-box.clientHeight < 60);
+  c.text+=(text||'');
+  c.body.className='tc-body'; c.body.textContent=c.text;
+  if(ttfb!==undefined && ttfb!==null) c.ttfb.textContent=ttfb+'ms';
+  // 只有本来就贴着底的时候才跟着滚。用户往上翻着看旧轮次时把他拽回来最烦人。
+  if(atBottom && box) box.scrollTop=box.scrollHeight;
+}
+
+function feedDone(panel,m){
+  if(!FEED||!FEED.cards[panel]) return;
+  const c=FEED.cards[panel];
+  if(m.error){ c.body.className='tc-body err'; c.body.textContent=m.error; }
+  else if(m.text){ c.body.className='tc-body'; c.body.textContent=m.text; c.text=m.text; }
+  if(m.ttfb!==undefined && m.ttfb!==null) c.ttfb.textContent=m.ttfb+'ms';
+  if(m.ms!==undefined) c.tot.textContent='· '+m.ms+'ms total';
 }
 
 function renderAll(){
@@ -1574,12 +1708,9 @@ $('btnNew').addEventListener('click',()=>{
   $('textIn').focus();
 });
 
-/* ── Chat / Memory Space 滑块 ─────────────────────────────────────── */
-/* Chat / Memory Space 的切换删了：右栏只做脑图。对照面板已经把两路回复都摊在
-   中栏了，右边再放一份聊天记录就是同一件事的第三个副本。会话列表还在左侧栏。
-   .track 本来是两屏横向滑动的容器，这里直接钉在第二屏。 */
-const track=$('track');
-track.classList.add('mem');
+/* ── 右栏 ─────────────────────────────────────────────────────────── */
+/* 横向滑动的两屏（.track）换成了上下切：脑图在上、对照流在下，两个都常驻，
+   所以不再需要切换控件，也不需要把容器钉在某一屏。 */
 setTimeout(window.VMBrain.resize,60);
 
 /* ── 导出 ─────────────────────────────────────────────────────────── */
@@ -2214,7 +2345,10 @@ function handle(m){
       // 不清的话，说一句抽不出东西的话（「啦啦啦」），标签栏还挂着上一句的实体。
       s.ui.tags={emo:'',ent:'',sch:''};
       lvOn=false; s.ui.input=m.text; paint(s);
-      addTurn(s,'user',m.text,s.ui.speaker||i18n('you'));
+      // 对照模式下不再往流里塞单条用户气泡：feedNewTurn 里那句居中的就是它，
+      // 两份会重复。非对照模式（关掉 A/B）还是老样子。
+      if(CMP.on) FEED=feedNewTurn(m.text);
+      else addTurn(s,'user',m.text,s.ui.speaker||i18n('you'));
       window.VMBrain.think([]);          // 检索结果还没回来，先让脑子动起来
       break;
 
@@ -2262,7 +2396,12 @@ function handle(m){
 
     case 'cmp_ctx':
       // 一轮的开头。两路的 cmp_start 紧跟在后面，所以在这儿清上一轮。
-      cmpReset(); CMP.ctx=m.context||''; renderCmp(); break;
+      cmpReset(); CMP.ctx=m.context||''; renderCmp();
+      // 打字轮没有 user_transcript 在前面时（比如后端直接发了 cmp_ctx），
+      // 这里补开一块，否则这一轮的两路无处可去。
+      if(!FEED) FEED=feedNewTurn(currentSession()?currentSession().ui.input:'');
+      feedCtx(CMP.ctx);
+      break;
 
     case 'cmp_start': {
       const st=CMP[m.panel];
@@ -2274,18 +2413,20 @@ function handle(m){
       // 而这个 demo 的全部意义就是让人相信屏幕上那两栏。
       if($('cmpMem'+m.panel.toUpperCase()))
         $('cmpMem'+m.panel.toUpperCase()).checked=!!m.memory;
-      renderCmp(); break;
+      renderCmp(); feedStart(m.panel,!!m.memory); break;
     }
 
     case 'cmp_delta': {
-      const st=CMP[m.panel]; if(st) st.text+=(m.text||'');
-      renderCmp(); break;
+      const st=CMP[m.panel];
+      if(st){ st.text+=(m.text||''); if(m.ttfb!==undefined) st.ttfb=m.ttfb; }
+      renderCmp(); feedDelta(m.panel,m.text,m.ttfb); break;
     }
 
     case 'cmp_done': {
       const st=CMP[m.panel];
-      if(st){ st.text=m.text||st.text; st.ms=m.ms||0; st.err=m.error||''; }
-      renderCmp(); break;
+      if(st){ st.text=m.text||st.text; st.ms=m.ms||0; st.err=m.error||'';
+              if(m.ttfb!==undefined) st.ttfb=m.ttfb; }
+      renderCmp(); feedDone(m.panel,m); break;
     }
 
     case 'answer_pause':

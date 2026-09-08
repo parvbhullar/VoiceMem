@@ -106,6 +106,52 @@ class StreamingTest(unittest.TestCase):
         self.assertEqual([m["memory"] for m in starts if m["panel"] == "b"], [False])
 
 
+class TtfbTest(unittest.TestCase):
+    """Time to first token, per arm.
+
+    Total time is the wrong number to show in a voice demo: it grows with how
+    long the answer is, so a chatty arm looks slower than a terse one even when
+    it started speaking first. What the listener actually feels is the wait
+    before the first word.
+    """
+
+    def test_first_delta_carries_the_ttfb(self):
+        arms = (Arm("a", memory=True), Arm("b", memory=False))
+
+        _, sent = _run(arms, {"a": _provider(["one", "two", "three"]),
+                              "b": _provider(["x"])})
+
+        deltas_a = [m for m in sent if m["type"] == "cmp_delta" and m["panel"] == "a"]
+        self.assertIn("ttfb", deltas_a[0], "first delta must announce ttfb")
+        self.assertNotIn("ttfb", deltas_a[1], "later deltas must not repeat it")
+        self.assertNotIn("ttfb", deltas_a[2])
+
+    def test_done_reports_both_ttfb_and_total(self):
+        arms = (Arm("a", memory=True), Arm("b", memory=False))
+
+        result, sent = _run(arms, {"a": _provider(["one", "two"]),
+                                   "b": _provider(["y"])})
+
+        done_a = next(m for m in sent if m["type"] == "cmp_done" and m["panel"] == "a")
+        self.assertIn("ttfb", done_a)
+        self.assertIn("ms", done_a)
+        self.assertLessEqual(done_a["ttfb"], done_a["ms"])
+        self.assertIn("a", result["ttfb_ms"])
+        self.assertIn("b", result["ttfb_ms"])
+
+    def test_an_arm_that_produced_nothing_reports_no_ttfb(self):
+        """Never invent a number for a turn that never started."""
+        arms = (Arm("a", memory=True), Arm("b", memory=False))
+
+        result, sent = _run(arms, {"a": _provider(["x"], fail_after=0),
+                                   "b": _provider(["ok"])})
+
+        done_a = next(m for m in sent if m["type"] == "cmp_done" and m["panel"] == "a")
+        self.assertIsNone(done_a.get("ttfb"))
+        self.assertIsNone(result["ttfb_ms"].get("a"))
+        self.assertIsNotNone(result["ttfb_ms"]["b"])
+
+
 class ArmFailureTest(unittest.TestCase):
     def test_one_arm_failing_does_not_stop_the_other(self):
         arms = (Arm("a", memory=True), Arm("b", memory=False))

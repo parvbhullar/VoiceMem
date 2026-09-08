@@ -192,11 +192,19 @@ async def _run_arm(arm: Arm, text: str, memory_context: str, send, provider) -> 
                 "model": arm.model, "memory": arm.memory})
     ctx = context_for(arm, memory_context)
     started = time.monotonic()
-    reply, error = "", ""
+    reply, error, ttfb = "", "", None
     try:
         async for delta in provider(arm)(text, ctx):
+            msg = {"type": "cmp_delta", "panel": arm.label, "text": delta}
+            if ttfb is None:
+                # 到第一个字的时间。总时长是个误导人的数字——它跟着答案长短走，
+                # 话多的那一路看起来更慢，哪怕它先开的口。听的人感觉到的是
+                # 「等了多久才出第一个字」，所以第一个 delta 就把它带上，
+                # UI 不用等这一路说完才能显示。
+                ttfb = int((time.monotonic() - started) * 1000)
+                msg["ttfb"] = ttfb
             reply += delta
-            await send({"type": "cmp_delta", "panel": arm.label, "text": delta})
+            await send(msg)
     except asyncio.CancelledError:
         raise
     except Exception as e:  # noqa: BLE001 -- surfaced to the panel, not raised
@@ -205,18 +213,23 @@ async def _run_arm(arm: Arm, text: str, memory_context: str, send, provider) -> 
         error = f"{type(e).__name__}: {e}"
         print(f"[compare] panel {arm.label} failed: {error}", flush=True)
     ms = int((time.monotonic() - started) * 1000)
-    done = {"type": "cmp_done", "panel": arm.label, "text": reply, "ms": ms}
+    # ttfb 为 None = 这一路一个字都没吐出来。别编个数字填上：0 会被读成
+    # 「快到零毫秒」，而真相是它根本没开口。
+    done = {"type": "cmp_done", "panel": arm.label, "text": reply,
+            "ms": ms, "ttfb": ttfb}
     if error:
         done["error"] = error
     await send(done)
-    return {"label": arm.label, "text": reply, "ms": ms, "error": error}
+    return {"label": arm.label, "text": reply, "ms": ms, "ttfb": ttfb, "error": error}
 
 
 async def fan_out(text: str, memory_context: str, arms: tuple[Arm, Arm], send,
                   system: str = "", provider=None) -> dict:
     """Run both arms concurrently, streaming ``cmp_*`` messages as tokens land.
 
-    Returns ``{"a": reply, "b": reply, "latency_ms": {...}, "errors": {...}}``.
+    Returns ``{"a": reply, "b": reply, "latency_ms": {...}, "ttfb_ms": {...},
+    "errors": {...}}``. A ``ttfb_ms`` entry is ``None`` for an arm that produced
+    no text at all.
     ``errors`` holds only the panels that failed, so ``not result["errors"]``
     means a clean turn and ``len(...) == 2`` means nothing was generated.
     """
@@ -234,10 +247,11 @@ async def fan_out(text: str, memory_context: str, arms: tuple[Arm, Arm], send,
             raise o
     outcomes = settled
 
-    result: dict = {"latency_ms": {}, "errors": {}}
+    result: dict = {"latency_ms": {}, "ttfb_ms": {}, "errors": {}}
     for o in outcomes:
         result[o["label"]] = o["text"]
         result["latency_ms"][o["label"]] = o["ms"]
+        result["ttfb_ms"][o["label"]] = o["ttfb"]
         if o["error"]:
             result["errors"][o["label"]] = o["error"]
     if len(result["errors"]) == len(arms):
