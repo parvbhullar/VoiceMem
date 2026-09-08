@@ -165,13 +165,15 @@ class FunASRStreamingASR:
 
 
 class Transcriber:
-    """SenseVoiceSmall 出最终文本（中英），比流式 ASR 更准，锁定一轮时用这个。
+    """SenseVoiceSmall produces the final text (zh/en). More accurate than the
+    streaming ASR, so it is used once a turn is locked in.
 
-    ``language`` 默认 ``auto``（也可用 ``VOICEMEM_ASR_LANGUAGE`` 配）。之前写死
-    ``zh``：SenseVoice 是多语模型，被钉在中文上时英文语音会被硬塞成汉字——
-    实测说 "hello how are you" 转出来是「你不知道还lohow areyou」。转错的文本
-    接着进抽取和检索，后面一路都是垃圾。SenseVoice 认的值：auto / zh / en /
-    yue / ja / ko / nospeech。"""
+    ``language`` defaults to ``auto`` (or set ``VOICEMEM_ASR_LANGUAGE``). It used
+    to be hardcoded to ``zh``: SenseVoice is multilingual, and pinned to Chinese
+    it forces English speech into Chinese characters -- saying "hello how are
+    you" came back as 你不知道还lohow areyou. That wrong transcript then goes
+    into extraction and retrieval, so everything downstream is garbage.
+    SenseVoice accepts auto / zh / en / yue / ja / ko / nospeech."""
 
     def __init__(self, device: str, language: str = "") -> None:
         self.language = (language
@@ -203,10 +205,11 @@ class Transcriber:
         return re.sub(r"<\|[^|]*\|>", "", raw).strip(), emotion
 
 
-# ── API 流式 ASR：不下模型，走 OpenAI 兼容的转写接口 ────────────────────────────
+# ── API streaming ASR: no local model, an OpenAI-compatible transcription endpoint ──
 
 def _wav_bytes(samples, rate: int = SAMPLE_RATE) -> bytes:
-    """float32 [-1,1] → 内存里的 16-bit WAV。转写接口要的是文件，不是裸 PCM。"""
+    """float32 [-1,1] -> a 16-bit WAV in memory. The transcription endpoint
+    wants a file, not raw PCM."""
     import io
     import wave
     pcm = (np.clip(np.asarray(samples, dtype=np.float32), -1.0, 1.0) * 32767).astype(np.int16)
@@ -220,22 +223,29 @@ def _wav_bytes(samples, rate: int = SAMPLE_RATE) -> bytes:
 
 
 class OpenAIStreamingASR:
-    """转写走 API，本地一个模型都不下。``VOICEMEM_ASR=openai`` 时启用。
+    """Transcription over the API, with no local model at all. Enabled by
+    ``VOICEMEM_ASR=openai``.
 
-    为什么不是"攒完一轮再转一次"：``stream.py`` 判「说完了」的条件里有
-    ``self._text.strip()``——``feed()`` 一直返回空串的话这一轮永远不会结束，
-    ``flush()`` 也就永远不会被调用。而且投机预取吃的就是 partial 文本，没有
-    partial 就等于把这个 demo 的核心（说到一半就把记忆搜好）关掉了。
+    Why not "buffer the whole turn and transcribe once": the end-of-turn check
+    in ``stream.py`` is gated on ``self._text.strip()``, so an ASR whose
+    ``feed()`` keeps returning "" would never let a turn finish and ``flush()``
+    would never be called. And the speculative prefetch eats the partial text --
+    without partials the core of this demo (having the memory searched before
+    you stop talking) is switched off.
 
-    所以 partial 也走网络，但**同时只允许一个请求在飞**（single-flight）：
-    ``feed()`` 立刻返回上一次已经拿到的文本，新请求在后台线程里跑，回来了下一次
-    ``feed()`` 就能看到。说话人还在说的时候，这条路是完全非阻塞的。
+    So partials go over the network too, but **only one request is ever in
+    flight** (single-flight): ``feed()`` returns the text it already has and the
+    new request runs on a background thread, visible to the next ``feed()``.
+    While the speaker is still talking this path never blocks.
 
-    ``flush()`` 是唯一一次同步等待：那一次的结果就是这一轮的最终文本。
+    ``flush()`` is the one synchronous wait, and its result is the turn's final
+    text.
 
-    代价说清楚：每 ``partial_every_s`` 秒一次网络请求（默认 0.9s，单飞所以慢的
-    时候自动降频），加收尾一次。多语言、自动判语种，中文/英文/印地语都能转——
-    这正是本地那两个模型做不到的地方。
+    The cost, plainly: one request per ``partial_every_s`` seconds (0.9s by
+    default, and single-flight means it throttles itself when the network is
+    slow), plus one at the end. In exchange it is multilingual with automatic
+    detection -- Chinese, English, Hindi -- which is exactly what the two local
+    models cannot do.
     """
 
     def __init__(self, model: str = "", language: str = "",
@@ -249,7 +259,7 @@ class OpenAIStreamingASR:
         self._lock = threading.Lock()
         self.reset()
 
-    # ── 网络那一半 ───────────────────────────────────────────────────────────
+    # ── the network half ─────────────────────────────────────────────────────
     def _api_transcribe(self, wav: bytes) -> str:
         if self._client is None:
             from openai import OpenAI
@@ -262,8 +272,9 @@ class OpenAIStreamingASR:
         return (getattr(r, "text", "") or "").strip()
 
     def _run(self, audio) -> None:
-        """后台线程：转写当前缓冲，成功了就更新 _text。失败不抛——一次 partial
-        丢了没关系，flush() 还会再转一次完整的。"""
+        """Background thread: transcribe the current buffer and update _text on
+        success. Never raises -- losing one partial is fine, flush() will
+        transcribe the whole thing again anyway."""
         try:
             text = self._transcribe(_wav_bytes(audio))
         except Exception as e:                       # noqa: BLE001
@@ -273,7 +284,7 @@ class OpenAIStreamingASR:
             if text:
                 self._text = text
 
-    # ── 流式接口（跟另外两个 ASR 一致）────────────────────────────────────────
+    # ── streaming interface (same shape as the other two ASRs) ───────────────
     def feed(self, samples) -> str:
         self._buf.append(np.asarray(samples, dtype=np.float32))
         self._n += len(samples)
@@ -288,7 +299,7 @@ class OpenAIStreamingASR:
             return self._text
 
     def flush(self) -> str:
-        """这一轮的最终文本。唯一一次同步等待。"""
+        """The turn's final text. The one synchronous wait."""
         if not self._buf:
             return self._text
         audio = np.concatenate(self._buf)
@@ -305,14 +316,18 @@ class OpenAIStreamingASR:
         return self._text
 
     def warmup(self) -> None:
-        """把第一次网络调用的开销挪到启动时。
+        """Move the cost of the first network call to startup.
 
-        实测：进程里第一次转写 ~2.0s，之后每次 ~0.65s。差的那一秒半全落在
-        用户说的**第一句**上——而第一句恰好决定了这个 demo 给人的快慢印象。
-        DNS、TLS、client 构造都在这一秒半里，发一段静音就能把它们付掉。
+        Measured: the first transcription in a process takes ~2.0s against
+        ~0.65s for every one after it. That second and a half lands on the
+        user's **first sentence** -- the one that decides whether this demo
+        feels fast. DNS, TLS and client construction are all in it, and sending
+        a moment of silence pays for them.
 
-        失败不抛：预热是优化，不该让服务起不来（开机时没网也照样能起）。
-        而且就算服务端拒了这段静音，TLS 和连接也已经建好了，目的照样达成。
+        Never raises: warmup is an optimisation and must not stop the server
+        from starting (no network at boot should still boot). And even if the
+        server rejects the silence, the TLS handshake and connection are already
+        established, which is the point.
         """
         try:
             self._transcribe(_wav_bytes(np.zeros(int(0.3 * SAMPLE_RATE),
@@ -320,8 +335,9 @@ class OpenAIStreamingASR:
         except Exception as e:  # noqa: BLE001
             print(f"[asr] 预热失败（忽略）：{type(e).__name__}: {e}", flush=True)
         finally:
-            # 预热的结果绝不能留在 _text 里，否则第一轮开口前就已经有文本了,
-            # stream.py 会拿它当成用户说了话。
+            # The warmup result must never stay in _text: otherwise there is
+            # already text before the first turn begins, and stream.py reads
+            # that as the user having spoken.
             self.reset()
 
     def reset(self) -> None:

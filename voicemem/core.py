@@ -194,7 +194,7 @@ class VoiceMem:
             done[0] += 1
             draw(label if done[0] < total else "models ready", finished=True)
 
-        step("embedding / slot 分类", lambda: self.classify("你好"))
+        step("embedding / slot classifier", lambda: self.classify("hello"))
         if not audio:
             return
 

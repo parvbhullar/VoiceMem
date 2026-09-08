@@ -197,10 +197,11 @@ async def _run_arm(arm: Arm, text: str, memory_context: str, send, provider) -> 
         async for delta in provider(arm)(text, ctx):
             msg = {"type": "cmp_delta", "panel": arm.label, "text": delta}
             if ttfb is None:
-                # 到第一个字的时间。总时长是个误导人的数字——它跟着答案长短走，
-                # 话多的那一路看起来更慢，哪怕它先开的口。听的人感觉到的是
-                # 「等了多久才出第一个字」，所以第一个 delta 就把它带上，
-                # UI 不用等这一路说完才能显示。
+                # Time to first token. Total time is a misleading number: it
+                # tracks how long the answer is, so the chattier arm looks
+                # slower even when it started speaking first. What a listener
+                # feels is the wait before the first word, so it rides along on
+                # the first delta and the UI need not wait for the arm to finish.
                 ttfb = int((time.monotonic() - started) * 1000)
                 msg["ttfb"] = ttfb
             reply += delta
@@ -213,8 +214,8 @@ async def _run_arm(arm: Arm, text: str, memory_context: str, send, provider) -> 
         error = f"{type(e).__name__}: {e}"
         print(f"[compare] panel {arm.label} failed: {error}", flush=True)
     ms = int((time.monotonic() - started) * 1000)
-    # ttfb 为 None = 这一路一个字都没吐出来。别编个数字填上：0 会被读成
-    # 「快到零毫秒」，而真相是它根本没开口。
+    # ttfb is None when this arm produced no text at all. Do not invent a
+    # number for it: 0 reads as "instant" when the truth is it never spoke.
     done = {"type": "cmp_done", "panel": arm.label, "text": reply,
             "ms": ms, "ttfb": ttfb}
     if error:

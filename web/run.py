@@ -298,12 +298,14 @@ def set_lang(lang: str) -> None:
 
 
 def _lang_note() -> str:
-    """助手**说**什么语言。
+    """What language the assistant **speaks**.
 
-    回落链：界面语言 → 空间语言 → en。界面语言优先是刻意的：说什么语言是每轮
-    都能改的（右上角一点就换），而**存**什么语言是库的属性、建库时定死（见
-    SPACE_LANG）。印地语就是这么支持的——回复走印地语，记忆仍按空间语言抽取
-    （voicemem/lang.py 的 SUPPORTED 只有 en/zh），一个库里不会中印英混存。
+    Fallback chain: UI language -> space language -> en. UI first is deliberate:
+    what it speaks is switchable every turn (one click, top right), while what
+    gets **stored** is a property of the library, fixed when it was created (see
+    SPACE_LANG). That is how Hindi is supported -- replies come out in Hindi
+    while memory is still extracted in the space's language (voicemem/lang.py
+    only SUPPORTS en/zh), so one library never mixes scripts.
     """
     return _LANG_NOTE.get(UI_LANG) or _LANG_NOTE.get(SPACE_LANG) or _LANG_NOTE["en"]
 
@@ -1003,9 +1005,11 @@ if ARGS.config:
 
 REPLY = CONFIG.get("reply")                           # 传给 utils 的回复函数
 
-#: A/B 对照的开关与两路配置（GET/POST /api/compare）。默认关；开了之后这一轮
-#: 不出声，两个面板并排出字——同一句话、同一份检索结果，只差 memory_context
-#: 注不注入。用户自己看差别（没有裁判，是刻意的）。
+#: The A/B compare switch and the two arms' config (GET/POST /api/compare).
+#: When on, the turn produces no audio and both panels stream text side by
+#: side -- same utterance, same retrieval result, differing only in whether
+#: memory_context was injected. The viewer judges; there is no automated judge,
+#: and that is deliberate.
 COMPARE = compare.CompareState()
 
 
@@ -1374,16 +1378,20 @@ def fill_tags(payload: dict, text: str, audio_path: str = "",
 
 
 async def _announce_turn(pending, send) -> None:
-    """一轮开场：转写 + 这轮命中的记忆 + 后台补声学情绪。
+    """Turn opening: transcript + the memories hit this turn + acoustic emotion
+    in the background.
 
-    三条控制流（llm_tts / realtime / 对照）说完同样这几句，所以收在一处——
-    之前是两份逐字重复的拷贝，加第三条时正好该合。
+    All three control flows (llm_tts / realtime / compare) say the same few
+    things, so they live in one place -- there used to be two verbatim copies,
+    and adding a third was the moment to merge them.
 
-    声学情绪**不在这儿算**。它要 2.3 秒（emotion2vec 跑整段音频），而这几行是
-    用户说完到助手开口之间最要紧的一段——实测这一步就吃掉了 4.5 秒里的一半，
-    算完还常常因为"把握不够"被丢掉，纯浪费。
-    先用文本语义那份（毫秒级）把标签发出去，声学放后台跑，可信了再补一条
-    tag_update 覆盖 UI 上的情绪。
+    Acoustic emotion is **not** computed here. It takes 2.3s (emotion2vec runs
+    the whole clip), and these lines sit in the most sensitive stretch there is:
+    between the user finishing and the assistant starting. Measured, that step
+    alone ate half of a 4.5s gap, and the result was often discarded for low
+    confidence anyway -- pure waste. Send the millisecond-level semantic label
+    now, run the acoustic one in the background, and issue a tag_update to
+    override the emotion in the UI only once it is trustworthy.
     """
     await send({"type": "user_transcript", "text": pending.text})
     note_hits(pending.result)      # 让脑图快照保证这几条在图上
@@ -1395,10 +1403,13 @@ async def _announce_turn(pending, send) -> None:
 
 
 async def _compare_shared_system(pending, context_session: str, context_space: str) -> str:
-    """两路面板**共用**的 system：人设 + 语言 + 会话历史。
+    """The system prompt **shared** by both panels: persona + language + session
+    history.
 
-    只有 memory_context 一路一路不同——那才是要对照的变量。人设/语言/历史如果
-    两边不一致，屏幕上的差别就不只是「有没有记忆」了，这个对照就不作数。
+    Only memory_context differs per arm -- that is the variable under test. If
+    persona, language or history differed between the two, the difference on
+    screen would no longer be "with or without memory", and the comparison
+    would not count.
     """
     parts = [_RT_PERSONA]
     if pending.stranger:
@@ -1413,20 +1424,24 @@ async def _compare_shared_system(pending, context_session: str, context_space: s
 
 async def _compare_turn(pending, send, owner, timeline=None, context_session="",
                         context_space="") -> dict:
-    """对照这一轮：同一句话喂两路，一路注入记忆一路不注入，并排出字。
+    """Compare this turn: one utterance to two arms, one with memory injected
+    and one without, streaming side by side.
 
-    不出声（TTS 整条跳过），也不发 answer_*——前端那套字幕/播放是绑在播放时钟上的，
-    对照模式走自己的 cmp_* 消息，那边一行不用改。
+    No audio (the whole TTS path is skipped) and no answer_* messages -- the
+    frontend's caption and playback machinery is tied to the playback clock, so
+    compare mode uses its own cmp_* messages and that code needs no changes.
 
-    记忆**只写一次**，走原来的 queue_remember_turn，拿 a 面板的回复。两路都挂了也
-    照样 ingest（agent_reply 为空）：用户刚说的那句话里的事实不该因为一个坏 key
-    就丢掉。
+    Memory is written **once**, through the existing queue_remember_turn, using
+    panel a's reply. Even when both arms fail the turn is still ingested (with
+    an empty agent_reply): the facts in what the user just said should not be
+    lost to one bad key.
     """
     context_space = context_space or ACTIVE_SPACE
     memory_vm = get_space(context_space)
     system = await _compare_shared_system(pending, context_session, context_space)
-    # 陌生人那一轮不注入任何记忆（这库的主人不是他），两路就都拿不到——没得对照，
-    # 但也不能把主人的记忆念给陌生人听。
+    # A stranger's turn gets no memory injected at all (they are not this
+    # library's owner), so neither arm has any -- nothing to compare, but the
+    # owner's memories must not be read out to someone else either.
     mem_ctx = "" if pending.stranger else (pending.memory_context or "")
     result = await compare.fan_out(pending.text, mem_ctx, COMPARE.arms, send,
                                    system=system)
@@ -1436,8 +1451,9 @@ async def _compare_turn(pending, send, owner, timeline=None, context_session="",
     queue_remember_turn(pending, reply, owner, history_turn_id,
                         memory_vm=memory_vm)
     if timeline is not None:
-        # 这一轮没有音频，但上下文确实存了。不置位的话时间线那边会以为本轮的
-        # 上下文丢了（见 llm_tts 收尾处同一行）。
+        # No audio this turn, but the context really was saved. Without this
+        # flag the timeline concludes the turn's context was lost (same line at
+        # the end of the llm_tts path).
         timeline.context_saved = True
     return result
 
@@ -1462,8 +1478,8 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, timeline,
         _note_replay(pending.replay)
         await send({"type": "play_memory", "memory_id": pending.replay})
     if COMPARE.enabled:
-        # answer_start 之前就分岔：那条消息会重置前端播放、把 aiSpeaking 置真，
-        # 而对照这一轮根本不出声。
+        # Branch before answer_start: that message resets the frontend's
+        # playback and sets aiSpeaking, and a compare turn makes no sound.
         await _compare_turn(pending, send, owner, timeline,
                             context_session=context_session,
                             context_space=context_space)
@@ -1667,9 +1683,11 @@ async def start_realtime_turn(pending, conn, send, timeline,
     else:
         await conn.conversation.item.create(item={"type": "message", "role": "user",
                                                   "content": [{"type": "input_text", "text": pending.text}]})
-    # 记忆走 response.create 的 per-response instructions，不是 session.update。
-    # 后者是会话级设置，实测更新完模型这一轮根本读不到（问"我的猫叫什么"，库里
-    # 明明检索到了"叫墨墨"，模型还答"你刚提过但我没听清"）。
+    # Memory goes in response.create's per-response instructions, not
+    # session.update. That one is a session-level setting and the model does not
+    # read it for the turn you just set it on: asked "what is my cat called?"
+    # with "her name is Momo" sitting in the retrieved memory, it still answered
+    # "you just mentioned it but I did not catch it".
     print(f"[lat] local VAD confirmed end of speech -> response.create", flush=True)
     await conn.response.create(response={
         "instructions": _realtime_instructions(pending.memory_context, pending.stranger,
@@ -2658,8 +2676,10 @@ async def realtime_session(sock):
                     try:
                         await asyncio.wait_for(response_idle.wait(), timeout=2.0)
                     except asyncio.TimeoutError:
-                        # 本地播放已停止；下一轮继续等待 done/cancelled 事件。
-                        print("[barge] 等待 Realtime 取消确认超时，下一轮暂缓创建", flush=True)
+                        # Local playback has already stopped; the next turn
+                        # keeps waiting for the done/cancelled event.
+                        print("[barge] timed out waiting for Realtime to confirm "
+                              "the cancel; holding off on the next turn", flush=True)
 
             pump_task = asyncio.create_task(pump())
             try:
@@ -2682,11 +2702,14 @@ async def realtime_session(sock):
                             print("[barge] 等旧 response 退出后再创建下一轮", flush=True)
                         await response_idle.wait()
                     if COMPARE.enabled:
-                        # realtime 是**一条**音频流，两路面板装不进去，所以这一轮
-                        # 改走 chat-completions 的扇出（不出声）。
-                        # 缓冲里那段麦克风音频必须清掉：realtime 连接是常驻的，
-                        # 不 commit 也不 clear 的话它会一直攒着，等哪一轮关掉对照
-                        # 再 commit，前面攒的几轮会一起被念出来。
+                        # realtime is **one** audio stream and cannot carry two
+                        # panels, so this turn goes through the
+                        # chat-completions fan-out instead (silent).
+                        # The mic audio in the buffer must be cleared: the
+                        # realtime connection is long-lived, and audio that is
+                        # neither committed nor cleared keeps piling up -- the
+                        # next commit after compare is switched off would speak
+                        # several earlier turns at once.
                         await conn.input_audio_buffer.clear()
                         await _announce_turn(pending, sock.send_json)
                         await _compare_turn(pending, sock.send_json, owner,
@@ -3238,14 +3261,18 @@ app = utils.build_app(MODE, realtime_session if MODE == "realtime" else llm_tts_
 
 
 def _warm_network() -> None:
-    """把走网络那两条路的第一次调用挪到启动时。
+    """Move the first call on both network paths to startup.
 
-    本地模型上面已经预热了，可是**网络**那两条还是凉的：回复模型和转写接口。
-    实测第一次 ~2.0s，之后 ~0.65s——那一秒半全落在用户说的第一句上，而第一句
-    恰好决定这个 demo 给人的快慢印象。付掉的是 DNS + TLS + client 构造。
+    The local models are warmed above, but the two **network** paths are still
+    cold: the reply model and the transcription endpoint. Measured, the first
+    call is ~2.0s against ~0.65s after -- that second and a half lands on the
+    user's first sentence, the one that decides whether this demo feels fast.
+    What it pays for is DNS + TLS + client construction.
 
-    两条并行发，各自失败都只打印不抛：预热是优化，没网也该能把服务起起来。
-    花的钱可以忽略（回复那条 max_tokens=1，转写那条是 0.3s 静音）。
+    Both fire in parallel and each only prints on failure rather than raising:
+    warmup is an optimisation, and no network at boot should still boot. The
+    cost is negligible (one token from the reply model, 0.3s of silence for
+    transcription).
     """
     import asyncio as _aio
 
@@ -3276,10 +3303,12 @@ def _warm_network() -> None:
 if __name__ == "__main__":
     print(f"[web] mode={MODE} spec>={SPEC_MIN_CHARS} chars gamble={ARGS.gamble_ms}ms "
           f"confirm={ARGS.confirm_ms}ms -> http://localhost:{ARGS.port}/", flush=True)
-    # 全部预热在这儿做完，别让第一句话去等模型加载。ASR(FunASR paraformer)
-    # 是懒加载的，等用户开口才拉起来要好几秒——那几秒的音频堆在 socket 缓冲里，
-    # 追赶时逐帧喂 VAD，静音会瞬间累计过 confirm_ms，第一句直接被截断（听感就是
-    # "第一句又慢又不准"）。
+    # Warm everything here so the first sentence never waits on a model load.
+    # The ASR is lazy: pulling it up when the user starts speaking costs several
+    # seconds, and that audio piles up in the socket buffer meanwhile. Catching
+    # up feeds it to the VAD frame by frame, the silence instantly exceeds
+    # confirm_ms, and the first sentence gets cut off -- which sounds like "the
+    # first sentence is both slow and wrong".
     print("[web] warming local models (embedding / ASR / VAD / perception)…", flush=True)
     vm.warmup(verbose=True)
     _warm_network()
