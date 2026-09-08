@@ -466,11 +466,6 @@ button{cursor:pointer;background:none;border:none}
     <div class="topbar">
       <div class="seg-gone"></div>
       <div class="export">
-        <span class="pill space" id="spaceBadge" data-i18n-title="spaceBadgeTitle"
-              title="Current Memory Space — switch it and the graph switches too">
-          <svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
-          <span id="spaceBadgeName">Demo</span>
-        </span>
         <select class="sel" id="spaceSel" data-i18n-title="spaceSelTitle"
                 title="Switch Memory Space"></select>
         <button class="btn sm" id="newSpaceBtn" data-i18n-title="spaceNewTitle"
@@ -639,7 +634,6 @@ const I18N = {
     rbInternalOnly:'本轮右脑命中 {0} 条，全是内部笔记',
     voiceMatched:'speaker 0 · 声纹已匹配', voiceKnown:' · 已识别为「{0}」',
     mySpace:'我创建的空间', diskSpace:'磁盘上的空间',
-    spaceBadgeTitle:'当前 Memory Space —— 换一个，脑图和记忆都跟着换',
     spaceSelTitle:'切换 Memory Space',
     spaceNewTitle:'新建 Memory Space',
     spaceNewHint:'起个名字。磁盘上会出现同名文件夹，记忆从零开始长。',
@@ -698,7 +692,6 @@ const I18N = {
     rbInternalOnly:'इस बार {0} दायाँ-दिमाग़ हिट, सब अंदरूनी नोट',
     voiceMatched:'speaker 0 · आवाज़ पहचानी गई', voiceKnown:' · “{0}” के रूप में पहचाना',
     mySpace:'मेरा बनाया', diskSpace:'डिस्क पर',
-    spaceBadgeTitle:'मौजूदा मेमोरी स्पेस — बदलें तो ग्राफ़ भी बदल जाता है',
     spaceSelTitle:'मेमोरी स्पेस बदलें',
     spaceNewTitle:'नया मेमोरी स्पेस',
     spaceNewHint:'एक नाम दें। डिस्क पर फ़ोल्डर बनेगा और मेमोरी शून्य से शुरू होगी।',
@@ -757,7 +750,6 @@ const I18N = {
     rbInternalOnly:'{0} right-brain hits this turn, all internal notes',
     voiceMatched:'speaker 0 · voice matched', voiceKnown:' · recognized as “{0}”',
     mySpace:'Created by me', diskSpace:'On disk',
-    spaceBadgeTitle:'Current Memory Space — switch it and the graph switches too',
     spaceSelTitle:'Switch Memory Space',
     spaceNewTitle:'New Memory Space',
     spaceNewHint:'Give it a name. A folder appears on disk and memories start from zero.',
@@ -1345,7 +1337,10 @@ function fillSpaceSel(){
   for(const sid of SPACE_IDS){
     const sp=SPACES[sid], o=document.createElement('option');
     o.value=sid;
-    o.textContent=sp.name+(sp.count!==undefined?' ('+sp.count+')':'');
+    // 实时算，不用 sp.count——那是列空间时的快照，之后新增的记忆不会反映进去，
+    // 于是下拉框写着 (4)、徽章写着 L2/R0、后端其实是 3 条，三个数各说各话。
+    const n = (sp.left ? sp.left.length : 0) + (sp.right ? sp.right.length : 0);
+    o.textContent=sp.name+' ('+(n || sp.count || 0)+')';
     if(sid===activeSpace) o.selected=true;
     sel.appendChild(o);
   }
@@ -1446,16 +1441,11 @@ function buildGraph(sid){
 
 /* ── 渲染 ─────────────────────────────────────────────────────────── */
 function renderSpaces(){
-  // 侧栏的空间列表已经换成右上角那个徽章（#spaceBadgeName）。旧结构还在就照旧
-  // 渲染，不在就只更新徽章——JS 里硬取 $('spaceList') 会在这里抛错，脚本一断，
-  // 后面所有监听（含「开始对话」）都挂不上，表现就是按钮点了没反应。
-  const badge=$('spaceBadgeName');
-  if(badge){
-    // 带上节点数：脑图空白时一眼看出是「没拉到记忆」还是「拉到了但没画出来」。
-    // 原来这个数字写在 #brainSpace 上，而那个元素在当前这版 HTML 里不存在。
-    const sp=SPACES[activeSpace];
-    badge.textContent=i18n('badgeStat', sp.name, sp.left.length, sp.right.length);
-  }
+  // 徽章（#spaceBadgeName）删了：它和紧挨着的下拉框显示的是同一件事，而且两个
+  // 数字来自两个来源、对不上——徽章读 left.length/right.length，下拉框读加载时
+  // 存下的 sp.count，后者不随新记忆更新。现在只剩下拉框，数字见 fillSpaceSel。
+  // 这里的 if() 保护要留着：$('spaceList') 是旧结构，硬取会抛错，脚本一断后面
+  // 所有监听（含「开始对话」）都挂不上，表现就是按钮点了没反应。
   const brain=$('brainSpace');
   if(brain){
     const sp=SPACES[activeSpace];
