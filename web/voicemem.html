@@ -817,7 +817,16 @@ const t0=performance.now();
 let W=0,H=0,DPR=1,IW=0,IH=0,OX=0,OY=0,S=1;
 //: 射线从左脑打到右脑的动画。dur 是走完全程的秒数——原来 2.1 秒，慢得像在爬，
 //: 而这条射线要表达的是"检索一下就找到了"。
-const PULSE={t:-0.6,dur:.9,trail:.3,seg:26};
+const PULSE={dur:.9,trail:.3,seg:26};
+/* 一束射线 = {a,b,t,dur,hue}。以前 BEAM 是一串边、共用一个全局 PULSE.t，
+   所有边同时亮同时灭——那画不出「信号一级一级往里传」。真实的那条链路是有
+   先后的：话进来 → 分到哪几个 slot → 打到具体哪几条记忆 → 右脑 → 答案回流。
+   每束自己带 t 和 dur，就能按 delay 排出这个顺序。 */
+const HUE={
+  in:   ['rgba(180,230,255,', 'rgba(120,190,255,'],   // 输入进来：冷蓝
+  recall:['rgba(255,240,190,', 'rgba(255,196,74,'],   // 检索：金（原来的颜色）
+  out:  ['rgba(205,255,225,', 'rgba(121,215,162,'],   // 答案回流：薄荷
+};
 //: 命中的节点：先"啵"地胀大再落回原样，然后亮着待一会儿。
 //: pop 是胀大那一下的时长，hold 是之后保持高亮多久（射线到达后还看得见）。
 const HIT={pop:.42, hold:1.0, fade:.45};
@@ -992,30 +1001,32 @@ function frame(now){
     ctx.stroke();
   }
   if(!REDUCED&&BEAM.length){
-    PULSE.t+=dt/PULSE.dur;
-    if(PULSE.t>1+PULSE.trail){ BEAM.length=0; PULSE.t=-.02; }
-    if(PULSE.t>-PULSE.trail){
-      ctx.globalCompositeOperation='lighter';
-      const STEP=PULSE.trail/PULSE.seg;
-      for(const p of BEAM){
-        const a=N[p.a], b=N[p.b]; if(!a||!b) continue;
-        const c=ctl(a,b);
-        const at=u=>{const iu=1-u;
-          return [iu*iu*a.x+2*iu*u*c[0]+u*u*b.x, iu*iu*a.y+2*iu*u*c[1]+u*u*b.y];};
-        for(let pass=0;pass<2;pass++) for(let i=0;i<PULSE.seg;i++){
-          const u1=PULSE.t-i*STEP, u0=u1-STEP;
-          if(u1<=0||u0>=1) continue;
-          const q0=at(Math.max(0,u0)), q1=at(Math.min(1,u1));
-          const k=1-i/PULSE.seg, e=k*k*(3-2*k);
-          // 金色。里芯偏白让它有亮度，外晕是暖金，在深色背景上比蓝白更跳。
-          ctx.strokeStyle=pass?'rgba(255,240,190,'+(.62*e).toFixed(3)+')'
-                              :'rgba(255,196,74,'+(.13*e).toFixed(3)+')';
-          ctx.lineWidth=(pass?1.3*e+.4:4.2*e+1)*Math.max(.8,S*.8);
-          ctx.beginPath(); ctx.moveTo(q0[0],q0[1]); ctx.lineTo(q1[0],q1[1]); ctx.stroke();
-        }
+    ctx.globalCompositeOperation='lighter';
+    const STEP=PULSE.trail/PULSE.seg;
+    for(const p of BEAM){
+      p.t+=dt/p.dur;                       // 每束自己走，互不干扰
+      if(p.t<=-PULSE.trail) continue;      // 还没到它的 delay
+      const a=N[p.a], b=N[p.b]; if(!a||!b) continue;
+      const c=ctl(a,b);
+      const at=u=>{const iu=1-u;
+        return [iu*iu*a.x+2*iu*u*c[0]+u*u*b.x, iu*iu*a.y+2*iu*u*c[1]+u*u*b.y];};
+      const col=HUE[p.hue]||HUE.recall;
+      for(let pass=0;pass<2;pass++) for(let i=0;i<PULSE.seg;i++){
+        const u1=p.t-i*STEP, u0=u1-STEP;
+        if(u1<=0||u0>=1) continue;
+        const q0=at(Math.max(0,u0)), q1=at(Math.min(1,u1));
+        const k=1-i/PULSE.seg, e=k*k*(3-2*k);
+        // 里芯偏白（亮度），外晕带色（在深色背景上比纯白更跳）
+        ctx.strokeStyle=pass?col[0]+(.62*e).toFixed(3)+')'
+                            :col[1]+(.13*e).toFixed(3)+')';
+        ctx.lineWidth=(pass?1.3*e+.4:4.2*e+1)*Math.max(.8,S*.8);
+        ctx.beginPath(); ctx.moveTo(q0[0],q0[1]); ctx.lineTo(q1[0],q1[1]); ctx.stroke();
       }
-      ctx.globalCompositeOperation='source-over';
+      // 射线到达终点的那一帧，把终点节点点亮——信号真的"送到"了
+      if(p.t>=1 && !p.lit){ p.lit=true; if(b){ b.hit=1; b.hitT=nowT(); } }
     }
+    BEAM=BEAM.filter(p=>p.t<=1+PULSE.trail);
+    ctx.globalCompositeOperation='source-over';
   }
   ctx.globalCompositeOperation='lighter';
   for(const n of N){
@@ -1193,20 +1204,63 @@ return {
     for(const n of N) n.hit=0;
     for(const i of ids) if(N[i]){ N[i].hit=1; N[i].hitT=now; }
   },
-  beam(from,to){ BEAM=[]; for(const a of from) for(const b of to) if(N[a]&&N[b]) BEAM.push({a:a,b:b});
-                 if(BEAM.length) PULSE.t=-PULSE.trail; },
+  /* 一级信号：from 里每个点往 to 里每个点打一束。
+     ``delay`` 秒后才起跑，所以多调几次就能排出「一级传一级」。
+     ``hue``: in / recall / out —— 输入进来、检索、答案回流。 */
+  fire(from,to,{delay=0,hue='recall',dur=PULSE.dur}={}){
+    const src=(from||[]).filter(i=>N[i]), dst=(to||[]).filter(i=>N[i]);
+    if(!src.length||!dst.length) return 0;
+    // 一次别打太多：8x8=64 束会糊成一片，也吃帧率。每个源最多取 4 个目标。
+    for(const a of src) for(const b of dst.slice(0,4)){
+      if(a===b) continue;
+      BEAM.push({a,b,hue,dur,t:-PULSE.trail-Math.max(0,delay)/dur,lit:false});
+    }
+    return 1;
+  },
+  beam(from,to){ this.fire(from,to,{hue:'recall'}); },
   /* 说完一轮就让脑子动一下。beam(左,右) 要两边都有命中才画得出线——空库或者
      只命中左脑的那些轮，右边一条线都没有，看起来就是"脑图没反应"。
      think() 从 you 节点往命中的节点打光；一个都没命中时至少让 you 自己脉冲，
      这样"它在想"这件事永远看得见。 */
-  think(ids){
-    const now=nowT(), hit=(ids||[]).filter(i=>N[i]);
-    if(N[USER]){ N[USER].hit=1; N[USER].hitT=now; }
-    BEAM=[];
-    for(const i of hit) BEAM.push({a:USER,b:i});
-    PULSE.t=-PULSE.trail;
+  /* 输入到达：you 那个点先亮。信号从这儿出发，所以它是链路的起点。 */
+  spark(){ if(N[USER]){ N[USER].hit=1; N[USER].hitT=nowT(); } },
+
+  /* 一整轮的信号链路，对着后端真实发生的几步排：
+
+       you ──in──▶ 命中的 slot 分区 ──recall──▶ 具体命中的记忆节点
+                                    └──recall──▶ 右脑（跨半球）
+
+     每一步比上一步晚一点起跑，所以看起来是「一级一级传进去」，不是所有线
+     同时闪。参数都是后端这一轮真的算出来的东西：slots 是本地 E5 分的类，
+     left/right 是检索命中的节点——所以这个动画不是装饰，它就是那条链路。 */
+  cascade({slots=[], left=[], right=[]}={}){
+    this.spark();
+    const hubs=slots.map(c=>labelOf(c)).filter(i=>i>=0&&N[i]);
+    if(hubs.length){
+      this.fire([USER],hubs,{hue:'in',delay:0,dur:.7});
+      if(left.length)  this.fire(hubs,left,{hue:'recall',delay:.5});
+      if(right.length) this.fire(hubs,right,{hue:'recall',delay:.75,dur:1.1});
+    }else{
+      // slot 没分出来（打字轮常见）：直接从 you 打到命中的节点
+      if(left.length)  this.fire([USER],left,{hue:'in',delay:0});
+      if(right.length) this.fire([USER],right,{hue:'in',delay:.2,dur:1.1});
+    }
+    // 一条记忆都没命中：至少让 you 自己脉冲，"它在想"这件事永远看得见
+    if(!left.length&&!right.length&&!hubs.length) this.spark();
   },
+
+  /* 答案开始出来：信号从命中的节点回流到 you。 */
+  answer(ids){ this.fire((ids&&ids.length)?ids:[USER],[USER],{hue:'out',dur:.8}); },
+
+  think(ids){ this.cascade({left:(ids||[])}); },
   clear(){ for(const n of N){ n.hit=0; n.act=0; } BEAM=[]; },
+  /* 调试/测试用的三个读口。跟 __dump() 同一个性质：控制台里看得见现在排了
+     哪些信号、起点亮没亮。信号链路是**分级**的，而分级这件事光看画面很难确认
+     （几百毫秒里闪完），所以留一个能断言的入口。 */
+  __beams(){ return BEAM.map(p=>({a:p.a,b:p.b,hue:p.hue,t:p.t,dur:p.dur})); },
+  userNode(){ return USER; },
+  userLit(){ return !!(N[USER]&&N[USER].hit); },
+
   // 调试用：把节点坐标倒出来（控制台 VMBrain.__dump()）
   __dump(){ return N.map(n=>({id:n.id,side:n.side,kind:n.kind,cluster:n.cluster,
                               w:n.w,x:n.x,y:n.y,sx:n.sx,sy:n.sy})); }
@@ -1709,6 +1763,8 @@ function setVoice(s){
 }
 const wave=$('wave'), wc=wave.getContext('2d');
 let vt=0, amp=0, aiSpeaking=false, lvOn=false;
+let lastSpark=0;              // partial 脉冲的节流闸
+let LAST_HIT_NODES=[];        // 这一轮命中的节点，答案回流时要从它们出发
 function sizeWave(){ const r=wave.getBoundingClientRect(), d=Math.min(2,window.devicePixelRatio||1);
   wave.width=Math.max(1,r.width*d); wave.height=Math.max(1,r.height*d); wc.setTransform(d,0,0,d,0,0); }
 new ResizeObserver(sizeWave).observe(wave); sizeWave();
@@ -2292,7 +2348,11 @@ function handle(m){
       toast(i18n('connected', m.mode||'')); break;
 
     case 'partial_transcript':
-      setVoice('user'); s.ui.input=m.text; paint(s); break;
+      setVoice('user'); s.ui.input=m.text; paint(s);
+      // 说话中：信号正在进来，让起点持续脉冲。partial 每 ~100ms 一条，
+      // 每条都点亮会糊成一片，所以 400ms 一次。
+      if(Date.now()-lastSpark>400){ lastSpark=Date.now(); window.VMBrain.spark(); }
+      break;
 
     case 'user_transcript':
       // 新的一轮：先把上一轮的标签清掉。这一轮抽出什么，等 ingest 完了再填。
@@ -2303,7 +2363,7 @@ function handle(m){
       // 两份会重复。非对照模式（关掉 A/B）还是老样子。
       if(CMP.on) FEED=feedNewTurn(m.text);
       else addTurn(s,'user',m.text,s.ui.speaker||i18n('you'));
-      window.VMBrain.think([]);          // 检索结果还没回来，先让脑子动起来
+      window.VMBrain.spark();            // 检索还没回来：先让起点亮，信号从这儿出发
       break;
 
     case 'memory_hits': {
@@ -2323,10 +2383,11 @@ function handle(m){
                   ' 节点；本轮命中 左'+li.length+'/右'+ri.length+
                   (ri.length?'':'  ← 右脑没有可亮的节点'));
       window.VMBrain.highlight(li.concat(ri));
-      // 左右都有命中时保留原来的「左脑→右脑」光束；否则从 you 往命中的那些
-      // 节点打光，这样只命中一边的轮次照样看得见东西在动。
-      if(li.length&&ri.length) window.VMBrain.beam(li,ri);
-      else window.VMBrain.think(li.concat(ri));
+      // 信号链路：you → 命中的 slot 分区 → 具体命中的记忆 → 右脑。
+      // 参数全是后端这一轮真的算出来的（slots 是本地 E5 分的类，li/ri 是
+      // 检索命中的节点），所以这不是装饰动画，它画的就是那条链路。
+      LAST_HIT_NODES=li.concat(ri);
+      window.VMBrain.cascade({slots:m.slots||[], left:li, right:ri});
       break;
     }
 
@@ -2373,7 +2434,13 @@ function handle(m){
     case 'cmp_delta': {
       const st=CMP[m.panel];
       if(st){ st.text+=(m.text||''); if(m.ttfb!==undefined) st.ttfb=m.ttfb; }
-      renderCmp(); feedDelta(m.panel,m.text,m.ttfb); break;
+      renderCmp(); feedDelta(m.panel,m.text,m.ttfb);
+      // 第一个 token：答案开始出来了，信号从命中的记忆回流到 you。
+      // 只在带记忆那一路的第一个 token 上放——两路都放就成了双份闪光，
+      // 而"记忆参与了这次回答"本来就只对那一路成立。
+      if(m.ttfb!==undefined && CMP[m.panel] && CMP[m.panel].memory)
+        window.VMBrain.answer(LAST_HIT_NODES);
+      break;
     }
 
     case 'cmp_done': {
