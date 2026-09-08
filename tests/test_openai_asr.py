@@ -168,6 +168,41 @@ class FlushTest(unittest.TestCase):
         self.assertEqual(asr.flush(), "")
 
 
+class WarmupTest(unittest.TestCase):
+    """First real call pays for DNS + TLS + client construction.
+
+    Measured on this machine: the first transcription/completion of a process
+    takes ~2.0s against ~0.65s for every one after it. That whole second and a
+    half lands on the user's first sentence, which is exactly the one that
+    decides whether the demo feels fast.
+    """
+
+    def test_warmup_makes_one_call(self):
+        calls = []
+        asr = OpenAIStreamingASR(transcribe=lambda w: calls.append(len(w)) or "")
+
+        asr.warmup()
+
+        self.assertEqual(len(calls), 1)
+        self.assertGreater(calls[0], 44, "should send real (if silent) audio, not an empty file")
+
+    def test_warmup_never_raises(self):
+        """A cold-start optimisation must not be able to stop the server."""
+        def boom(wav):
+            raise RuntimeError("no network at boot")
+
+        asr = OpenAIStreamingASR(transcribe=boom)
+        asr.warmup()          # must not raise
+
+    def test_warmup_leaves_no_text_and_no_buffer_behind(self):
+        asr = OpenAIStreamingASR(transcribe=lambda w: "hello from warmup")
+
+        asr.warmup()
+
+        self.assertEqual(asr.flush(), "", "warmup text must not leak into the first turn")
+        self.assertEqual(asr.feed(_audio(0.01)), "")
+
+
 class LanguageTest(unittest.TestCase):
     def test_auto_means_no_language_hint(self):
         self.assertEqual(OpenAIStreamingASR(language="auto", transcribe=lambda w: "").language, "")

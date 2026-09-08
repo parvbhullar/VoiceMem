@@ -304,6 +304,26 @@ class OpenAIStreamingASR:
                 self._text = text
         return self._text
 
+    def warmup(self) -> None:
+        """把第一次网络调用的开销挪到启动时。
+
+        实测：进程里第一次转写 ~2.0s，之后每次 ~0.65s。差的那一秒半全落在
+        用户说的**第一句**上——而第一句恰好决定了这个 demo 给人的快慢印象。
+        DNS、TLS、client 构造都在这一秒半里，发一段静音就能把它们付掉。
+
+        失败不抛：预热是优化，不该让服务起不来（开机时没网也照样能起）。
+        而且就算服务端拒了这段静音，TLS 和连接也已经建好了，目的照样达成。
+        """
+        try:
+            self._transcribe(_wav_bytes(np.zeros(int(0.3 * SAMPLE_RATE),
+                                                dtype=np.float32)))
+        except Exception as e:  # noqa: BLE001
+            print(f"[asr] 预热失败（忽略）：{type(e).__name__}: {e}", flush=True)
+        finally:
+            # 预热的结果绝不能留在 _text 里，否则第一轮开口前就已经有文本了,
+            # stream.py 会拿它当成用户说了话。
+            self.reset()
+
     def reset(self) -> None:
         self._buf: list = []
         self._n = 0

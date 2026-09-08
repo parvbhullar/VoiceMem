@@ -30,6 +30,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -3235,6 +3236,42 @@ app = utils.build_app(MODE, realtime_session if MODE == "realtime" else llm_tts_
                       compare=(lambda: COMPARE, _set_compare))
 
 
+def _warm_network() -> None:
+    """把走网络那两条路的第一次调用挪到启动时。
+
+    本地模型上面已经预热了，可是**网络**那两条还是凉的：回复模型和转写接口。
+    实测第一次 ~2.0s，之后 ~0.65s——那一秒半全落在用户说的第一句上，而第一句
+    恰好决定这个 demo 给人的快慢印象。付掉的是 DNS + TLS + client 构造。
+
+    两条并行发，各自失败都只打印不抛：预热是优化，没网也该能把服务起起来。
+    花的钱可以忽略（回复那条 max_tokens=1，转写那条是 0.3s 静音）。
+    """
+    import asyncio as _aio
+
+    async def _reply() -> None:
+        from voicemem.reply import openai_reply
+        fn = openai_reply(model=utils.CHAT_MODEL, system="warmup")
+        agen = fn("hi", "")
+        async for _ in agen:            # 第一个 token 就够了，握手已经付掉
+            await agen.aclose()
+            break
+
+    def _asr() -> None:
+        warm = getattr(vm.utils.get("asr"), "warmup", None)
+        if warm:                        # 本地 ASR 没有这个方法，也不需要
+            warm()
+
+    t0 = time.monotonic()
+    thread = threading.Thread(target=_asr, daemon=True)
+    thread.start()
+    try:
+        _aio.new_event_loop().run_until_complete(_reply())
+    except Exception as e:              # noqa: BLE001
+        print(f"[warmup] 回复模型预热失败（忽略）：{type(e).__name__}: {e}", flush=True)
+    thread.join(timeout=20)
+    print(f"[warmup] 网络（回复模型 + 转写）{time.monotonic() - t0:.1f}s", flush=True)
+
+
 if __name__ == "__main__":
     print(f"[web] mode={MODE} spec≥{SPEC_MIN_CHARS}字 gamble={ARGS.gamble_ms}ms "
           f"confirm={ARGS.confirm_ms}ms -> http://localhost:{ARGS.port}/", flush=True)
@@ -3244,5 +3281,6 @@ if __name__ == "__main__":
     # "第一句又慢又不准"）。
     print("[web] 预热本地模型（embedding / ASR / VAD / 感知）…", flush=True)
     vm.warmup(verbose=True)
+    _warm_network()
     print("[web] 就绪", flush=True)
     uvicorn.run(app, host=ARGS.host, port=ARGS.port)
