@@ -2568,13 +2568,13 @@ async def realtime_session(sock):
                         # 真正的 EOU 下限，晚的那部分是白等的。
                         turn["stopped"] = time.monotonic()
                         if BARGE_DEBUG:
-                            print("[lat] OpenAI 判说完", flush=True)
+                            print("[lat] OpenAI decided the speaker finished", flush=True)
                     elif t.endswith("input_audio_buffer.speech_started"):
                         # OpenAI 的 VAD 听到人声：它那侧已经掐了回复，我们同步收尾
                         since = (time.monotonic() - turn["t0"]) * 1000
                         if BARGE_DEBUG:
-                            print(f"[barge] OpenAI VAD 听到人声 (live={turn['live']}, "
-                                  f"还在播={hearing()}, {since:.0f}ms)", flush=True)
+                            print(f"[barge] OpenAI VAD heard speech (live={turn['live']}, "
+                                  f"still_playing={hearing()}, {since:.0f}ms)", flush=True)
                         # 宽限期，跟本地那条路一样。本地 VAD 判完一轮（静音 500ms）就
                         # 发 response.create，而 OpenAI 的 server_vad 只要 320ms 静音就
                         # 认为下一句开始了——用户的话尾、呼吸声、环境噪声都够触发。
