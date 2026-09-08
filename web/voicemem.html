@@ -1571,7 +1571,8 @@ function renderRecall(side,items){
    状态**不挂在 session 上**：这是个一眼看完就走的视图，切会话时把上一轮的两路
    留在屏幕上只会让人分不清哪一轮是哪一轮。 */
 const CMP={ on:false, ctx:'',
-            a:{text:'',ms:0,err:''}, b:{text:'',ms:0,err:''} };
+            a:{text:'',ms:0,err:'',memory:true},
+            b:{text:'',ms:0,err:'',memory:false} };
 
 function cmpArms(){
   return ['A','B'].map(u=>({ label:u.toLowerCase(),
@@ -1603,6 +1604,7 @@ function cmpApply(d){
     if($('cmpModel'+u)!==document.activeElement) $('cmpModel'+u).value=a.model||'';
     if($('cmpUrl'+u)!==document.activeElement) $('cmpUrl'+u).value=a.base_url||'';
     $('cmpMem'+u).checked=!!a.memory;
+    CMP[a.label].memory=!!a.memory;
     $('cmpCol'+u).classList.toggle('mem',!!a.memory);
   }
   $('cmpTg').classList.toggle('on',CMP.on);
@@ -1617,13 +1619,21 @@ function cmpApply(d){
 }
 
 function cmpReset(){
-  CMP.ctx=''; CMP.a={text:'',ms:0,err:''}; CMP.b={text:'',ms:0,err:''};
+  // memory 标志不清：它是这一路的身份，由 cmp_start 更新，不是每轮的产出。
+  CMP.ctx='';
+  CMP.a={text:'',ms:0,err:'',memory:CMP.a.memory};
+  CMP.b={text:'',ms:0,err:'',memory:CMP.b.memory};
 }
 
 function renderCmp(){
   for(const u of ['A','B']){
     const st=CMP[u.toLowerCase()], el=$('cmpTxt'+u);
     if(!el) continue;
+    // 标题跟着**这一路实际有没有记忆**走，不是写死的。写死的话谁把 B 的
+    // checkbox 勾上，B 就会一边拿着记忆一边标着「Without VoiceMem」。
+    const lab=$('cmpCol'+u).querySelector('.lab');
+    if(lab) lab.textContent=i18n(st.memory?'cmpWith':'cmpWithout');
+    $('cmpCol'+u).classList.toggle('mem',!!st.memory);
     if(st.err){ el.className='cmp-body err'; el.textContent=st.err; }
     else if(st.text){ el.className='cmp-body'; el.textContent=st.text; }
     else { el.className='cmp-body idle'; el.textContent=i18n('cmpWaiting'); }
@@ -1633,7 +1643,7 @@ function renderCmp(){
   $('cmpCtx').textContent=CMP.ctx||i18n('cmpCtxEmpty');
   // 检索是**每轮都做**的，跟哪一路开没开记忆无关——所以两路都关着的时候这里
   // 照样有内容，而它一个字都没进任何 prompt。不写清楚给了谁，这个标题就在骗人。
-  const to=['A','B'].filter(u=>$('cmpMem'+u).checked).join('+');
+  const to=['A','B'].filter(u=>CMP[u.toLowerCase()].memory).join('+');
   $('cmpCtxN').textContent = !CMP.ctx ? ''
     : CMP.ctx.length+' chars → '+(to||i18n('cmpCtxNobody'));
 }
@@ -2416,7 +2426,15 @@ function handle(m){
       cmpReset(); CMP.ctx=m.context||''; renderCmp(); break;
 
     case 'cmp_start': {
-      const st=CMP[m.panel]; if(st){ st.text=''; st.err=''; st.ms=0; }
+      const st=CMP[m.panel];
+      if(st){ st.text=''; st.err=''; st.ms=0; st.memory=!!m.memory; }
+      // 服务端说了这一路到底有没有拿到记忆——以它为准。之前标题和「注入给谁」
+      // 那个角标是照本地 checkbox 算的，而 checkbox 可能跟服务端不同步（别处
+      // POST 过 /api/compare、或者这个页面开着没刷新）。结果就是服务端把记忆
+      // 给了 B，界面却写着 → A，标题还写着 With VoiceMem —— 界面在撒谎，
+      // 而这个 demo 的全部意义就是让人相信屏幕上那两栏。
+      if($('cmpMem'+m.panel.toUpperCase()))
+        $('cmpMem'+m.panel.toUpperCase()).checked=!!m.memory;
       renderCmp(); break;
     }
 
