@@ -19,37 +19,61 @@ classifiers = [
     "Topic :: Multimedia :: Sound/Audio :: Speech",
 ]
 
-# `pip install voicemem` 一条命令装齐所有内置组件：ASR、VAD、声纹、场景、情绪、
-# 本地 embedding，外加 web demo 和 examples/ 的运行依赖。
+# `pip install voicemem` installs every built-in component in one command: ASR, VAD,
+# speaker ID, scene, emotion, local embedding, plus the runtime deps for the web demo
+# and examples/.
 #
-# 之前把这些拆在 [slm] extra 里，用户按 README 装完基础包仍然
-# ModuleNotFoundError: funasr —— 名字叫 slm，没人想得到 ASR 在里面。
+# These used to live in the [slm] extra, so a user who installed the base package by
+# following the README still hit ModuleNotFoundError: funasr -- the extra was named
+# "slm" and nobody expects ASR to be hiding in there.
 dependencies = [
     "numpy",
     "openai",
     "mem0ai",
-    # ── 音频链路 ──
+    # -- audio pipeline --
     "torch",
-    "torchaudio",         # funasr 内部 import 它，但自己没声明
-    "torchvision",        # transformers 加载 Qwen2.5-Omni 要 Qwen2VLVideoProcessor，
-                          # 它 import torchvision。缺了不报错，只是情绪归因器**静默**
-                          # 退回纯声学象限——"我喜欢草莓"会判成悲伤，右脑整个不准。
-    "transformers==4.52.3",
-    "accelerate",         # 情绪归因 from_pretrained(device_map="auto") 要它，
-                          # 缺了同样是静默退化，不是报错。
-    "funasr",             # 流式 ASR（默认）
-    "modelscope",         # funasr 取模型用
-    "sherpa-onnx",        # VAD + 声纹 + 回退 ASR（纯 onnx）
-    "sentence-transformers",   # 本地 E5（记忆向量 / slot 分类）
-    "soundfile",          # 读 mp3/m4a/flac；缺了会退回标准库 wave，只认 PCM wav
+    "torchaudio",         # funasr imports it internally but does not declare it
+    "torchvision",        # transformers needs Qwen2VLVideoProcessor to load Qwen2.5-Omni,
+                          # and that imports torchvision. Missing it raises nothing -- the
+                          # emotion attributor **silently** falls back to the purely acoustic
+                          # quadrant, so "I love strawberries" reads as sad and the whole
+                          # right brain goes wrong.
+    # Both bounds come from pipecat-ai[speechmatics], which we run alongside this package:
+    #   pipecat-ai[speechmatics] -> speechmatics-voice[smart] -> transformers>=4.57.0,<5
+    # Matching that range here means pip reports a conflict up front instead of silently
+    # resolving to a transformers our voice stack cannot use.
+    #
+    # It is also correct on our own terms:
+    #   - floor: the Qwen2_5Omni* classes (Qwen2_5OmniProcessor /
+    #     Qwen2_5OmniThinkerForConditionalGeneration, see emotion/paper_emotion_detector.py)
+    #     only exist from 4.52 on, so 4.57 clears that comfortably.
+    #   - ceiling: transformers 5.x renamed from_pretrained's torch_dtype to dtype, and
+    #     paper_emotion_detector.py and finetune/train.py still pass the old name.
+    "transformers>=4.57,<5",
+    "accelerate",         # required by the emotion attributor's
+                          # from_pretrained(device_map="auto"); missing it is another
+                          # silent degradation, not an error.
+    "funasr",             # streaming ASR (default)
+    "modelscope",         # how funasr fetches models
+    "sherpa-onnx",        # VAD + speaker ID + fallback ASR (pure onnx)
+    # Local E5 (memory vectors / slot classification). Floor 5.2.3 matches what
+    # super.ai/super pins, so installing into that env does not move the package.
+    # The <6 ceiling states a constraint pip would otherwise have to discover by
+    # backtracking: sentence-transformers 6.x wants transformers>=5.0.0, which cannot
+    # coexist with our transformers<5 above. Writing it down keeps resolution fast and
+    # keeps the two bounds tied together if the transformers ceiling ever moves.
+    "sentence-transformers>=5.2.3,<6",
+    "soundfile",          # reads mp3/m4a/flac; without it we fall back to stdlib wave,
+                          # which only accepts PCM wav
     "scipy",
-    # ── web demo（web/run.py）和 examples/ ──
+    # -- web demo (web/run.py) and examples/ --
     "fastapi",
     "uvicorn",
-    "pydantic",           # web/utils.py 顶层就 import 了（fastapi 带得进来，但别靠它）
-    "websockets>=14",     # uvicorn 跑 WebSocket；examples/05 接 realtime 也用
-    "sounddevice",        # examples 里的语音 agent：麦克风 + 扬声器
-    "pywebrtc-audio",     # 回声消除（外放时能打断）
+    "pydantic",           # imported at the top of web/utils.py (fastapi pulls it in, but
+                          # do not rely on that)
+    "websockets>=14",     # uvicorn serving WebSocket; examples/05 also uses it for realtime
+    "sounddevice",        # the voice agent in examples/: microphone + speaker
+    "pywebrtc-audio",     # echo cancellation (lets you barge in over a loudspeaker)
 ]
 
 [project.optional-dependencies]
@@ -57,19 +81,22 @@ rtc = [
     "av>=14",
 ]
 
-# 跑我们微调的 Qwen 回复模型（Qwen3.6-35B-A3B + QLoRA adapter）。
-# 权重不在 wheel 里，用 `bash scripts/download_models.sh --reply-adapter` 拉。
+# For running our fine-tuned Qwen reply model (Qwen3.6-35B-A3B + QLoRA adapter).
+# The weights are not in the wheel; fetch them with
+# `bash scripts/download_models.sh --reply-adapter`.
 slm = [
-    "peft",               # 加载 QLoRA adapter
-    "qwen-omni-utils",    # Qwen-Omni 的多模态输入预处理
-    "audioread",          # qwen-omni-utils 顶层就 import 它，但自己没声明；
-                          # 缺了 `import qwen_omni_utils` 直接 ModuleNotFoundError。
+    "peft",               # loads the QLoRA adapter
+    "qwen-omni-utils",    # multimodal input preprocessing for Qwen-Omni
+    "audioread",          # qwen-omni-utils imports it at the top but does not declare it;
+                          # without it `import qwen_omni_utils` is a hard
+                          # ModuleNotFoundError.
 ]
 
-# 只有这两条命令。其余场景各自 pip，不再单开 extra——名字对不上内容的 extra
-# 正是之前那个坑的成因（[slm] 里装着 ASR，谁也想不到）：
-#   本地 TTS（TTS_BACKEND=local）  pip install piper-tts   或   pip install voxcpm
-#   跑 finetune/ 的训练脚本         pip install ms-swift==4.5.2 bitsandbytes
+# Only these two commands. Everything else is a plain pip install -- no more extras,
+# because an extra whose name does not match its contents is exactly what caused the
+# earlier trap (ASR living inside [slm], which nobody would guess):
+#   local TTS (TTS_BACKEND=local)      pip install piper-tts   or   pip install voxcpm
+#   the training scripts in finetune/  pip install ms-swift==4.5.2 bitsandbytes
 
 [project.urls]
 Homepage = "https://github.com/lang-jiaqi/Voicemem_open"
@@ -79,13 +106,13 @@ Issues = "https://github.com/lang-jiaqi/Voicemem_open/issues"
 [tool.setuptools.packages.find]
 include = ["voicemem*"]
 
-# data/ 下的 prompt 文本是运行时读的（见 leftbrain/mem0_additive_prompt_build.py），
-# 不显式声明的话 wheel 里不会有，装完一调用就 FileNotFoundError。
 [tool.setuptools.package-data]
-# data/ 下的 prompt 文本是运行时读的（见 leftbrain/mem0_additive_prompt_build.py），
-# 不显式声明的话 wheel 里不会有，装完一调用就 FileNotFoundError。
+# The prompt text under data/ is read at runtime (see
+# leftbrain/mem0_additive_prompt_build.py). Without declaring it explicitly it never
+# lands in the wheel, and the first call after install is a FileNotFoundError.
 #
-# assets/*.wav 是 README 和 examples 里用的示例音频（一共 1MB）。不打进包的话，
-# pip 装完照 README 跑第一个例子就是 LibsndfileError——那是别人对这个项目的
-# 第一印象。voicemem.sample_audio() 会先找仓库里的 assets/，没有再回落到这份。
+# assets/*.wav are the sample clips used by the README and examples (1MB total). Leave
+# them out of the package and a pip install followed by the README's first example is a
+# LibsndfileError -- which is someone's first impression of this project.
+# voicemem.sample_audio() looks in the repo's assets/ first and falls back to this copy.
 "*" = ["data/*.txt", "*.txt", "assets/*.wav"]
