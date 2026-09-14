@@ -1281,7 +1281,9 @@ def _kick_acoustic(send, audio_path: str) -> None:
                 print(f"  [emotion] acoustic (background) {(time.monotonic()-t0)*1000:.0f}ms "
                       f"-> {emo or '-'} {score:.2f} ({'used' if take else 'rejected'})", flush=True)
             if take:
-                await send({"type": "tag_update", "emotion": emo, "emotion_from": "acoustic"})
+                from voicemem.lang import display_emotion
+                await send({"type": "tag_update", "emotion": display_emotion(emo),
+                            "emotion_from": "acoustic"})
         except Exception as e:
             print(f"[web] background acoustic emotion skipped: {type(e).__name__}: {e}", flush=True)
 
@@ -1367,6 +1369,13 @@ def fill_tags(payload: dict, text: str, audio_path: str = "",
     #     说「下周三在国金中心见客户」→ 标签栏空
     # 显示一个错的比先空着更糟。前端会在 ingest 落库后用真结果补上（见
     # voicemem.html 的 loadMemories）。
+
+    # anchor_router / emotion2vec 的返回值都是 8 个规范情绪的中文内部值（见
+    # voicemem/lang.py）——UI 标签栏要看的是当前记忆库语言下的写法，否则英文
+    # demo 里会冒出「平静」这种谁都读不懂的字。
+    if payload.get("emotion"):
+        from voicemem.lang import display_emotion
+        payload["emotion"] = display_emotion(payload["emotion"])
 
     rb = payload.get("right_brain_hits") or []
     inner = sum(1 for h in rb if h.get("internal"))

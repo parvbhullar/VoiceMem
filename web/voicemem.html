@@ -194,14 +194,26 @@ button{cursor:pointer;background:none;border:none}
 .chat .empty b{display:block;font-weight:500;font-size:15px;color:var(--txt-2);margin-bottom:4px}
 
 .brainwrap{position:relative;flex:1;min-height:0;overflow:hidden;background:var(--bg-dark)}
-#brain{position:absolute;left:0;top:0;mix-blend-mode:screen;opacity:0;
-  transition:opacity 1s ease .1s;pointer-events:none;user-select:none;
-  filter:brightness(.66) contrast(1.35)}
-#brain.in{opacity:1}
+/* brain silhouette image ab display नहीं होता — reference design में brain shape
+   नहीं, wireframe sphere है। sizing math अभी भी इसी hidden anchor पर टिका है। */
+#brain{position:absolute;left:0;top:0;opacity:0;pointer-events:none;user-select:none;
+  display:none}
 #fx{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
-.legend{position:absolute;left:16px;bottom:14px;z-index:4;display:flex;gap:14px;
-  font-size:11px;color:var(--txt-3);pointer-events:none}
-.legend i{display:inline-block;width:7px;height:7px;border-radius:2px;margin-right:6px;vertical-align:1px}
+.core-title{position:absolute;left:0;right:0;top:12px;z-index:4;text-align:center;
+  font-size:11px;font-weight:600;letter-spacing:.22em;text-transform:uppercase;
+  color:var(--txt-2);pointer-events:none}
+.core-title em{color:var(--mint);font-style:normal}
+.core-state{position:absolute;left:0;right:0;bottom:14px;z-index:4;text-align:center;
+  font-size:11px;color:var(--txt-3);letter-spacing:.02em;pointer-events:none;
+  font-variant-numeric:tabular-nums}
+.legend{position:absolute;top:38%;left:0;right:0;z-index:4;display:flex;
+  justify-content:space-between;padding:0 6%;pointer-events:none}
+.core-pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;
+  padding:5px 13px;border-radius:99px;background:rgba(20,26,38,.55);text-transform:capitalize;
+  backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
+.core-pill.facts{border:1px solid rgba(107,167,240,.55);color:#bcdcff}
+.core-pill.profile{border:1px solid rgba(239,123,171,.55);color:#ffcfe4}
+.core-pill .arrow{font-size:11px;opacity:.85}
 .brain-space{position:absolute;right:16px;top:14px;z-index:4;pointer-events:none}
 
 #card{position:absolute;left:0;top:0;width:224px;z-index:5;border-radius:10px;
@@ -310,6 +322,11 @@ button{cursor:pointer;background:none;border:none}
 .cmp-keys{grid-template-columns:1fr;gap:5px}
 .cmp-keys .cmp-model{width:100%}
 .seg-gone{flex:1}
+.seg-gone.brand{display:flex;align-items:center;gap:8px;min-width:0}
+.brand-ic{height:20px;width:20px;border-radius:5px;flex:0 0 auto;object-fit:contain}
+.brand-wm{height:13px;width:auto;flex:0 0 auto;object-fit:contain}
+.brand-by{font-size:10.5px;color:var(--txt-3);letter-spacing:.02em;white-space:nowrap}
+@media (max-width:1180px){ .brand-by{display:none} }
 .cmp-model{flex:1;min-width:0;background:var(--bg-input);border:1px solid transparent;
   border-radius:7px;padding:3px 7px;font-size:11px;color:var(--txt)}
 .cmp-model:focus{border-color:var(--line-2);outline:none}
@@ -420,7 +437,7 @@ button{cursor:pointer;background:none;border:none}
         <div class="cmp-cols">
       <div class="cmp-col mem" id="cmpColA">
         <div class="cmp-h">
-          <span class="lab">With VoiceMem</span>
+          <span class="lab">With Memory</span>
           <span class="cmp-ms" id="cmpMsA"></span>
           <button class="cmp-gear" id="cmpGearA" data-i18n-title="cmpGearTitle"
                   title="model / endpoint / key">⚙</button>
@@ -439,7 +456,7 @@ button{cursor:pointer;background:none;border:none}
       </div>
       <div class="cmp-col" id="cmpColB">
         <div class="cmp-h">
-          <span class="lab">Without VoiceMem</span>
+          <span class="lab">Without Memory</span>
           <span class="cmp-ms" id="cmpMsB"></span>
           <button class="cmp-gear" id="cmpGearB" data-i18n-title="cmpGearTitle"
                   title="model / endpoint / key">⚙</button>
@@ -480,7 +497,11 @@ button{cursor:pointer;background:none;border:none}
   <!-- ③ Chat / Memory Space -->
   <section class="rightpane">
     <div class="topbar">
-      <div class="seg-gone"></div>
+      <div class="seg-gone brand">
+        <img src="./images/unpod-icon.png" alt="" class="brand-ic" />
+        <img src="./images/unpod-wordmark.png" alt="Unpod" class="brand-wm" />
+        <span class="brand-by">demo by Unpod</span>
+      </div>
       <div class="export">
         <button class="btn sm" id="btnNew" data-i18n-title="newChat"
                 title="New chat" data-i18n="newChat">New chat</button>
@@ -508,9 +529,11 @@ button{cursor:pointer;background:none;border:none}
           <div class="brainwrap" id="brainwrap">
             <img id="brain" alt="" src="./images/background.webp" />
             <canvas id="fx"></canvas>
+            <div class="core-title"><em data-i18n="coreTitleEm">Neural</em> <span data-i18n="coreTitleRest">Synthesis Core</span></div>
+            <div class="core-state" id="coreState"></div>
             <div class="legend">
-              <span><i style="background:#6ba7f0"></i><span data-i18n="leftFacts">Left · Facts</span></span>
-              <span><i style="background:#ef7bab"></i><span data-i18n="rightProfile">Right · Profile</span></span>
+              <span class="core-pill facts"><span class="arrow">→</span><span data-i18n="factsShort">Facts</span></span>
+              <span class="core-pill profile"><span data-i18n="profileShort">Profile</span><span class="arrow">→</span></span>
             </div>
             <div id="card" aria-hidden="true">
               <div class="eb"><span class="sw" id="c-sw"></span><span class="kd" id="c-kd">entity</span><span class="id" id="c-id">#0000</span></div>
@@ -576,13 +599,14 @@ const I18N = {
     cmpCtx:'注入的记忆上下文', cmpCtxEmpty:'这一轮没检索到任何记忆——两边拿到的东西一样。',
     cmpKeyPh:'自带 key（可留空）', cmpUrlPh:'自建端点（可留空）',
     cmpCtxNobody:'两路都没开记忆，这段没进任何 prompt',
-    cmpWith:'带 VoiceMem', cmpWithout:'不带 VoiceMem',
+    cmpWith:'带记忆', cmpWithout:'不带记忆',
     cmpGearTitle:'模型 / 端点 / key',
     talkStart:'开始对话', talkEnd:'结束对话', pause:'暂停', resume:'继续',
     ended:'已结束。',
     idle:'待机', listening:'正在听', replying:'正在回复', paused:'已暂停',
     left:'左脑', right:'右脑', factsShort:'事实', profileShort:'画像',
     leftFacts:'左脑 · 事实', rightProfile:'右脑 · 画像',
+    coreTitleEm:'神经', coreTitleRest:'融合核心', coreState:'状态：融合中 · 收敛 {0}%',
     emotion:'情绪', personality:'性格', preference:'偏好',
     newChat:'新对话', expand:'展开侧栏', collapse:'收起侧栏',
     download:'下载', dlAll:'本空间全部记忆', dlLeft:'左脑 · 事实',
@@ -626,13 +650,14 @@ const I18N = {
     cmpCtx:'डाली गई मेमोरी', cmpCtxEmpty:'इस बार कुछ नहीं मिला — दोनों को एक ही चीज़ मिली।',
     cmpKeyPh:'अपनी key (ज़रूरी नहीं)', cmpUrlPh:'अपना endpoint (ज़रूरी नहीं)',
     cmpCtxNobody:'किसी भी तरफ़ मेमोरी चालू नहीं — यह किसी prompt में नहीं गया',
-    cmpWith:'VoiceMem के साथ', cmpWithout:'VoiceMem के बिना',
+    cmpWith:'मेमोरी के साथ', cmpWithout:'मेमोरी के बिना',
     cmpGearTitle:'model / endpoint / key',
     talkStart:'बात शुरू करें', talkEnd:'बंद करें', pause:'रोकें', resume:'जारी रखें',
     ended:'सेशन ख़त्म।',
     idle:'खाली', listening:'सुन रहा है', replying:'जवाब दे रहा है', paused:'रुका हुआ',
     left:'बायाँ दिमाग़', right:'दायाँ दिमाग़', factsShort:'तथ्य', profileShort:'प्रोफ़ाइल',
     leftFacts:'बायाँ · तथ्य', rightProfile:'दायाँ · प्रोफ़ाइल',
+    coreTitleEm:'न्यूरल', coreTitleRest:'सिंथेसिस कोर', coreState:'स्थिति: संश्लेषण जारी · अभिसरण {0}%',
     emotion:'भावना', personality:'व्यक्तित्व', preference:'पसंद',
     newChat:'नई चैट', expand:'साइडबार खोलें', collapse:'साइडबार समेटें',
     download:'डाउनलोड', dlAll:'इस स्पेस की सारी मेमोरी', dlLeft:'बायाँ · तथ्य',
@@ -676,13 +701,14 @@ const I18N = {
     cmpCtx:'Injected memory context', cmpCtxEmpty:'Nothing retrieved this turn — both arms got the same thing.',
     cmpKeyPh:'own key (optional)', cmpUrlPh:'own endpoint (optional)',
     cmpCtxNobody:'neither arm has memory on — this went into no prompt',
-    cmpWith:'With VoiceMem', cmpWithout:'Without VoiceMem',
+    cmpWith:'With Memory', cmpWithout:'Without Memory',
     cmpGearTitle:'model / endpoint / key',
     talkStart:'Start talking', talkEnd:'End session', pause:'Pause', resume:'Resume',
     ended:'Session ended.',
     idle:'Idle', listening:'Listening', replying:'Replying', paused:'Paused',
     left:'Left brain', right:'Right brain', factsShort:'facts', profileShort:'profile',
     leftFacts:'Left · Facts', rightProfile:'Right · Profile',
+    coreTitleEm:'Neural', coreTitleRest:'Synthesis Core', coreState:'State: Synthesizing · Convergence {0}%',
     emotion:'Emotion', personality:'Personality', preference:'Preference',
     newChat:'New chat', expand:'Expand sidebar', collapse:'Collapse sidebar',
     download:'Download', dlAll:'All memories in this space', dlLeft:'Left · Facts',
@@ -724,6 +750,9 @@ function i18n(key, ...args){
   const s = (I18N[LANG] && I18N[LANG][key]) || (I18N.zh[key]) || key;
   return args.length ? s.replace(/\{(\d+)\}/g, (m,i)=> args[i] !== undefined ? args[i] : m) : s;
 }
+// entity/schema टैग लिस्ट का separator — पहले हमेशा '、' (चीनी comma) था, यानी
+// English/Hindi UI में भी वो अकेला चीनी character दिख जाता था। LANG के हिसाब से।
+function listSep(){ return LANG==='zh' ? '、' : ', '; }
 /* 静态 HTML 上标了 data-i18n* 的，切语言时统一重刷 */
 function applyLang(){
   document.documentElement.lang = LANG === 'en' ? 'en' : 'zh-CN';
@@ -929,6 +958,97 @@ new ResizeObserver(resize).observe(wrap);
 brain.addEventListener('load',()=>{ resize(); brain.classList.add('in'); });
 if(brain.complete&&brain.naturalWidth) brain.classList.add('in');
 
+/* ---- Neural Synthesis Core：装饰性 wireframe sphere + 左右粒子流 ----
+   brain 轮廓图拿掉之后，中间空出来的这块用一个旋转的线框球代替——facts 从左边
+   汇入，profile 从右边流出。球和粒子纯装饰，不影响下面 entity/schema 节点的真实
+   数据和交互（那套照旧）。节点/边只算一次，每帧只做旋转投影。 */
+const CORE_N = 90;
+const corePts = (()=>{
+  const pts=[], off=2/CORE_N;
+  for(let i=0;i<CORE_N;i++){
+    const y=i*off-1+off/2, r=Math.sqrt(Math.max(0,1-y*y));
+    const phi=i*Math.PI*(3-Math.sqrt(5));
+    pts.push({x:Math.cos(phi)*r, y, z:Math.sin(phi)*r});
+  }
+  return pts;
+})();
+const coreEdges = (()=>{
+  const eds=[], seen=new Set();
+  for(let i=0;i<corePts.length;i++){
+    const d=[];
+    for(let j=0;j<corePts.length;j++){
+      if(i===j) continue;
+      const a=corePts[i], b=corePts[j];
+      d.push([(a.x-b.x)**2+(a.y-b.y)**2+(a.z-b.z)**2, j]);
+    }
+    d.sort((a,b)=>a[0]-b[0]);
+    for(let k=0;k<3;k++){
+      const j=d[k][1], key=i<j?i+'_'+j:j+'_'+i;
+      if(!seen.has(key)){ seen.add(key); eds.push([i,j]); }
+    }
+  }
+  return eds;
+})();
+function mkStreamP(){ return { t:Math.random(), sp:.1+Math.random()*.18,
+  off:(Math.random()-0.5)*2, sz:.6+Math.random()*1.7 }; }
+const STREAM_N = 130;
+const factsStream   = Array.from({length:STREAM_N}, mkStreamP);
+const profileStream = Array.from({length:STREAM_N}, mkStreamP);
+function drawStream(list, dt, cx, cy, R, dir, rgb){
+  const x0 = dir<0 ? 0 : cx+R*0.94;
+  const x1 = dir<0 ? cx-R*0.94 : W;
+  for(const p of list){
+    p.t += dt*p.sp;
+    if(p.t>1){ p.t=0; p.off=(Math.random()-0.5)*2; p.sp=.1+Math.random()*.18; p.sz=.6+Math.random()*1.7; }
+    const e=p.t;
+    const x=x0+(x1-x0)*e;
+    const spread=(dir<0?(1-e):e)*IH*0.30+6*S;
+    const y=cy+p.off*spread;
+    const alpha=(dir<0 ? Math.min(1,e*2.2) : Math.max(0,1-e*1.05))*0.95;
+    if(alpha<=0.01) continue;
+    ctx.fillStyle=rgb+alpha.toFixed(3)+')';
+    ctx.beginPath(); ctx.arc(x,y,p.sz*S,0,7); ctx.fill();
+  }
+}
+function drawCore(t,dt){
+  if(!IW) return;
+  const cx=OX+0.5*IW, cy=OY+0.5*IH;
+  const R=Math.max(30,Math.min(IW,IH)*0.15);
+  const rot=t*0.16, cosR=Math.cos(rot), sinR=Math.sin(rot);
+  const proj=corePts.map(p=>{
+    const x=p.x*cosR-p.z*sinR, z=p.x*sinR+p.z*cosR, y=p.y;
+    const f=2.6, sc=f/(f+z);
+    return { sx:cx+x*R*sc, sy:cy+y*R*sc, z, sc };
+  });
+  drawStream(factsStream, dt, cx, cy, R, -1, 'rgba(120,180,255,');
+  const glowR=R*1.8;
+  const rg=ctx.createRadialGradient(cx,cy,0,cx,cy,glowR);
+  rg.addColorStop(0,'rgba(150,200,255,.22)'); rg.addColorStop(.45,'rgba(120,180,255,.08)');
+  rg.addColorStop(1,'rgba(120,180,255,0)');
+  ctx.fillStyle=rg; ctx.beginPath(); ctx.arc(cx,cy,glowR,0,7); ctx.fill();
+  ctx.lineWidth=Math.max(.5,.6*S);
+  for(const [i,j] of coreEdges){
+    const a=proj[i], b=proj[j], depth=(a.z+b.z)/2, al=0.08+0.22*((depth+1)/2);
+    ctx.strokeStyle='rgba(190,220,255,'+al.toFixed(3)+')';
+    ctx.beginPath(); ctx.moveTo(a.sx,a.sy); ctx.lineTo(b.sx,b.sy); ctx.stroke();
+  }
+  for(const p of proj){
+    const al=0.35+0.5*((p.z+1)/2), r=(1.1+0.9*p.sc)*S;
+    ctx.fillStyle='rgba(210,232,255,'+al.toFixed(3)+')';
+    ctx.beginPath(); ctx.arc(p.sx,p.sy,r,0,7); ctx.fill();
+  }
+  drawStream(profileStream, dt, cx, cy, R, 1, 'rgba(240,130,180,');
+}
+let coreStateTick=-1;
+const coreStateEl=document.getElementById('coreState');
+function updateCoreState(t){
+  const tick=Math.floor(t*2.2);
+  if(tick===coreStateTick || !coreStateEl) return;
+  coreStateTick=tick;
+  const pct=(86+11*(0.5+0.5*Math.sin(t*0.31))).toFixed(1);
+  coreStateEl.textContent=i18n('coreState', pct);
+}
+
 /* ---- 光晕 ---- */
 const GLOW={};
 function hexa(h,a){ const n=parseInt(h.slice(1),16);
@@ -958,6 +1078,7 @@ let tPrev=performance.now();
 function frame(now){
   const t=(now-t0)/1000, dt=Math.min(.05,(now-tPrev)/1000); tPrev=now;
   ctx.clearRect(0,0,W,H);
+  drawCore(t,dt); updateCoreState(t);
   const amp=REDUCED?0:3.4*S;
   for(const n of N){
     let u=Math.min(1,Math.max(0,(t-n.dl)/0.6));
@@ -2160,7 +2281,7 @@ async function loadMemories(){
     // 「这轮没有实体就停留在上一轮」。
     const cur=currentSession();
     if(cur&&ents.length&&watchTurn===turnSeq){
-      cur.ui.tags.ent=ents.slice(0,6).join('、'); paint(cur);
+      cur.ui.tags.ent=ents.slice(0,6).join(listSep()); paint(cur);
     }
   }
   sp.right.forEach((x,i)=>{
@@ -2247,6 +2368,10 @@ let replyPlaybackGeneration=0;
 spokenCaption={session:null,target:'',shown:'',index:0,budget:0,playing:false,
                active:false,frame:0,lastAt:0};
 function beginLiveChatDraft(s){
+  // A/B कम्पेयर चालू हो तो यह सिंगल "VoiceMem" ड्राफ्ट बबल feedNewTurn() के
+  // turn-cols पर लिख देता था (renderChat() पूरा chatLog rebuild करता है सिर्फ़
+  // s.turns से) — इसी वजह से "Without VoiceMem" वाला कार्ड ग़ायब हो जाता था।
+  if(CMP.on) return;
   if(!s||s!==currentSession()) return;
   const box=$('chatLog');
   const empty=box.querySelector('.empty'); if(empty) empty.remove();
@@ -2278,6 +2403,7 @@ function paintSpokenCaption(text){
 function finishLiveChatDraft(s,text){
   if(spokenCaption&&spokenCaption.session===s) spokenCaption.active=false;
   if(liveChatDraft&&liveChatDraft.sessionId===s.id) liveChatDraft=null;
+  if(CMP.on) return;   // compare turn: feedDone() ने turn-cols में दोनों जवाब पहले ही लिख दिए
   if(text) addTurn(s,'ai',text); else if(s===currentSession()) renderChat();
 }
 function captionCost(ch){
@@ -2369,8 +2495,8 @@ function handle(m){
     case 'memory_hits': {
       const L=m.left_brain||[], R=m.right_brain_hits||[];
       s.ui.tags={emo:m.emotion||'',
-                 ent:(m.entities||[]).join('、'),
-                 sch:(m.slots||[]).join('、')};
+                 ent:(m.entities||[]).join(listSep()),
+                 sch:(m.slots||[]).join(listSep())};
       s.ui.recallL=L.map(h=>({text:trunc(h.text),score:Number(h.score||0).toFixed(2)}));
       s.ui.recallR=R.filter(h=>!h.internal)
                     .map(h=>({text:trunc(h.content),score:Number(h.priority||0).toFixed(2)}));
