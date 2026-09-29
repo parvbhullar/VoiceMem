@@ -5,7 +5,7 @@ Status: approved, ready for implementation plan
 
 ## Problem
 
-VoiceMem's value claim is "inject retrieved memory into an existing LLM and the
+SuperMem's value claim is "inject retrieved memory into an existing LLM and the
 replies get better". Today the web demo shows only one reply, so the claim is
 unproven on screen: a viewer sees a good answer but cannot see what the same
 model would have said without the memory block.
@@ -30,11 +30,11 @@ Non-goals (explicitly out of the first cut):
 
 ## Constraints discovered in the codebase
 
-1. **`vm.reply_stream()` writes the reply into memory.** `voicemem/core.py:241`
+1. **`vm.reply_stream()` writes the reply into memory.** `supermem/core.py:241`
    wraps the provider in `capture(..., lambda answer: remember_reply(text, answer))`.
    Calling it once per arm would store two agent replies for one user turn and
    corrupt the memory space. Arms must therefore call the plain provider
-   `voicemem.reply.openai_reply(...)` directly, and the turn must be ingested
+   `supermem.reply.openai_reply(...)` directly, and the turn must be ingested
    exactly once by the existing path.
 
 2. **Memory context is already computed off the critical path.** The
@@ -53,7 +53,7 @@ Non-goals (explicitly out of the first cut):
    because `run_demo.sh` defaults to realtime.
 
 4. **The frontend reply renderer is coupled to the playback clock.**
-   `answer_start/_delta/_done` in `web/voicemem.html:2085-2109` drive spoken
+   `answer_start/_delta/_done` in `web/supermem.html:2085-2109` drive spoken
    captions, PCM output and live chat drafts. Compare must not reuse those
    messages; it gets its own `cmp_*` message types and its own render state.
 
@@ -77,8 +77,8 @@ mic → existing VAD/ASR (untouched) → Pending{text, memory_context, result}
 
 ### Components
 
-**`web/compare.py`** (new, ~120 lines, no FastAPI or voicemem-core imports at
-module load beyond `voicemem.reply`)
+**`web/compare.py`** (new, ~120 lines, no FastAPI or supermem-core imports at
+module load beyond `supermem.reply`)
 
 ```python
 @dataclass
@@ -119,7 +119,7 @@ at all, not an LLM told it has no memories.
 **`web/run.py`** (~40 lines changed)
 
 - Module-level `COMPARE = compare.CompareState()`.
-- In `voicemem_llm_tts()`: if `COMPARE.enabled`, send `cmp_ctx`, call
+- In `supermem_llm_tts()`: if `COMPARE.enabled`, send `cmp_ctx`, call
   `compare.fan_out(...)`, skip the TTS queue, the `synth`/`speak` tasks and all
   `answer_*` sends, then fall through to the existing `_push_history` +
   `queue_remember_turn(pending, replies["a"], owner, history_turn_id,
@@ -139,13 +139,13 @@ at all, not an LLM told it has no memories.
     (never returns the key itself)
   - `POST /api/compare` → accepts the same shape plus `api_key`, validates, returns the sanitized state.
 
-**`web/voicemem.html`**
+**`web/supermem.html`**
 
 - `⚖ Compare` toggle in the header; calls `POST /api/compare`.
 - When on, a compare section renders below the transcript: two columns, each with
   a model text input, a memory switch, a latency badge, and the streaming reply.
 - A collapsible **Injected memory context** block showing the exact string sent
-  to the memory-on arm (from `cmp_ctx`), so "what VoiceMem contributed" is
+  to the memory-on arm (from `cmp_ctx`), so "what SuperMem contributed" is
   visible verbatim.
 - Four new `case 'cmp_start' | 'cmp_delta' | 'cmp_done' | 'cmp_ctx'` handlers
   writing into a new `s.ui.cmp` state object, plus one new render function called
@@ -276,7 +276,7 @@ with `flex:1 0 auto` (grow, never shrink under content) and re-measured at
 arms 190-319px.
 
 The page now defaults to English (`localStorage 'vm-lang' || 'en'`); the top-bar
-selector still switches to 中文 and the choice persists. `renderCmp()` was added
+selector still switches to Chinese and the choice persists. `renderCmp()` was added
 to the language-switch handler — the compare placeholders are not part of
 `renderAll()`, so they previously stayed in the old language until the next turn.
 
@@ -289,9 +289,9 @@ boot and on its own actions only. There is no cross-client sync requirement.
 | File | Change |
 |---|---|
 | `web/compare.py` | new — `Arm`, `CompareState`, `fan_out`, `sanitize` |
-| `web/run.py` | `COMPARE` state + `_set_compare`; `_compare_shared_system`; `_compare_turn`; branch in `voicemem_llm_tts`; realtime divert; `_announce_turn` extracted; pass `compare=` into `build_app` |
+| `web/run.py` | `COMPARE` state + `_set_compare`; `_compare_shared_system`; `_compare_turn`; branch in `supermem_llm_tts`; realtime divert; `_announce_turn` extracted; pass `compare=` into `build_app` |
 | `web/utils.py` | `build_app` gains the optional `compare` param and delegates to `compare.register_routes` |
-| `web/voicemem.html` | toggle, compare section (per-panel model / memory / base_url / api_key), 4 `cmp_*` handlers, `renderCmp`, i18n keys, CSS |
+| `web/supermem.html` | toggle, compare section (per-panel model / memory / base_url / api_key), 4 `cmp_*` handlers, `renderCmp`, i18n keys, CSS |
 | `tests/test_compare.py` | new — 20 unit tests (`git add -f`: `tests/` is gitignored, matching the two already-tracked test files) |
 
 Two changes to the plan above, made while implementing:
@@ -302,7 +302,7 @@ Two changes to the plan above, made while implementing:
   `compare.py` they run against a bare `FastAPI()` app in milliseconds.
 * `_announce_turn` was extracted. The transcript + `memory_hits` +
   acoustic-emotion block was already duplicated verbatim between
-  `voicemem_llm_tts` and `start_realtime_turn`; the compare path would have
+  `supermem_llm_tts` and `start_realtime_turn`; the compare path would have
   made a third copy.
 
 
@@ -314,7 +314,7 @@ all of them about the demo explaining itself:
 1. **Compare is on by default** (`CompareState.enabled = True`). Both replies are
    the point; needing to find a toggle first was the confusion. Switching it off
    returns the page to one reply with voice.
-2. **The panels say what they are** — "With VoiceMem" / "Without VoiceMem" — instead
+2. **The panels say what they are** — "With SuperMem" / "Without SuperMem" — instead
    of "A" / "B" plus a `memory` checkbox. The model, endpoint, key and the memory
    switch moved behind a ⚙ per panel, so the default view is two labels and two
    replies. The configurability is unchanged, just no longer the first thing shown.
@@ -338,7 +338,7 @@ all of them about the demo explaining itself:
 Hindi replies work through `_lang_note()`, which now prefers `UI_LANG` over
 `SPACE_LANG`. That split is deliberate: what the assistant *says* is switchable per
 turn, while what gets *stored* is a property of the memory space, fixed at creation
-(`voicemem/lang.py` supports only `en`/`zh`). So Hindi replies come out of an
+(`supermem/lang.py` supports only `en`/`zh`). So Hindi replies come out of an
 English memory space and nothing mixes languages inside one vector store. Verified:
 `तेरी बिल्ली मोचा तीन साल की है।` from the memory arm against
 `तुम्हारी बिल्ली लगभग चार साल पुरानी है` from the baseline.
@@ -372,9 +372,9 @@ canvas animation was checked by diffing `canvas.toDataURL()` across a turn.
 
 ## Round three: the Chinese that survived the language switch
 
-Picking EN still left ten-odd Chinese strings on screen: the sidebar's "对话"
-label, the speaker chip ("你", `speaker 7 · recognized as "你"`), the type-here
-placeholder, the "Top-K 召回" and "AI 回复" panel headers, both recall column
+Picking EN still left ten-odd Chinese strings on screen: the sidebar's "Dialogue"
+label (in Chinese), the speaker chip ("you" in Chinese, `speaker 7 · recognized as "you"`), the type-here
+placeholder, the "Top-K recall" and "AI reply" panel headers (in Chinese), both recall column
 headings, the brain legend, and the Idle / Pause / Start-talking row.
 
 Two separate causes:
@@ -388,7 +388,7 @@ Two separate causes:
   reply header with the compare toggle, the two legend swatches — needed the
   text wrapped in its own span first: `data-i18n` assigns `innerHTML`, so
   tagging the parent would have deleted the child.
-* **Chinese string literals in JS.** `'你'` was the hardcoded fallback speaker
+* **Chinese string literals in JS.** The Chinese for "you" was the hardcoded fallback speaker
   name in five places (`blankUI`, `addTurn`, `renderIO`, the export, the
   `user_transcript` handler); all now call `i18n('you')`. `SPK_COLOR` is keyed by
   the speaker's display name, so it needed the Hindi form as a third key.

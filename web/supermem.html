@@ -1,0 +1,2807 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>SuperMem</title>
+<style>
+/* ══════════════════════════════════════════════════════════════════════
+   SuperMem — black/grey (matching ChatGPT). Left-brain blue / right-brain pink are the only two colours.
+   ══════════════════════════════════════════════════════════════════════ */
+:root{
+  --bg:#212121; --bg-side:#181818; --bg-panel:#1c1c1c; --bg-input:#2b2b2b;
+  --bg-hover:rgba(255,255,255,.055); --bg-active:rgba(255,255,255,.09);
+  --bg-dark:#080808;
+  --line:rgba(255,255,255,.09); --line-2:rgba(255,255,255,.17);
+  --txt:#ececec; --txt-2:#a8a8a8; --txt-3:#7c7c7c;
+  --blue:#6ba7f0; --rose:#ef7bab; --mint:#79d7a2;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",
+         "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  --radius:12px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--txt);font-family:var(--sans);
+  font-size:14px;line-height:1.5;overflow:hidden;-webkit-font-smoothing:antialiased}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer;background:none;border:none}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:99px}
+::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.24)}
+::-webkit-scrollbar-track{background:transparent}
+:focus-visible{outline:2px solid #8ab4f8;outline-offset:2px;border-radius:6px}
+
+/* Collapsing the sidebar keeps the centre column width; the brain map is sized by height — the whole screen just shifts sideways, no reflow.
+   Only when the window really cannot fit do the two columns shrink to their minmax floor. */
+#app{
+  position:fixed;inset:0;display:grid;
+  grid-template-columns:minmax(340px,420px) minmax(560px,1fr);
+  transition:grid-template-columns .3s cubic-bezier(.2,.8,.2,1);
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────── */
+.sidebar{display:flex;flex-direction:column;min-width:0;background:var(--bg-side);
+  border-right:1px solid var(--line)}
+.side-head{display:flex;align-items:center;gap:4px;padding:10px 8px}
+.side-head .grow{flex:1}
+.ico{width:34px;height:34px;flex:0 0 34px;border-radius:8px;display:flex;
+  align-items:center;justify-content:center;color:var(--txt-2);transition:background .15s,color .15s}
+.ico:hover{background:var(--bg-hover);color:var(--txt)}
+.ico svg{width:19px;height:19px;stroke:currentColor;fill:none;stroke-width:1.7;
+  stroke-linecap:round;stroke-linejoin:round}
+.side-search{padding:0 10px 8px;display:none}
+.side-search.open{display:block}
+.side-search input{width:100%;padding:7px 11px;border-radius:9px;border:1px solid var(--line);
+  background:var(--bg-input);color:var(--txt);font-size:13px}
+.side-search input::placeholder{color:var(--txt-3)}
+.side-search input:focus{outline:none;border-color:var(--line-2)}
+.side-scroll{flex:1;overflow-y:auto;padding:0 8px 14px}
+.side-label{display:flex;align-items:center;gap:6px;padding:10px 10px 6px;
+  font-size:11.5px;color:var(--txt-3)}
+.side-label .c{margin-left:auto;font-variant-numeric:tabular-nums}
+
+.sess{list-style:none;margin:0;padding:0}
+.sess li{display:flex;align-items:center;gap:8px;padding:8px 10px;margin-bottom:2px;
+  border-radius:9px;cursor:pointer;font-size:13.5px;color:var(--txt-2);
+  transition:background .14s,color .14s}
+.sess li:hover{background:var(--bg-hover);color:var(--txt)}
+.sess li.on{background:var(--bg-active);color:var(--txt)}
+.sess .t{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sess .n{flex:0 0 auto;font-size:11px;color:var(--txt-3);font-variant-numeric:tabular-nums}
+.sess .sp{flex:0 0 auto;font-size:10.5px;color:var(--txt-3);border:1px solid var(--line);
+  border-radius:99px;padding:1px 7px;max-width:88px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sess li.on .sp{color:var(--txt-2);border-color:var(--line-2)}
+.side-empty{padding:12px 10px;font-size:12.5px;color:var(--txt-3);line-height:1.7}
+.side-foot{padding:10px 14px;border-top:1px solid var(--line);font-size:11.5px;
+  letter-spacing:.14em;color:var(--txt-3)}
+
+/* ── Centre column ─────────────────────────────────────────────────── */
+.center{display:flex;flex-direction:column;gap:10px;min-width:0;min-height:0;padding:14px}
+#orb{display:block;flex:0 1 26%;height:26%;min-height:0;width:auto;aspect-ratio:1/1;
+  margin:0 auto;opacity:.75;pointer-events:none;border-radius:50%}
+.panel{border:1px solid var(--line);border-radius:var(--radius);background:var(--bg-panel);
+  padding:12px 14px;display:flex;flex-direction:column;min-height:0}
+.panel-h{flex:0 0 auto;display:flex;align-items:center;gap:8px;margin-bottom:9px;
+  font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--txt-3)}
+.panel-h::after{content:"";flex:1;height:1px;background:var(--line)}
+
+.p-in{flex:0 0 auto}
+.spk{display:flex;align-items:center;gap:8px;margin-bottom:9px}
+.spk .av{width:22px;height:22px;flex:0 0 22px;border-radius:50%;display:flex;
+  align-items:center;justify-content:center;font-size:11px;color:#141414;background:var(--blue)}
+.spk .nm{font-size:12.5px;color:var(--txt)}
+.spk .id{font-size:11px;color:var(--txt-3);padding:2px 8px;border:1px solid var(--line);border-radius:99px}
+.spk .lv{margin-left:auto;display:flex;gap:2px;align-items:flex-end;height:14px}
+.spk .lv i{width:2px;background:var(--txt-3);border-radius:1px;height:4px;transition:height .11s}
+.spk.live .lv i{background:var(--blue)}
+.live-text{font-size:15px;line-height:1.5;color:var(--txt);min-height:23px;word-break:break-word}
+.live-text.idle{color:var(--txt-3)}
+.textin{width:100%;margin-top:10px;padding:9px 12px;border-radius:10px;border:1px solid var(--line);
+  background:var(--bg-input);color:var(--txt);font-size:13.5px}
+.textin::placeholder{color:var(--txt-3)}
+.textin:focus{outline:none;border-color:var(--line-2)}
+.tags{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}
+.tag{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;padding:3px 10px;
+  border-radius:99px;border:1px solid var(--line);color:var(--txt-2);white-space:nowrap}
+.tag b{font-weight:400;color:var(--txt-3);font-size:10.5px;letter-spacing:.06em}
+.tag.off{color:var(--txt-3);border-style:dashed}
+.tag.emo:not(.off){border-color:rgba(239,123,171,.42);color:#f2a3c5}
+.tag.ent:not(.off){border-color:rgba(107,167,240,.42);color:#a5cbf7}
+.tag.sch:not(.off){border-color:rgba(121,215,162,.42);color:#a2e3bf}
+
+.p-recall{flex:0 1 auto;max-height:32%}
+.recall-cols{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.rc{display:flex;flex-direction:column;min-height:0}
+.rc-h{flex:0 0 auto;font-size:10.5px;letter-spacing:.1em;margin-bottom:6px;color:var(--txt-3)}
+.rc.l .rc-h{color:var(--blue)} .rc.r .rc-h{color:var(--rose)}
+.rc ul{list-style:none;margin:0;padding:0;overflow:auto;flex:1;min-height:0}
+.rc li{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;color:var(--txt-2);
+  padding:6px 0;border-bottom:1px solid var(--line);line-height:1.35}
+.rc li:last-child{border-bottom:none}
+.rc .sc{flex:0 0 auto;color:var(--txt-3);font-variant-numeric:tabular-nums;font-size:11px}
+.rc .none{font-size:12.5px;color:var(--txt-3);padding:6px 0}
+
+.p-out{flex:1 1 auto;min-height:150px}
+.reply{flex:1;min-height:38px;overflow:auto;font-size:15px;line-height:1.6;
+  color:var(--txt);white-space:pre-wrap}
+.reply.idle{color:var(--txt-3)}
+.out-foot{flex:0 0 auto;display:flex;align-items:center;gap:10px;margin-top:11px;
+  padding-top:10px;border-top:1px solid var(--line)}
+.voice{display:flex;align-items:center;gap:9px;height:28px;min-width:0}
+.voice .lab{font-size:11px;color:var(--txt-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.voice #wave{display:none;width:96px;height:24px}
+.voice.ai #wave{display:block} .voice.ai .lab{color:var(--mint)} .voice.user .lab{color:var(--blue)}
+.ear{position:relative;width:20px;height:20px;flex:0 0 20px;display:none}
+.voice.user .ear{display:block}
+.ear .ring{position:absolute;inset:0;border:1px solid rgba(107,167,240,.5);border-radius:50%;
+  animation:earpulse 1.6s ease-out infinite}
+@keyframes earpulse{0%{transform:scale(.55);opacity:.85}100%{transform:scale(1.5);opacity:0}}
+.btns{margin-left:auto;display:flex;gap:8px;flex:0 0 auto}
+.btn{padding:7px 15px;border-radius:99px;font-size:13px;border:1px solid var(--line-2);
+  color:var(--txt);transition:background .15s,border-color .15s,color .15s,opacity .15s}
+.btn:hover{background:var(--bg-hover)}
+.btn.primary{background:#ececec;color:#141414;border-color:#ececec}
+.btn.primary:hover{background:#fff;border-color:#fff}
+.btn.live{border-color:rgba(239,123,171,.55);color:#f2a3c5}
+.btn.sm{padding:5px 11px;font-size:12px}
+.btn.on{border-color:rgba(121,215,162,.5);color:#a2e3bf}
+.btn[disabled]{opacity:.35;cursor:default}
+.btn[disabled]:hover{background:none}
+
+/* ── Right column ─────────────────────────────────────────────────── */
+.rightpane{display:flex;flex-direction:column;min-width:0;min-height:0;border-left:1px solid var(--line)}
+.topbar{flex:0 0 auto;display:flex;align-items:center;gap:12px;padding:11px 14px;
+  border-bottom:1px solid var(--line)}
+.seg{position:relative;display:flex;padding:3px;border-radius:99px;background:#171717;
+  border:1px solid var(--line)}
+.seg-thumb{position:absolute;top:3px;left:3px;bottom:3px;width:calc(50% - 3px);border-radius:99px;
+  background:#3a3a3a;transition:transform .3s cubic-bezier(.2,.8,.2,1)}
+.seg.mem .seg-thumb{transform:translateX(100%)}
+.seg button{position:relative;z-index:1;flex:1 0 auto;min-width:102px;padding:5px 14px;
+  border-radius:99px;font-size:12.5px;color:var(--txt-3);transition:color .2s}
+.seg button.on{color:var(--txt)}
+.export{margin-left:auto;display:flex;gap:8px;align-items:center}
+.sel{appearance:none;padding:6px 30px 6px 11px;border-radius:9px;border:1px solid var(--line);
+  background:var(--bg-input) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%23a8a8a8' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/></svg>") no-repeat right 10px center;
+  font-size:12.5px;color:var(--txt)}
+.sel:focus{outline:none;border-color:var(--line-2)}
+
+.viewport{flex:1;min-height:0;overflow:hidden}
+.track{display:flex;width:200%;height:100%;transition:transform .34s cubic-bezier(.2,.8,.2,1)}
+.track.mem{transform:translateX(-50%)}
+.pane{width:50%;flex:0 0 50%;min-width:0;height:100%;display:flex;flex-direction:column;overflow:hidden}
+
+.chat-head{flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:10px 22px;
+  border-bottom:1px solid var(--line)}
+.chat-head .ttl{font-size:13.5px;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pill{display:inline-flex;align-items:center;gap:6px;flex:0 0 auto;font-size:11.5px;
+  padding:3px 10px;border-radius:99px;border:1px solid var(--line);color:var(--txt-2)}
+.pill svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:1.6}
+.pill.space{border-color:rgba(107,167,240,.4);color:#a5cbf7}
+.chat{flex:1;overflow:auto;padding:20px 22px;display:flex;flex-direction:column;gap:16px}
+.chat .turn{max-width:78%;display:flex;flex-direction:column;gap:5px}
+.chat .turn.user{align-self:flex-end;align-items:flex-end}
+.chat .turn.ai{align-self:flex-start;align-items:flex-start}
+.chat .who{font-size:11px;color:var(--txt-3);padding:0 4px}
+.chat .said{font-size:14.5px;line-height:1.65;white-space:pre-wrap;word-break:break-word}
+.chat .turn.user .said{background:#303030;padding:10px 15px;border-radius:18px;border-bottom-right-radius:6px}
+.chat .turn.ai .said{color:var(--txt)}
+.chat .turn.ai.streaming .said::after{content:'';display:inline-block;width:2px;height:1em;
+  margin-left:4px;vertical-align:-2px;border-radius:1px;background:var(--blue);
+  animation:stream-caret .8s steps(1,end) infinite}
+@keyframes stream-caret{50%{opacity:.18}}
+.chat .empty{margin:auto;text-align:center;color:var(--txt-3);font-size:13.5px;line-height:1.9}
+.chat .empty b{display:block;font-weight:500;font-size:15px;color:var(--txt-2);margin-bottom:4px}
+
+.brainwrap{position:relative;flex:1;min-height:0;overflow:hidden;background:var(--bg-dark)}
+/* brain silhouette image ab display नहीं होता — reference design में brain shape
+   नहीं, wireframe sphere है। sizing math अभी भी इसी hidden anchor पर टिका है। */
+#brain{position:absolute;left:0;top:0;opacity:0;pointer-events:none;user-select:none;
+  display:none}
+#fx{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
+.core-title{position:absolute;left:0;right:0;top:12px;z-index:4;text-align:center;
+  font-size:11px;font-weight:600;letter-spacing:.22em;text-transform:uppercase;
+  color:var(--txt-2);pointer-events:none}
+.core-title em{color:var(--mint);font-style:normal}
+.core-state{position:absolute;left:0;right:0;bottom:14px;z-index:4;text-align:center;
+  font-size:11px;color:var(--txt-3);letter-spacing:.02em;pointer-events:none;
+  font-variant-numeric:tabular-nums}
+.legend{position:absolute;top:38%;left:0;right:0;z-index:4;display:flex;
+  justify-content:space-between;padding:0 6%;pointer-events:none}
+.core-pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;
+  padding:5px 13px;border-radius:99px;background:rgba(20,26,38,.55);text-transform:capitalize;
+  backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
+.core-pill.facts{border:1px solid rgba(107,167,240,.55);color:#bcdcff}
+.core-pill.profile{border:1px solid rgba(239,123,171,.55);color:#ffcfe4}
+.core-pill .arrow{font-size:11px;opacity:.85}
+.brain-space{position:absolute;right:16px;top:14px;z-index:4;pointer-events:none}
+
+#card{position:absolute;left:0;top:0;width:224px;z-index:5;border-radius:10px;
+  border:1px solid var(--line-2);background:rgba(24,24,24,.96);
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);padding:11px 12px 10px;
+  opacity:0;transform:translate3d(-999px,-999px,0);transition:opacity .18s;pointer-events:none;
+  box-shadow:0 18px 44px -20px rgba(0,0,0,.95)}
+#card.on{opacity:1}
+#card .eb{display:flex;align-items:center;gap:7px;margin-bottom:8px}
+#card .sw{width:7px;height:7px;border-radius:2px;border:1.4px solid #fff;flex:0 0 7px}
+#card .kd{font-size:10.5px;letter-spacing:.08em;color:var(--txt)}
+#card .id{margin-left:auto;font-size:10px;color:var(--txt-3)}
+#card .cbody{font-size:12.5px;line-height:1.5;color:var(--txt-2);margin-bottom:9px;
+  max-height:112px;overflow:auto;word-break:break-word;white-space:pre-wrap}
+#card .ft{font-size:10px;color:var(--txt-3);border-top:1px solid var(--line);padding-top:7px}
+
+/* ── Modal / toast ─────────────────────────────────────────────────── */
+.mask{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.55);display:none;
+  align-items:center;justify-content:center;padding:20px}
+.mask.on{display:flex}
+.modal{width:min(440px,100%);border-radius:16px;border:1px solid var(--line-2);
+  background:#1f1f1f;padding:20px}
+.modal h3{margin:0 0 4px;font-size:16px;font-weight:600}
+.modal p{margin:0 0 16px;font-size:12.5px;color:var(--txt-3)}
+.pick{display:flex;flex-direction:column;gap:9px;margin-bottom:18px}
+.pick button{display:flex;gap:11px;align-items:flex-start;text-align:left;padding:12px 14px;
+  border-radius:12px;border:1px solid var(--line);transition:border-color .15s,background .15s}
+.pick button:hover{background:var(--bg-hover)}
+.pick button.on{border-color:var(--blue);background:rgba(107,167,240,.09)}
+.pick .dot{width:9px;height:9px;flex:0 0 9px;border-radius:50%;margin-top:5px;background:var(--txt-3)}
+.pick button.on .dot{background:var(--blue);box-shadow:0 0 9px rgba(107,167,240,.9)}
+.pick .nm{font-size:14px;color:var(--txt);display:block}
+.pick .sub{font-size:12px;color:var(--txt-3);margin-top:2px;line-height:1.5;display:block}
+.pick button.newopt{border-style:dashed;color:var(--txt-2)}
+.pick button.newopt .nm{color:var(--txt-2)}
+/* "Create a new space" inside the new-chat modal. It used to default to display:none with no code ever
+   adding .on, so it was never visible — the entry point for creating a space simply vanished. Show it by default. */
+.newspace{display:flex;gap:8px;margin:-8px 0 18px}
+.newspace.off{display:none}
+.newspace input{flex:1;min-width:0;padding:8px 11px;border-radius:9px;border:1px solid var(--line);
+  background:var(--bg-input);color:var(--txt);font-size:13px}
+.newspace input::placeholder{color:var(--txt-3)}
+.newspace input:focus{outline:none;border-color:var(--blue)}
+/* Language dropdown: unstyled, it uses the browser's native look — on the dark theme that is a white background + inherited white text,
+   i.e. invisible. Use the same palette as the input next to it; appearance:none removes the native control background. */
+.newspace select{padding:8px 28px 8px 11px;border-radius:9px;border:1px solid var(--line);
+  background:var(--bg-input);color:var(--txt);font-size:13px;cursor:pointer;
+  appearance:none;-webkit-appearance:none;
+  background-image:linear-gradient(45deg,transparent 50%,var(--txt-3) 50%),
+                   linear-gradient(135deg,var(--txt-3) 50%,transparent 50%);
+  background-position:calc(100% - 15px) 50%,calc(100% - 10px) 50%;
+  background-size:5px 5px,5px 5px;background-repeat:no-repeat}
+.newspace select:focus{outline:none;border-color:var(--blue)}
+/* The expanded option list is drawn by the OS; only explicit colours keep it from following the system theme. */
+.newspace select option{background:var(--bg-input);color:var(--txt)}
+.modal-foot{display:flex;justify-content:flex-end;gap:9px}
+#toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,14px);padding:9px 16px;
+  border-radius:10px;background:#2f2f2f;border:1px solid var(--line-2);font-size:13px;
+  color:var(--txt);opacity:0;pointer-events:none;z-index:70;transition:opacity .2s,transform .2s}
+#toast.on{opacity:1;transform:translate(-50%,0)}
+
+@media (max-width:1180px){
+  #app{grid-template-columns:56px minmax(320px,380px) minmax(340px,1fr)}
+}
+@media (max-width:860px){
+  #app,#app.collapsed{grid-template-columns:1fr;grid-template-rows:auto 1fr;overflow:auto}
+  .rightpane{border-left:none;border-top:1px solid var(--line);min-height:70vh}
+}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.001ms!important;transition-duration:.001ms!important}}
+
+/* ── A/B compare ────────────────────────────────────────────────────────────
+   Two panels side by side. Deliberately not left-brain blue / right-brain pink — on this page those colours already mean "which half of the brain",
+   and using them for "which arm" would read as the same thing. The arm with memory gets a mint outline; the arm without stays grey. */
+/* panel-h's ::after is the thin line filling the remaining width (flex:1); in DOM order it comes after the button,
+   so without setting order the line ends up right of the button. We want "title — line — button". */
+.cmp-tg{font-size:11px;letter-spacing:.02em;padding:3px 9px;border-radius:99px;
+  border:1px solid var(--line-2);color:var(--txt-2);order:2;flex:0 0 auto}
+.panel-h.has-tg::after{order:1;margin-right:8px}
+.cmp-tg:hover{background:var(--bg-hover);color:var(--txt)}
+.cmp-tg.on{background:var(--mint);border-color:var(--mint);color:#08150e;font-weight:600}
+.panel-h.has-tg{display:flex;align-items:center;gap:8px}
+/* flex:1 means flex:1 1 0% — it can shrink below its content. cols has a 190px floor, so once it over-shrinks the ctx
+   overflows .cmp and sits on top of .out-foot (reproduced at both 1920x1080 and 1440x900; it looks like
+   "Injected memory context" and "Start talking" squeezed onto the same line).
+   1 0 auto: may grow, never shrinks below its content; when it does not fit, .center.cmp-on scrolls. */
+.cmp{display:flex;flex-direction:column;gap:8px;min-height:0;flex:0 0 auto}
+/* Each arm needs enough room to read a reply. Without a floor, when the centre column is short flex squeezes them to a few
+   pixels — measured 64px at 1440x900 and 5px at 1280x720, all text hidden under overflow:hidden,
+   which looks like "the panels are empty". So cols gets a floor, and when space runs out the centre column scrolls
+   instead of the panels vanishing. The centre column only scrolls while compare is on (.center.cmp-on); the default layout is untouched. */
+.cmp-cols{display:grid;grid-template-columns:1fr 1fr;gap:8px;flex:0 0 auto}
+.center.cmp-on{overflow-y:auto}
+.p-out.cmp-on{flex:0 0 auto}
+.cmp-col{display:flex;flex-direction:column;min-width:0;border:1px solid var(--line);
+  border-radius:var(--radius);background:var(--bg-panel);overflow:hidden}
+.cmp-col.mem{border-color:rgba(121,215,162,.45)}
+.cmp-h{display:flex;align-items:center;gap:6px;padding:6px 8px;
+  border-bottom:1px solid var(--line);background:rgba(255,255,255,.02)}
+.cmp-h .lab{font-size:11px;font-weight:700;color:var(--txt-3);letter-spacing:.04em;
+  flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cmp-col.mem .cmp-h .lab{color:var(--mint)}
+/* model / endpoint / key are tucked behind the gear: the default view shows only "which arm" and the reply itself.
+   The settings are still there, just no longer the first thing you see — which is exactly why it was confusing before. */
+.cmp-gear{font-size:11px;color:var(--txt-3);padding:0 2px;line-height:1;flex:0 0 auto}
+.cmp-gear:hover,.cmp-gear.on{color:var(--txt)}
+.cmp-keys{grid-template-columns:1fr;gap:5px}
+.cmp-keys .cmp-model{width:100%}
+.seg-gone{flex:1}
+.seg-gone.brand{display:flex;align-items:center;gap:8px;min-width:0}
+.brand-ic{height:20px;width:20px;border-radius:5px;flex:0 0 auto;object-fit:contain}
+.brand-wm{height:13px;width:auto;flex:0 0 auto;object-fit:contain}
+.cmp-model{flex:1;min-width:0;background:var(--bg-input);border:1px solid transparent;
+  border-radius:7px;padding:3px 7px;font-size:11px;color:var(--txt)}
+.cmp-model:focus{border-color:var(--line-2);outline:none}
+.cmp-mem{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--txt-2);
+  cursor:pointer;white-space:nowrap}
+.cmp-ms{font-size:10px;color:var(--txt-3);font-variant-numeric:tabular-nums}
+.cmp-body{display:none;flex:1;overflow-y:auto;padding:9px 10px;font-size:13px;line-height:1.62;
+  white-space:pre-wrap;word-break:break-word}
+.cmp-body.idle{color:var(--txt-3)}
+.cmp-body.err{color:var(--rose);font-size:12px}
+.cmp-ctx{display:none;border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--bg-dark);flex:none}
+.cmp-ctx>summary{padding:6px 10px;font-size:11px;color:var(--txt-2);cursor:pointer;
+  list-style:none;display:flex;gap:6px;align-items:center}
+.cmp-ctx>summary::-webkit-details-marker{display:none}
+.cmp-ctx>summary::before{content:'▸';color:var(--txt-3)}
+.cmp-ctx[open]>summary::before{content:'▾'}
+.cmp-ctx pre{margin:0;padding:0 10px 9px;font-size:11px;line-height:1.55;
+  color:var(--txt-2);white-space:pre-wrap;max-height:22vh;overflow-y:auto}
+.cmp-keys{display:grid;padding:6px 8px 8px}
+.cmp-keys input{background:var(--bg-input);border:1px solid transparent;border-radius:7px;
+  padding:3px 7px;font-size:11px;color:var(--txt);min-width:0}
+.cmp-keys input:focus{border-color:var(--line-2);outline:none}
+
+/* ── Right column split top/bottom: brain map + per-turn compare feed ──────────────────────────────────────── */
+.rsplit{display:flex;flex-direction:column;height:100%;min-height:0}
+/* The brain map gets a fixed 42%: it is background information and should not grow with the feed. min-height is a floor
+   so it still looks like a brain when the window is very short. */
+.brainpart{flex:0 0 42%;min-height:220px;position:relative;min-width:0;
+  display:flex;flex-direction:column}
+.feedpart{flex:1 1 auto;display:flex;flex-direction:column;min-height:0;
+  border-top:1px solid var(--line)}
+
+/* ── One turn = the user's line + both arms side by side ─────────────────────────────────────────── */
+.turn{padding:2px 0 10px;border-bottom:1px solid var(--line)}
+.turn-said{display:flex;justify-content:center;margin-bottom:12px}
+.turn-said span{background:var(--bg-input);border-radius:99px;padding:5px 14px;
+  font-size:12.5px;color:var(--txt-2);max-width:76%;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.turn-said b{color:var(--txt-3);font-weight:600;letter-spacing:.06em;
+  font-size:10.5px;margin-right:7px;text-transform:uppercase}
+.turn-cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.tc{border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--bg-panel);overflow:hidden;min-width:0}
+.tc.mem{border-color:rgba(121,215,162,.45)}
+.tc-h{display:flex;align-items:center;gap:8px;padding:6px 10px;
+  border-bottom:1px solid var(--line);background:rgba(255,255,255,.02)}
+.tc-h .who{font-size:10.5px;font-weight:700;letter-spacing:.05em;
+  color:var(--txt-3);text-transform:uppercase;flex:1;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tc.mem .tc-h .who{color:var(--mint)}
+/* TTFB is the headline, total time is secondary. What the viewer feels is "how long until the first word". */
+.tc-h .ttfb{font-size:11px;color:var(--txt);font-variant-numeric:tabular-nums}
+.tc.mem .tc-h .ttfb{color:var(--mint)}
+.tc-h .tot{font-size:10px;color:var(--txt-3);font-variant-numeric:tabular-nums}
+.tc-kv{padding:0 12px 8px;font-size:10.5px;color:var(--mint);font-variant-numeric:tabular-nums}
+.tc-kv:empty{display:none}
+.tc-body{padding:10px 12px;font-size:13px;line-height:1.62;white-space:pre-wrap;
+  word-break:break-word;min-height:44px}
+.tc-body.idle{color:var(--txt-3)}
+.tc-body.err{color:var(--rose);font-size:12px}
+.turn-ctx{margin:10px 0 12px;border:1px solid var(--line);border-radius:var(--radius);
+  background:var(--bg-dark)}
+.turn-ctx>summary{padding:5px 10px;font-size:11px;color:var(--txt-2);cursor:pointer;
+  list-style:none;display:flex;gap:6px;align-items:center}
+.turn-ctx>summary::-webkit-details-marker{display:none}
+.turn-ctx>summary::before{content:'▸';color:var(--txt-3)}
+.turn-ctx[open]>summary::before{content:'▾'}
+.turn-ctx pre{margin:0;padding:0 10px 8px;font-size:11px;line-height:1.55;
+  color:var(--txt-2);white-space:pre-wrap;max-height:20vh;overflow-y:auto}
+@media (max-width:1100px){ .turn-cols{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- (2) Live conversation -->
+  <section class="center">
+    <canvas id="orb" width="264" height="264" aria-hidden="true"></canvas>
+
+    <div class="panel p-in">
+      <div class="panel-h" data-i18n="liveInput">Live input</div>
+      <div class="spk" id="spk">
+        <span class="av" id="spkAv">Y</span>
+        <span class="nm" id="spkNm">You</span>
+        <span class="id" id="spkId" data-i18n="voiceMatched">speaker 0 · voice matched</span>
+        <span class="lv" id="spkLv"><i></i><i></i><i></i><i></i><i></i></span>
+      </div>
+      <div class="live-text idle" id="liveInput" data-i18n="waitingYou">Waiting for you to speak…</div>
+      <input id="textIn" class="textin" data-i18n-ph="typeHint"
+             placeholder="Or just type and press Enter" />
+      <div class="tags" id="tags"></div>
+    </div>
+
+    <div class="panel p-recall">
+      <div class="panel-h" data-i18n="topk">Top-K recall</div>
+      <div class="recall-cols">
+        <div class="rc l"><div class="rc-h" data-i18n="leftFacts">Left · Facts</div><ul id="recallL"></ul></div>
+        <div class="rc r"><div class="rc-h" data-i18n="rightProfile">Right · Profile</div><ul id="recallR"></ul></div>
+      </div>
+    </div>
+
+    <div class="panel p-out">
+      <div class="panel-h has-tg"><span data-i18n="aiReply">AI reply</span>
+        <button class="cmp-tg" id="cmpTg" data-i18n-title="cmpTgTitle"
+                title="Same utterance to two arms: one with memory, one without">⚖ A/B</button>
+      </div>
+      <div class="reply idle" id="reply" data-i18n="noReplyYet">No reply yet.</div>
+      <div class="cmp" id="cmp" hidden>
+        <div class="cmp-cols">
+      <div class="cmp-col mem" id="cmpColA">
+        <div class="cmp-h">
+          <span class="lab">With Memory</span>
+          <span class="cmp-ms" id="cmpMsA"></span>
+          <button class="cmp-gear" id="cmpGearA" data-i18n-title="cmpGearTitle"
+                  title="model / endpoint / key">⚙</button>
+        </div>
+        <div class="cmp-keys" id="cmpAdvA" hidden>
+          <input class="cmp-model" id="cmpModelA" data-i18n-ph="cmpModelPh"
+                 placeholder="server default" spellcheck="false">
+          <label class="cmp-mem"><input type="checkbox" id="cmpMemA" checked>
+            <span data-i18n="cmpMem">memory</span></label>
+          <label class="cmp-mem" data-i18n-title="cmpCartTitle"
+                 title="Carry the memory as a reusable KV cartridge (stable prompt prefix)"><input type="checkbox" id="cmpCartA">
+            <span data-i18n="cmpCart">KV cartridge</span></label>
+          <input id="cmpUrlA" data-i18n-ph="cmpUrlPh" placeholder="own endpoint"
+                 spellcheck="false">
+          <input id="cmpKeyA" type="password" data-i18n-ph="cmpKeyPh"
+                 placeholder="own key" spellcheck="false" autocomplete="off">
+        </div>
+        <div class="cmp-body idle" id="cmpTxtA">waiting for this turn…</div>
+      </div>
+      <div class="cmp-col" id="cmpColB">
+        <div class="cmp-h">
+          <span class="lab">Without Memory</span>
+          <span class="cmp-ms" id="cmpMsB"></span>
+          <button class="cmp-gear" id="cmpGearB" data-i18n-title="cmpGearTitle"
+                  title="model / endpoint / key">⚙</button>
+        </div>
+        <div class="cmp-keys" id="cmpAdvB" hidden>
+          <input class="cmp-model" id="cmpModelB" data-i18n-ph="cmpModelPh"
+                 placeholder="server default" spellcheck="false">
+          <label class="cmp-mem"><input type="checkbox" id="cmpMemB">
+            <span data-i18n="cmpMem">memory</span></label>
+          <label class="cmp-mem" data-i18n-title="cmpCartTitle"
+                 title="Carry the memory as a reusable KV cartridge (stable prompt prefix)"><input type="checkbox" id="cmpCartB">
+            <span data-i18n="cmpCart">KV cartridge</span></label>
+          <input id="cmpUrlB" data-i18n-ph="cmpUrlPh" placeholder="own endpoint"
+                 spellcheck="false">
+          <input id="cmpKeyB" type="password" data-i18n-ph="cmpKeyPh"
+                 placeholder="own key" spellcheck="false" autocomplete="off">
+        </div>
+        <div class="cmp-body idle" id="cmpTxtB">waiting for this turn…</div>
+      </div>
+        </div>
+        <details class="cmp-ctx">
+          <summary><span data-i18n="cmpCtx">Injected memory context</span>
+            <span class="cmp-ms" id="cmpCtxN"></span></summary>
+          <pre id="cmpCtx"></pre>
+        </details>
+      </div>
+      <div class="out-foot">
+        <div class="voice" id="voice">
+          <div class="ear"><span class="ring"></span></div>
+          <canvas id="wave"></canvas>
+          <span class="lab" id="voiceLab" data-i18n="idle">Idle</span>
+        </div>
+        <div class="btns">
+          <button class="btn" id="pauseBtn" data-i18n="pause" disabled>Pause</button>
+          <button class="btn primary" id="talkBtn" data-i18n="talkStart">Start talking</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ③ Chat / Memory Space -->
+  <section class="rightpane">
+    <div class="topbar">
+      <div class="seg-gone brand">
+        <img src="./images/unpod-icon.png" alt="" class="brand-ic" />
+        <img src="./images/unpod-wordmark.png" alt="Unpod" class="brand-wm" />
+      </div>
+      <div class="export">
+        <button class="btn sm" id="btnNew" data-i18n-title="newChat"
+                title="New chat" data-i18n="newChat">New chat</button>
+        <select class="sel" id="langSel" data-i18n-title="langTitle" title="Language">
+          <option value="en">EN</option>
+          <option value="hi">हिंदी</option>
+        </select>
+        <select class="sel" id="dlScope" data-i18n-title="dlScopeTitle" title="What to download">
+          <option value="all" data-i18n="dlAll">All memories in this space</option>
+          <option value="left" data-i18n="dlLeft">Left · Facts</option>
+          <option value="right" data-i18n="dlRight">Right · Profile</option>
+          <option value="chat" data-i18n="dlChat">This conversation</option>
+        </select>
+        <button class="btn sm" id="dlBtn" data-i18n="download">Download</button>
+      </div>
+    </div>
+
+    <!-- Split top/bottom: brain map on top (fixed height), per-turn compare feed below. This used to be two
+         side-swiped screens (chat / brain), only one visible at a time; but this demo needs exactly "watch where the brain
+         lights up while scrolling back through earlier turns". #chatLog is that feed's container; addTurn()
+         appends into it, so older turns simply stay above. -->
+    <div class="viewport">
+      <div class="rsplit">
+        <div class="brainpart">
+          <div class="brainwrap" id="brainwrap">
+            <img id="brain" alt="" src="./images/background.webp" />
+            <canvas id="fx"></canvas>
+            <div class="core-title"><em data-i18n="coreTitleEm">Neural</em> <span data-i18n="coreTitleRest">Synthesis Core</span></div>
+            <div class="core-state" id="coreState"></div>
+            <div class="legend">
+              <span class="core-pill facts"><span class="arrow">→</span><span data-i18n="factsShort">Facts</span></span>
+              <span class="core-pill profile"><span data-i18n="profileShort">Profile</span><span class="arrow">→</span></span>
+            </div>
+            <div id="card" aria-hidden="true">
+              <div class="eb"><span class="sw" id="c-sw"></span><span class="kd" id="c-kd">entity</span><span class="id" id="c-id">#0000</span></div>
+              <div class="cbody" id="c-body">…</div>
+              <div class="ft"><span id="c-src">—</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="feedpart">
+          <div class="chat-head">
+            <span class="ttl" id="chatTitle" data-i18n="newChat">New chat</span>
+          </div>
+          <div class="chat" id="chatLog"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* Once the script throws, none of the later addEventListener calls get attached — the symptom is "the button does nothing",
+   while the page looks perfectly normal. This has happened twice already (once $('spaceList') was missing,
+   once a shadowed variable), and each time someone had to open F12 to see it.
+   So just paste the error at the top of the page. */
+(function(){
+  function show(msg){
+    var d=document.getElementById('__err');
+    if(!d){
+      d=document.createElement('div'); d.id='__err';
+      d.style.cssText='position:fixed;left:0;right:0;top:0;z-index:99999;'+
+        'background:#7f1d1d;color:#fecaca;font:12px/1.6 ui-monospace,monospace;'+
+        'padding:8px 12px;white-space:pre-wrap;max-height:38vh;overflow:auto';
+      (document.body||document.documentElement).appendChild(d);
+    }
+    d.textContent += msg + '\n';
+  }
+  window.addEventListener('error', function(e){
+    show('[JS error] ' + (e.message||'') + '\n  ' + (e.filename||'') + ':' + (e.lineno||'') +
+         (e.error && e.error.stack ? '\n' + e.error.stack.split('\n').slice(0,4).join('\n') : ''));
+  });
+  window.addEventListener('unhandledrejection', function(e){
+    show('[Unhandled promise] ' + (e.reason && (e.reason.stack||e.reason.message) || e.reason));
+  });
+})();
+/* ══════════════════════════════════════════════════════════════════════
+   0. Language — UI text and the assistant's spoken language switch together
+
+   All UI text lives in this table; code always uses i18n('key'). Static HTML is tagged data-i18n (body text)
+   / data-i18n-ph (placeholder) / data-i18n-title (title), and all of them are refreshed on switch.
+
+   Positional args use {0} {1} placeholders — word order differs between languages, so concatenated strings read wrong in one of them.
+   ══════════════════════════════════════════════════════════════════════ */
+const I18N = {
+  hi: {
+    chat:'चैट', memspace:'मेमोरी स्पेस', liveInput:'लाइव इनपुट',
+    dialogue:'बातचीत', searchChats:'चैट खोजें', typeHint:'या टाइप करके Enter दबाएँ',
+    topk:'Top-K खोज', aiReply:'AI का जवाब',
+    langTitle:'भाषा / Language', dlScopeTitle:'क्या डाउनलोड करना है', langEnglish:'अंग्रेज़ी',
+    you:'आप', waitingYou:'आपके बोलने का इंतज़ार…', noReplyYet:'इस बार कोई जवाब नहीं।', cmpTgTitle:'एक ही बात दो तरफ़ जाती है: एक में निकाली गई मेमोरी डाली जाती है, दूसरे में नहीं। तुलना वाली बारी में आवाज़ नहीं आती — दोनों जवाब टेक्स्ट में आते हैं।',
+    cmpMem:'मेमोरी', cmpModelPh:'सर्वर डिफ़ॉल्ट', cmpWaiting:'इस बारी का इंतज़ार…',
+    cmpCtx:'डाली गई मेमोरी', cmpCtxEmpty:'इस बार कुछ नहीं मिला — दोनों को एक ही चीज़ मिली।',
+    cmpKeyPh:'अपनी key (ज़रूरी नहीं)', cmpUrlPh:'अपना endpoint (ज़रूरी नहीं)',
+    cmpCtxNobody:'किसी भी तरफ़ मेमोरी चालू नहीं — यह किसी prompt में नहीं गया',
+    cmpWith:'मेमोरी के साथ', cmpWithout:'मेमोरी के बिना', cmpWithCart:'मेमोरी · KV कार्ट्रिज',
+    cmpCart:'KV कार्ट्रिज', cmpCartTitle:'मेमोरी को दोबारा इस्तेमाल होने वाले KV कार्ट्रिज की तरह भेजें', cmpKvReused:'KV दोबारा इस्तेमाल',
+    cmpGearTitle:'model / endpoint / key',
+    talkStart:'बात शुरू करें', talkEnd:'बंद करें', pause:'रोकें', resume:'जारी रखें',
+    ended:'सेशन ख़त्म।',
+    idle:'खाली', listening:'सुन रहा है', replying:'जवाब दे रहा है', paused:'रुका हुआ',
+    left:'बायाँ दिमाग़', right:'दायाँ दिमाग़', factsShort:'तथ्य', profileShort:'प्रोफ़ाइल',
+    leftFacts:'बायाँ · तथ्य', rightProfile:'दायाँ · प्रोफ़ाइल',
+    coreTitleEm:'न्यूरल', coreTitleRest:'सिंथेसिस कोर', coreState:'स्थिति: संश्लेषण जारी · अभिसरण {0}%',
+    emotion:'भावना', personality:'व्यक्तित्व', preference:'पसंद',
+    newChat:'नई चैट', expand:'साइडबार खोलें', collapse:'साइडबार समेटें',
+    download:'डाउनलोड', dlAll:'इस स्पेस की सारी मेमोरी', dlLeft:'बायाँ · तथ्य',
+    dlRight:'दायाँ · प्रोफ़ाइल', dlChat:'यह बातचीत', spaceCreate:'स्पेस बनाएँ', spaceCreating:'बन रहा है…', cancel:'रद्द करें',
+    ownerNote:'इस मेमोरी ग्राफ़ के मालिक — हर मेमोरी आप से जुड़ी है।',
+    waitRetrieve:'खोज का इंतज़ार…', noHitThisTurn:'इस बार कुछ नहीं मिला',
+    notConnected:'जुड़ा नहीं है (“बात शुरू करें” दबाएँ)',
+    noChatInSpace:'इस स्पेस में अभी कोई चैट नहीं। ऊपर दाईं तरफ़ से शुरू करें।',
+    noMatchInSpace:'इस स्पेस में कोई मिलती चैट नहीं।',
+    emptyChat:'यह चैट अभी खाली है।',
+    noMemInSpace:'इस स्पेस में अभी कोई मेमोरी नहीं।',
+    needName:'पहले नाम दें', nameTaken:'यह नाम पहले से है',
+    nameBad:'नाम ठीक नहीं', createFailed:'बन नहीं पाया',
+    micUnsupported:'इस ब्राउज़र में माइक नहीं चलेगा (https या localhost चाहिए)।',
+    backendGone:'बैकएंड से नाता टूट गया।',
+    switching:'“{0}” पर जा रहे हैं…', switched:'अब “{0}” में', switchFailed:'बदल नहीं पाया',
+    created:'“{0}” बन गया',
+    turnsN:'{0} बारी', memN:'{0} मेमोरी',
+    andMore:'…और {0}',
+    spaceStat:'{0} तथ्य · {1} प्रोफ़ाइल नोट',
+    badgeStat:'{0} (L{1}/R{2})',
+    startHint:'<b>बातचीत शुरू करें</b>यह चैट {0} में है। कुछ बोलें, या बाईं तरफ़ टाइप करें।',
+    createdIn:'{0} में बना। चैट दूसरे स्पेस में नहीं जा सकती।',
+    downloadedChat:'बातचीत डाउनलोड हो गई।', downloadedN:'{0} मेमोरी डाउनलोड हुईं ({1}).',
+    rbInternalOnly:'इस बार {0} दायाँ-दिमाग़ हिट, सब अंदरूनी नोट',
+    voiceMatched:'speaker 0 · आवाज़ पहचानी गई', voiceKnown:' · “{0}” के रूप में पहचाना',
+    mySpace:'मेरा बनाया', diskSpace:'डिस्क पर',
+    spaceStat3:'{0} तथ्य · {1} प्रोफ़ाइल नोट · {2} चैट',
+    connected:'जुड़ गया ({0}) — सिमुलेशन बंद।',
+    micFailed:'माइक नहीं मिला: {0}',
+    cantConnect:'{0} तक नहीं पहुँच पाए। देखें कि python web/run.py चल रहा है।',
+    disconnected:'{0}. नाता टूट गया।',
+  },
+  en: {
+    chat:'Chat', memspace:'Memory Space', liveInput:'Live input',
+    dialogue:'Dialogue', searchChats:'Search chats', typeHint:'Or just type and press Enter',
+    topk:'Top-K recall', aiReply:'AI reply',
+    langTitle:'Language', dlScopeTitle:'What to download', langEnglish:'English',
+    you:'You', waitingYou:'Waiting for you to speak…', noReplyYet:'No reply yet.', cmpTgTitle:'Same utterance to two arms: one with the retrieved memory injected, one without. A compare turn is silent — both replies stream as text.',
+    cmpMem:'memory', cmpModelPh:'server default', cmpWaiting:'waiting for this turn…',
+    cmpCtx:'Injected memory context', cmpCtxEmpty:'Nothing retrieved this turn — both arms got the same thing.',
+    cmpKeyPh:'own key (optional)', cmpUrlPh:'own endpoint (optional)',
+    cmpCtxNobody:'neither arm has memory on — this went into no prompt',
+    cmpWith:'With Memory', cmpWithout:'Without Memory', cmpWithCart:'With Memory · KV cartridge',
+    cmpCart:'KV cartridge', cmpCartTitle:'Carry the memory as a reusable KV cartridge (stable prompt prefix)', cmpKvReused:'KV reused',
+    cmpGearTitle:'model / endpoint / key',
+    talkStart:'Start talking', talkEnd:'End session', pause:'Pause', resume:'Resume',
+    ended:'Session ended.',
+    idle:'Idle', listening:'Listening', replying:'Replying', paused:'Paused',
+    left:'Left brain', right:'Right brain', factsShort:'facts', profileShort:'profile',
+    leftFacts:'Left · Facts', rightProfile:'Right · Profile',
+    coreTitleEm:'Neural', coreTitleRest:'Synthesis Core', coreState:'State: Synthesizing · Convergence {0}%',
+    emotion:'Emotion', personality:'Personality', preference:'Preference',
+    newChat:'New chat', expand:'Expand sidebar', collapse:'Collapse sidebar',
+    download:'Download', dlAll:'All memories in this space', dlLeft:'Left · Facts',
+    dlRight:'Right · Profile', dlChat:'This conversation', spaceCreate:'Create space', spaceCreating:'Creating…', cancel:'Cancel',
+    ownerNote:'The owner of this memory graph — every memory is anchored to you.',
+    waitRetrieve:'Waiting for retrieval…', noHitThisTurn:'Nothing matched this turn',
+    notConnected:'Not connected (hit “Start talking”)',
+    noChatInSpace:'No chats in this space yet. Start one from the top right.',
+    noMatchInSpace:'No matching chats in this space.',
+    emptyChat:'This chat is still empty.',
+    noMemInSpace:'No memories in this space yet.',
+    needName:'Give it a name first', nameTaken:'That name is taken',
+    nameBad:'Invalid name', createFailed:'Could not create it',
+    micUnsupported:'This browser has no microphone access (needs https or localhost).',
+    backendGone:'Backend disconnected.',
+    switching:'Switching to “{0}”…', switched:'Now in “{0}”', switchFailed:'Could not switch',
+    created:'Created “{0}”',
+    turnsN:'{0} turns', memN:'{0} memories',
+    andMore:'…and {0} more',
+    spaceStat:'{0} facts · {1} profile notes',
+    badgeStat:'{0} (L{1}/R{2})',
+    startHint:'<b>Start a conversation</b>This chat lives in {0}. Say something, or type on the left.',
+    createdIn:'Created in {0}. A chat cannot move to another space.',
+    downloadedChat:'Conversation downloaded.', downloadedN:'Downloaded {0} memories ({1}).',
+    rbInternalOnly:'{0} right-brain hits this turn, all internal notes',
+    voiceMatched:'speaker 0 · voice matched', voiceKnown:' · recognized as “{0}”',
+    mySpace:'Created by me', diskSpace:'On disk',
+    spaceStat3:'{0} facts · {1} profile notes · {2} chats',
+    connected:'Connected ({0}) — simulation stopped.',
+    micFailed:'No microphone: {0}',
+    cantConnect:'Cannot reach {0}. Check that python web/run.py is running.',
+    disconnected:'{0}. Disconnected.',
+  },
+};
+const LANGS = ['en','hi'];
+let LANG = LANGS.includes(localStorage.getItem('vm-lang')) ?
+           localStorage.getItem('vm-lang') : 'en';
+function i18n(key, ...args){
+  const s = (I18N[LANG] && I18N[LANG][key]) || (I18N.en[key]) || key;
+  return args.length ? s.replace(/\{(\d+)\}/g, (m,i)=> args[i] !== undefined ? args[i] : m) : s;
+}
+// entity/schema टैग लिस्ट का separator — पहले हमेशा U+3001 (चीनी comma) था, यानी
+// English/Hindi UI में भी वो अकेला चीनी character दिख जाता था। LANG के हिसाब से।
+function listSep(){ return ', '; }
+/* Elements in static HTML tagged data-i18n* are refreshed together on a language switch */
+function applyLang(){
+  document.documentElement.lang = LANG;
+  for(const el of document.querySelectorAll('[data-i18n]'))
+    el.innerHTML = i18n(el.dataset.i18n);
+  for(const el of document.querySelectorAll('[data-i18n-ph]'))
+    el.placeholder = i18n(el.dataset.i18nPh);
+  for(const el of document.querySelectorAll('[data-i18n-title]'))
+    el.title = i18n(el.dataset.i18nTitle);
+  for(const el of document.querySelectorAll('[data-i18n-aria]'))
+    el.setAttribute('aria-label', i18n(el.dataset.i18nAria));
+}
+/* ══════════════════════════════════════════════════════════════════════
+   A. Brain map — every node grows inside the two hemisphere outlines
+   Background image 1672×941; measured brain outline: left hemisphere x 0.254–0.481, right hemisphere x 0.519–0.746,
+   y 0.120–0.843. Each hemisphere takes an inscribed ellipse; cluster centres sit on a ring inside it, members spread
+   around the centre at sunflower angles, and any point out of bounds is pulled back within 0.95 radius — no point escapes the brain.
+   ══════════════════════════════════════════════════════════════════════ */
+window.VMBrain = (function(){
+const IMG_AR = 1672/941;
+const BOX  = { x0:0.245, x1:0.755, y0:0.11, y1:0.855 };
+const HEMI = { L:{cx:0.378, cy:0.485, rx:0.090, ry:0.295},
+               R:{cx:0.622, cy:0.485, rx:0.090, ry:0.295} };
+const LEFT_SLOTS  = ['work','health','relationships','finance','goals','daily_life','knowledge'];
+const RIGHT_SLOTS = ['emotion','personality','preference'];
+/* Label for each region on the brain map. Follows the UI language — these are the most prominent words on the map. */
+const SLOT_DESC_I18N = {
+  hi: {
+    work:'काम · करियर / प्रोजेक्ट / सहकर्मी / मीटिंग',
+    health:'सेहत · कसरत / खाना / नींद / शरीर',
+    relationships:'रिश्ते · परिवार / दोस्त / प्यार / मेल-जोल',
+    finance:'पैसा · कमाई / खर्च / किराया / निवेश',
+    goals:'लक्ष्य · योजना / भविष्य / ख़ुद को बेहतर करना',
+    daily_life:'रोज़मर्रा · आदतें / आना-जाना / जीने का तरीक़ा',
+    knowledge:'ज्ञान · पढ़ाई / किताबें / हुनर',
+    emotion:'भावना · अभी का और पहले का मन',
+    personality:'व्यक्तित्व · पक्की आदतें और निपटने के तरीक़े',
+    preference:'पसंद · बातचीत और चीज़ों में निजी रुचि',
+  },
+  en: {
+    work:'Work · career / projects / colleagues / meetings',
+    health:'Health · exercise / food / sleep / body',
+    relationships:'People · family / friends / partner / social',
+    finance:'Money · income / spending / rent / investing',
+    goals:'Goals · plans / future / self-improvement',
+    daily_life:'Daily life · habits / commute / lifestyle',
+    knowledge:'Knowledge · study / reading / skills',
+    emotion:'Emotion · how they feel, now and over time',
+    personality:'Personality · stable tendencies and coping',
+    preference:'Preference · what they like, and how they like it said',
+  },
+};
+const SLOT_DESC = new Proxy({}, {
+  // Fall back to en, not zh: when LANG='hi' fell back to Chinese, the ten most prominent words on the brain map became Chinese.
+  get:(_,k)=> (SLOT_DESC_I18N[LANG]||SLOT_DESC_I18N.en)[k],
+  has:(_,k)=> k in SLOT_DESC_I18N.en,
+  ownKeys:()=> Reflect.ownKeys(SLOT_DESC_I18N.en),
+  getOwnPropertyDescriptor:()=>({enumerable:true, configurable:true}),
+});
+const PAL = { entity:'#6ba7f0', emotion:'#ef7bab', exper:'#f0a35f',
+              prefer:'#79d7a2', label:'#ffffff', user:'#d766ad' };
+// Computing this once at load would leave node-kind labels in the old language after a switch. Compute on demand.
+const KIND_CN = new Proxy({}, { get:(_,k)=>({ entity:i18n('factsShort'),
+  emotion:i18n('emotion'), exper:i18n('personality'), prefer:i18n('preference') })[k] });
+const RPX = { entity:3.0, emotion:5.0, exper:4.6, prefer:4.8, user:8.0 };
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const wrap  = document.getElementById('brainwrap');
+const cv    = document.getElementById('fx');
+const ctx   = cv.getContext('2d', {alpha:true});
+const brain = document.getElementById('brain');
+const card  = document.getElementById('card');
+const cKd=document.getElementById('c-kd'), cId=document.getElementById('c-id'),
+      cSw=document.getElementById('c-sw'), cSrc=document.getElementById('c-src'),
+      cBody=document.getElementById('c-body');
+
+let N=[], L=[], NB=[], BEAM=[], USER=0;
+const t0=performance.now();
+let W=0,H=0,DPR=1,IW=0,IH=0,OX=0,OY=0,S=1;
+//: Animation of the beam from left brain to right brain. dur is the seconds to travel the full path — it used to be 2.1s, crawling,
+//: while this beam is meant to say "one lookup and it's found".
+const PULSE={dur:.9,trail:.3,seg:26};
+/* One beam = {a,b,t,dur,hue}. BEAM used to be a list of edges sharing one global PULSE.t,
+   all edges lit and faded together — that cannot draw "the signal travelling inward stage by stage". The real pipeline has
+   an order: the utterance comes in → which slots it lands in → which specific memories it hits → right brain → answer flows back.
+   Each beam carries its own t and dur, so a delay can lay out that order. */
+const HUE={
+  in:   ['rgba(180,230,255,', 'rgba(120,190,255,'],   // input coming in: cool blue
+  recall:['rgba(255,240,190,', 'rgba(255,196,74,'],   // retrieval: gold (the original colour)
+  out:  ['rgba(205,255,225,', 'rgba(121,215,162,'],   // answer flowing back: mint
+};
+//: Hit nodes: first "pop" larger then settle back, then stay lit for a while.
+//: pop is the duration of the swell, hold is how long it stays highlighted afterwards (still visible after the beam arrives).
+const HIT={pop:.42, hold:1.0, fade:.45};
+function nowT(){ return (performance.now()-t0)/1000; }
+
+function mk(o){
+  o.id=N.length; o.ph=Math.random()*6.28; o.ph2=Math.random()*6.28;
+  o.sp=.28+Math.random()*.4; o.ax=.5+Math.random()*.9; o.ay=.5+Math.random()*.9;
+  o.x=0;o.y=0;o.sx=0;o.sy=0;o.h=0;o.p=0;o.iv=0;o.hit=0;o.hitT=0;o.act=0;o.bw=0;o.bh=0;
+  if(o.dl==null) o.dl=nowT()+Math.random()*.3;
+  N.push(o); NB.push([]); return o.id;
+}
+function base(){
+  N=[]; L=[]; NB=[]; BEAM=[];
+  LEFT_SLOTS.forEach((s,i)=>mk({kind:'label',side:'L',cluster:s,seat:i,w:s,r:0}));
+  RIGHT_SLOTS.forEach((s,i)=>mk({kind:'label',side:'R',cluster:s,seat:i,w:s,r:0}));
+  USER = mk({kind:'user',side:'C',cluster:null,seat:0,w:'you',r:RPX.user});
+  for(let i=0;i<LEFT_SLOTS.length+RIGHT_SLOTS.length;i++) link(USER,i,'cross',.5);
+}
+function link(a,b,t,w){
+  if(a===b||N[a]===undefined||N[b]===undefined) return;
+  for(const i of NB[a]) if(i===b) return;
+  L.push({a,b,t:t||'in',w:w||.4}); NB[a].push(b); NB[b].push(a);
+}
+function labelOf(cluster){
+  for(const n of N) if(n.kind==='label'&&n.cluster===cluster) return n.id;
+  return -1;
+}
+function add(side, kind, label, cluster, detail){
+  const li=labelOf(cluster);
+  const id=mk({kind, side, cluster, w:label, r:RPX[kind]||3, seat:0,
+    act:.9, detail:detail||null, dl:nowT()});
+  if(li>=0) link(li,id,'in',.34); else link(USER,id,'cross',.5);
+  layout();
+  return id;
+}
+
+/* ---- Layout ---- */
+function hemi(side){
+  const h=HEMI[side]||HEMI.L;
+  return { cx:OX+h.cx*IW, cy:OY+h.cy*IH, rx:h.rx*IW, ry:h.ry*IH };
+}
+function seatUV(side, seat, k){
+  const a=-Math.PI/2 + seat*(Math.PI*2/k);
+  const R = side==='R' ? 0.56 : 0.63;
+  return [Math.cos(a)*R, Math.sin(a)*R];
+}
+function layout(){
+  if(!IW) return;
+  const groups={};
+  for(const n of N){
+    if(n.kind==='label'||n.kind==='user') continue;
+    (groups[n.cluster]=groups[n.cluster]||[]).push(n);
+  }
+  for(const n of N){
+    if(n.kind==='user'){ n.sx=OX+0.5*IW; n.sy=OY+0.50*IH; continue; }
+    if(n.kind!=='label') continue;
+    const k=n.side==='R'?RIGHT_SLOTS.length:LEFT_SLOTS.length;
+    const h=hemi(n.side), uv=seatUV(n.side,n.seat,k);
+    n.sx=h.cx+uv[0]*h.rx; n.sy=h.cy+uv[1]*h.ry;
+  }
+  for(const c in groups){
+    const g=groups[c], m=g.length, side=g[0].side;
+    const k=side==='R'?RIGHT_SLOTS.length:LEFT_SLOTS.length;
+    const li=labelOf(c), seat=li>=0?N[li].seat:0;
+    const h=hemi(side), uv=seatUV(side,seat,k);
+    const maxR=(side==='R'?.46:.34)*h.rx;
+    const R=Math.min(maxR,(side==='R'?.16:.13)*h.rx*Math.sqrt(m+1));
+    for(let i=0;i<m;i++){
+      const ang=i*2.399963+seat*0.7;
+      const rad=R*(0.5+0.5*Math.sqrt((i+0.5)/m));
+      let u=uv[0]+Math.cos(ang)*rad/h.rx;
+      let v=uv[1]+Math.sin(ang)*rad/h.ry;
+      const d=Math.hypot(u,v); if(d>0.95){ u*=0.95/d; v*=0.95/d; }
+      g[i].sx=h.cx+u*h.rx; g[i].sy=h.cy+v*h.ry;
+    }
+  }
+}
+
+/* ---- Size: brain outline sized by height; a wider container only re-centres (shifts) ---- */
+function resize(){
+  const r=wrap.getBoundingClientRect();
+  if(!r.width||!r.height) return;
+  W=r.width; H=r.height;
+  DPR=Math.min(2,window.devicePixelRatio||1);
+  cv.width=Math.round(W*DPR); cv.height=Math.round(H*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  const dx=BOX.x1-BOX.x0, dy=BOX.y1-BOX.y0;
+  const boxAR=dx*IMG_AR/dy;
+  let bh=H*0.94, bw=bh*boxAR;
+  if(bw>W*0.94){ bw=W*0.94; bh=bw/boxAR; }
+  IW=bw/dx; IH=bh/dy;
+  OX=(W-bw)/2-BOX.x0*IW; OY=(H-bh)/2-BOX.y0*IH;
+  brain.style.left=OX.toFixed(1)+'px'; brain.style.top=OY.toFixed(1)+'px';
+  brain.style.width=IW.toFixed(1)+'px'; brain.style.height=IH.toFixed(1)+'px';
+  S=Math.max(.62, bh/620);
+  layout(); buildGlow();
+}
+new ResizeObserver(resize).observe(wrap);
+brain.addEventListener('load',()=>{ resize(); brain.classList.add('in'); });
+if(brain.complete&&brain.naturalWidth) brain.classList.add('in');
+
+/* ---- Neural Synthesis Core: decorative wireframe sphere + left/right particle streams ----
+   With the brain outline image removed, the empty middle is filled by a rotating wireframe sphere — facts flow in
+   from the left, profile flows out to the right. The sphere and particles are pure decoration and do not affect the real
+   data and interaction of the entity/schema nodes below (those work as before). Nodes/edges are computed once; each frame only rotates and projects. */
+const CORE_N = 90;
+const corePts = (()=>{
+  const pts=[], off=2/CORE_N;
+  for(let i=0;i<CORE_N;i++){
+    const y=i*off-1+off/2, r=Math.sqrt(Math.max(0,1-y*y));
+    const phi=i*Math.PI*(3-Math.sqrt(5));
+    pts.push({x:Math.cos(phi)*r, y, z:Math.sin(phi)*r});
+  }
+  return pts;
+})();
+const coreEdges = (()=>{
+  const eds=[], seen=new Set();
+  for(let i=0;i<corePts.length;i++){
+    const d=[];
+    for(let j=0;j<corePts.length;j++){
+      if(i===j) continue;
+      const a=corePts[i], b=corePts[j];
+      d.push([(a.x-b.x)**2+(a.y-b.y)**2+(a.z-b.z)**2, j]);
+    }
+    d.sort((a,b)=>a[0]-b[0]);
+    for(let k=0;k<3;k++){
+      const j=d[k][1], key=i<j?i+'_'+j:j+'_'+i;
+      if(!seen.has(key)){ seen.add(key); eds.push([i,j]); }
+    }
+  }
+  return eds;
+})();
+function mkStreamP(){ return { t:Math.random(), sp:.1+Math.random()*.18,
+  off:(Math.random()-0.5)*2, sz:.6+Math.random()*1.7 }; }
+const STREAM_N = 130;
+const factsStream   = Array.from({length:STREAM_N}, mkStreamP);
+const profileStream = Array.from({length:STREAM_N}, mkStreamP);
+function drawStream(list, dt, cx, cy, R, dir, rgb){
+  const x0 = dir<0 ? 0 : cx+R*0.94;
+  const x1 = dir<0 ? cx-R*0.94 : W;
+  for(const p of list){
+    p.t += dt*p.sp;
+    if(p.t>1){ p.t=0; p.off=(Math.random()-0.5)*2; p.sp=.1+Math.random()*.18; p.sz=.6+Math.random()*1.7; }
+    const e=p.t;
+    const x=x0+(x1-x0)*e;
+    const spread=(dir<0?(1-e):e)*IH*0.30+6*S;
+    const y=cy+p.off*spread;
+    const alpha=(dir<0 ? Math.min(1,e*2.2) : Math.max(0,1-e*1.05))*0.95;
+    if(alpha<=0.01) continue;
+    ctx.fillStyle=rgb+alpha.toFixed(3)+')';
+    ctx.beginPath(); ctx.arc(x,y,p.sz*S,0,7); ctx.fill();
+  }
+}
+function drawCore(t,dt){
+  if(!IW) return;
+  const cx=OX+0.5*IW, cy=OY+0.5*IH;
+  const R=Math.max(30,Math.min(IW,IH)*0.15);
+  const rot=t*0.16, cosR=Math.cos(rot), sinR=Math.sin(rot);
+  const proj=corePts.map(p=>{
+    const x=p.x*cosR-p.z*sinR, z=p.x*sinR+p.z*cosR, y=p.y;
+    const f=2.6, sc=f/(f+z);
+    return { sx:cx+x*R*sc, sy:cy+y*R*sc, z, sc };
+  });
+  drawStream(factsStream, dt, cx, cy, R, -1, 'rgba(120,180,255,');
+  const glowR=R*1.8;
+  const rg=ctx.createRadialGradient(cx,cy,0,cx,cy,glowR);
+  rg.addColorStop(0,'rgba(150,200,255,.22)'); rg.addColorStop(.45,'rgba(120,180,255,.08)');
+  rg.addColorStop(1,'rgba(120,180,255,0)');
+  ctx.fillStyle=rg; ctx.beginPath(); ctx.arc(cx,cy,glowR,0,7); ctx.fill();
+  ctx.lineWidth=Math.max(.5,.6*S);
+  for(const [i,j] of coreEdges){
+    const a=proj[i], b=proj[j], depth=(a.z+b.z)/2, al=0.08+0.22*((depth+1)/2);
+    ctx.strokeStyle='rgba(190,220,255,'+al.toFixed(3)+')';
+    ctx.beginPath(); ctx.moveTo(a.sx,a.sy); ctx.lineTo(b.sx,b.sy); ctx.stroke();
+  }
+  for(const p of proj){
+    const al=0.35+0.5*((p.z+1)/2), r=(1.1+0.9*p.sc)*S;
+    ctx.fillStyle='rgba(210,232,255,'+al.toFixed(3)+')';
+    ctx.beginPath(); ctx.arc(p.sx,p.sy,r,0,7); ctx.fill();
+  }
+  drawStream(profileStream, dt, cx, cy, R, 1, 'rgba(240,130,180,');
+}
+let coreStateTick=-1;
+const coreStateEl=document.getElementById('coreState');
+function updateCoreState(t){
+  const tick=Math.floor(t*2.2);
+  if(tick===coreStateTick || !coreStateEl) return;
+  coreStateTick=tick;
+  const pct=(86+11*(0.5+0.5*Math.sin(t*0.31))).toFixed(1);
+  coreStateEl.textContent=i18n('coreState', pct);
+}
+
+/* ---- Glow ---- */
+const GLOW={};
+function hexa(h,a){ const n=parseInt(h.slice(1),16);
+  return 'rgba('+(n>>16)+','+(n>>8&255)+','+(n&255)+','+a+')'; }
+function buildGlow(){
+  for(const k in PAL){
+    if(k==='label') continue;
+    const R=Math.max(16,Math.round((k==='user'?90:44)*S));
+    const c=document.createElement('canvas'); c.width=c.height=R*2;
+    const g=c.getContext('2d'), rg=g.createRadialGradient(R,R,0,R,R,R);
+    rg.addColorStop(0,hexa(PAL[k],.52)); rg.addColorStop(.3,hexa(PAL[k],.18));
+    rg.addColorStop(.65,hexa(PAL[k],.04)); rg.addColorStop(1,hexa(PAL[k],0));
+    g.fillStyle=rg; g.fillRect(0,0,R*2,R*2); GLOW[k]=c;
+  }
+}
+
+/* ---- Pointer ---- */
+let mx=-9999,my=-9999,has=false,sel=-1,selPrev=-1;
+let cX=0,cY=0,cTX=0,cTY=0,cSide=1,cOn=false;
+function pt(e){ const r=cv.getBoundingClientRect(); mx=e.clientX-r.left; my=e.clientY-r.top; has=true; }
+wrap.addEventListener('pointermove',pt,{passive:true});
+wrap.addEventListener('pointerdown',pt,{passive:true});
+wrap.addEventListener('pointerleave',()=>{has=false;mx=my=-9999;},{passive:true});
+
+/* ---- Main loop ---- */
+let tPrev=performance.now();
+function frame(now){
+  const t=(now-t0)/1000, dt=Math.min(.05,(now-tPrev)/1000); tPrev=now;
+  ctx.clearRect(0,0,W,H);
+  drawCore(t,dt); updateCoreState(t);
+  const amp=REDUCED?0:3.4*S;
+  for(const n of N){
+    let u=Math.min(1,Math.max(0,(t-n.dl)/0.6));
+    n.iv=1-Math.pow(1-u,3);
+    n.x=n.sx+Math.sin(t*n.sp+n.ph)*amp*n.ax;
+    n.y=n.sy+Math.cos(t*n.sp*.83+n.ph2)*amp*n.ay;
+  }
+  let best=-1,bd=1e9;
+  if(has) for(const n of N){
+    let d;
+    if(n.kind==='label'&&n.bw){
+      const dx=Math.max(Math.abs(n.x-mx)-n.bw/2,0), dy=Math.max(Math.abs(n.y-my)-n.bh/2,0);
+      d=Math.hypot(dx,dy);
+    } else d=Math.max(0,Math.hypot(n.x-mx,n.y-my)-n.r*S);
+    if(d<bd){ bd=d; best=n.id; }
+  }
+  if(bd>26) best=-1;
+  sel=best;
+  const lit=new Set(sel>=0?NB[sel]:[]);
+  for(const n of N){
+    const tg=Math.max(n.id===sel?1:(lit.has(n.id)?.4:0), n.act||0);
+    n.h+=(tg-n.h)*(tg?.22:.10);
+    let p=0; if(has){ const d=Math.hypot(n.x-mx,n.y-my); p=d<120*S?(1-d/(120*S)):0; p*=p; }
+    n.p+=(p-n.p)*.14;
+    if(n.act>0) n.act=Math.max(0,n.act-dt*.5);
+  }
+  ctx.lineCap='round';
+  for(const l of L){
+    const a=N[l.a], b=N[l.b];
+    const st = l.t==='cross' ? ['rgba(198,214,240,',.13,1.1]
+             : l.t==='rel'   ? ['rgba(170,196,230,',.13,.7]
+                             : ['rgba(150,180,220,',.17,.75];
+    const lift=Math.max(a.h,b.h)*.4+Math.max(a.p,b.p)*.15;
+    const al=(st[1]*(l.w||1)+lift)*Math.min(a.iv,b.iv);
+    if(al<=.006) continue;
+    ctx.strokeStyle=st[0]+al.toFixed(3)+')';
+    ctx.lineWidth=st[2]*(1+lift*1.4)*Math.max(.7,S*.8);
+    ctx.beginPath(); ctx.moveTo(a.x,a.y);
+    if(l.t==='cross'){ const c=ctl(a,b); ctx.quadraticCurveTo(c[0],c[1],b.x,b.y); }
+    else ctx.lineTo(b.x,b.y);
+    ctx.stroke();
+  }
+  if(!REDUCED&&BEAM.length){
+    ctx.globalCompositeOperation='lighter';
+    const STEP=PULSE.trail/PULSE.seg;
+    for(const p of BEAM){
+      p.t+=dt/p.dur;                       // each beam advances on its own, independently
+      if(p.t<=-PULSE.trail) continue;      // its delay has not elapsed yet
+      const a=N[p.a], b=N[p.b]; if(!a||!b) continue;
+      const c=ctl(a,b);
+      const at=u=>{const iu=1-u;
+        return [iu*iu*a.x+2*iu*u*c[0]+u*u*b.x, iu*iu*a.y+2*iu*u*c[1]+u*u*b.y];};
+      const col=HUE[p.hue]||HUE.recall;
+      for(let pass=0;pass<2;pass++) for(let i=0;i<PULSE.seg;i++){
+        const u1=p.t-i*STEP, u0=u1-STEP;
+        if(u1<=0||u0>=1) continue;
+        const q0=at(Math.max(0,u0)), q1=at(Math.min(1,u1));
+        const k=1-i/PULSE.seg, e=k*k*(3-2*k);
+        // whitish core (brightness), coloured halo outside (pops more than pure white on a dark background)
+        ctx.strokeStyle=pass?col[0]+(.62*e).toFixed(3)+')'
+                            :col[1]+(.13*e).toFixed(3)+')';
+        ctx.lineWidth=(pass?1.3*e+.4:4.2*e+1)*Math.max(.8,S*.8);
+        ctx.beginPath(); ctx.moveTo(q0[0],q0[1]); ctx.lineTo(q1[0],q1[1]); ctx.stroke();
+      }
+      // on the frame the beam reaches its end, light up the end node — the signal really "arrived"
+      if(p.t>=1 && !p.lit){ p.lit=true; if(b){ b.hit=1; b.hitT=nowT(); } }
+    }
+    BEAM=BEAM.filter(p=>p.t<=1+PULSE.trail);
+    ctx.globalCompositeOperation='source-over';
+  }
+  ctx.globalCompositeOperation='lighter';
+  for(const n of N){
+    const g=GLOW[n.kind]; if(!g) continue;
+    const k=n.r*S*3.0*(1+n.h*1.1+n.p*.25);
+    const idle=REDUCED?1:(1+.25*Math.sin(t*.78+n.ph));
+    const a=(.15*idle+n.h*.6+n.p*.2)*n.iv;
+    ctx.globalAlpha=Math.min(1,a);
+    ctx.drawImage(g,n.x-k,n.y-k,k*2,k*2);
+  }
+  ctx.globalAlpha=1; ctx.globalCompositeOperation='source-over';
+  for(const n of N){
+    if(n.kind==='label') continue;
+    const r=n.r*S*(1+n.h*.5+n.p*.12)*(0.4+0.6*n.iv);
+    const a=(.75+n.h*.25)*n.iv;
+    ctx.strokeStyle=hexa(PAL[n.kind],a);
+    ctx.fillStyle=hexa(PAL[n.kind],a*.18);
+    ctx.lineWidth=Math.max(.8,1.2*Math.max(.8,S*.8));
+    shape(n,r,t);
+  }
+  const FS=Math.max(8.6,9.6*S);
+  ctx.font=FS.toFixed(1)+'px '+getComputedStyle(document.body).fontFamily;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  for(const n of N){
+    if(n.kind!=='label'&&n.kind!=='user') continue;
+    const w=n.kind==='user'?'you':n.w;
+    const tw=ctx.measureText(w).width, bw=tw+FS*1.5, bh=FS*1.9;
+    const cy=n.kind==='user'?n.y+n.r*S+bh*.9:n.y;
+    if(n.kind==='label'){ n.bw=bw; n.bh=bh; }
+    const a=n.iv*(.6+n.h*.4);
+    ctx.beginPath(); rrect(n.x-bw/2,cy-bh/2,bw,bh,5);
+    ctx.fillStyle='rgba(8,8,8,'+(0.88*n.iv).toFixed(3)+')'; ctx.fill();
+    ctx.strokeStyle='rgba(255,255,255,'+(a*.5).toFixed(3)+')';
+    ctx.lineWidth=Math.max(.7,.9*Math.max(.8,S*.8)); ctx.stroke();
+    ctx.fillStyle='rgba(255,255,255,'+(n.iv*.95).toFixed(3)+')';
+    ctx.fillText(w,n.x,cy+FS*.06);
+  }
+  // Hit nodes: a white flash, swell once and settle back, stay lit for a second, then fade out.
+  //
+  // It used to be a blue ring slowly breathing all the time — a retrieval hit looked no different from idle, you could not tell "it's this one".
+  // Now three phases: pop catches the eye, hold lets you see which node it is, fade cleans up.
+  ctx.globalCompositeOperation='lighter';
+  for(const n of N){
+    if(!n.hit) continue;
+    const age=t-(n.hitT||0);
+    let amp, scale;
+    if(age<HIT.pop){                       // swell and settle: rush to 1, ease-out on the way back
+      const k=age/HIT.pop;
+      amp=1; scale=1+.55*Math.sin(Math.PI*k)*(1-k*.35);
+    }else if(age<HIT.pop+HIT.hold){        // hold: steadily lit, breathing slightly
+      amp=1; scale=1+.06*Math.sin(t*2.4+n.ph);
+    }else{                                 // fade out
+      const k=(age-HIT.pop-HIT.hold)/HIT.fade;
+      if(k>=1){ n.hit=0; continue; }
+      amp=1-k; scale=1+.04*(1-k);
+    }
+    const a=n.hit*amp;
+    const base2=(n.r*S+4.2*Math.max(.7,S*.8))*scale;
+    ctx.beginPath(); ctx.arc(n.x,n.y,base2+4,0,6.2832);   // outer soft glow
+    ctx.strokeStyle='rgba(255,255,255,'+(.20*a).toFixed(3)+')';
+    ctx.lineWidth=Math.max(4,6.0*S*.8); ctx.stroke();
+    ctx.beginPath(); ctx.arc(n.x,n.y,base2,0,6.2832);     // inner solid white
+    ctx.strokeStyle='rgba(255,255,255,'+(.92*a).toFixed(3)+')';
+    ctx.lineWidth=Math.max(1.4,1.9*S*.8); ctx.stroke();
+  }
+  ctx.globalCompositeOperation='source-over';
+  for(const n of N){
+    if(n.h<.02) continue;
+    const r=(n.kind==='label'?Math.hypot(n.bw,n.bh)/2+7:n.r*S*(1+n.h*.5))+(8+n.h*4);
+    ctx.save(); ctx.translate(n.x,n.y); ctx.rotate(t*.35);
+    ctx.strokeStyle='rgba(255,255,255,'+(.36*n.h).toFixed(3)+')';
+    ctx.lineWidth=.9; ctx.setLineDash([2.4,5.6]);
+    ctx.beginPath(); ctx.arc(0,0,r,0,6.2832); ctx.stroke();
+    ctx.setLineDash([]); ctx.restore();
+  }
+  updateCard();
+  requestAnimationFrame(frame);
+}
+function ctl(a,b){
+  const gx=OX+0.5*IW, my2=(a.y+b.y)/2;
+  return [ (a.x+b.x)/2*0.42+gx*0.58, my2*0.8+(OY+0.48*IH)*0.2 ];
+}
+function shape(n,r,t){
+  const x=n.x, y=n.y;
+  ctx.beginPath();
+  if(n.kind==='emotion'||n.kind==='prefer') rrect(x-r,y-r,r*2,r*2,Math.min(r*.4,3));
+  else if(n.kind==='exper'){
+    const h=r*1.1;
+    ctx.moveTo(x,y-h); ctx.lineTo(x+r,y+h*.72); ctx.lineTo(x-r,y+h*.72); ctx.closePath();
+  } else if(n.kind==='user'){
+    ctx.arc(x,y,r,0,6.2832); ctx.fillStyle=hexa(PAL.user,.22); ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x,y,r*.6,0,6.2832);
+    ctx.strokeStyle=hexa(PAL.user,.5); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x,y,Math.max(1.6,r*.16),0,6.2832);
+    ctx.fillStyle=hexa(PAL.user,.95); ctx.fill();
+    if(!REDUCED){
+      ctx.globalCompositeOperation='lighter';
+      for(let q=0;q<2;q++){
+        const ph=((t/3.4)+q*.5)%1, rr=r*(1+ph*3), al=(1-ph)*(1-ph)*.35*n.iv;
+        ctx.strokeStyle=hexa(PAL.user,al); ctx.lineWidth=1;
+        ctx.beginPath(); ctx.arc(x,y,rr,0,6.2832); ctx.stroke();
+      }
+      ctx.globalCompositeOperation='source-over';
+    }
+    return;
+  } else ctx.arc(x,y,r,0,6.2832);
+  ctx.fill(); ctx.stroke();
+  ctx.beginPath(); ctx.arc(x,y,Math.max(.9,r*.28),0,6.2832);
+  ctx.fillStyle=hexa(PAL[n.kind],Math.min(1,.5+n.h*.5)); ctx.fill();
+}
+function rrect(x,y,w,h,r){
+  ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+}
+function updateCard(){
+  if(sel>=0){
+    const n=N[sel];
+    if(sel!==selPrev){
+      selPrev=sel;
+      cSw.style.borderColor=PAL[n.kind]||'#fff';
+      cId.textContent='#'+String(1000+n.id*7%8999).padStart(4,'0');
+      if(n.kind==='label'){
+        cKd.textContent=n.w;
+        cBody.textContent=SLOT_DESC[n.cluster]||n.cluster;
+        let c=0; for(const m of N) if(m.cluster===n.cluster&&m.kind!=='label') c++;
+        cSrc.textContent=(n.side==='L'?i18n('left'):i18n('right'))+' · '+i18n('memN', c);
+      } else if(n.kind==='user'){
+        cKd.textContent='You · owner';
+        cBody.textContent=i18n('ownerNote');
+        cSrc.textContent='identity · anchor';
+      } else {
+        cKd.textContent=(KIND_CN[n.kind]||n.kind)+' · '+n.cluster;
+        const d=n.detail;
+        let body=(d&&d.full)||n.w;
+        if(d&&d.notes&&d.notes.length){
+          const lines=[];
+          for(let i=0;i<d.notes.length&&i<2;i++){
+            const q=d.notes[i];
+            lines.push((q.emotion?'['+q.emotion+'] ':'')+(q.text||q.cause||''));
+          }
+          if(d.notes.length>2) lines.push(i18n('andMore', d.notes.length-2));
+          body=body+'\n'+lines.join('\n');
+        }
+        cBody.textContent=body;
+        cSrc.textContent=(n.side==='L'?i18n('leftFacts'):i18n('rightProfile'))+((d&&d.src)?(' · '+d.src):'');
+      }
+    }
+    const w=card.offsetWidth, h=card.offsetHeight;
+    cSide=(n.x<W/2)?-1:1;
+    let tx=n.x+(cSide>0?26:-26-w), ty=n.y-h/2;
+    tx=Math.min(Math.max(tx,8),Math.max(8,W-w-8));
+    ty=Math.min(Math.max(ty,8),Math.max(8,H-h-8));
+    cTX=tx; cTY=ty;
+    if(!cOn){ cX=tx; cY=ty; cOn=true; card.classList.add('on'); }
+  } else if(cOn){ cOn=false; card.classList.remove('on'); selPrev=-1; }
+  if(cOn){
+    cX+=(cTX-cX)*.22; cY+=(cTY-cY)*.22;
+    card.style.transform='translate3d('+cX.toFixed(1)+'px,'+cY.toFixed(1)+'px,0)';
+    const n=N[sel];
+    const ax=cSide>0?cX:cX+card.offsetWidth, ay=cY+card.offsetHeight/2;
+    ctx.strokeStyle='rgba(255,255,255,'+(.4*n.h).toFixed(3)+')'; ctx.lineWidth=.9;
+    ctx.beginPath(); ctx.moveTo(n.x+Math.sign(ax-n.x)*(n.r*S+5),n.y);
+    ctx.lineTo(ax-Math.sign(ax-n.x)*3,ay); ctx.stroke();
+  }
+}
+
+base(); resize(); requestAnimationFrame(frame);
+
+return {
+  reset(){ base(); layout(); },
+  add:add, link:link, clusterNode:labelOf, resize:resize,
+  highlight(ids){
+    // Record the hit time: swell/hold/fade are each computed from their own hitT, so batches do not interrupt each other.
+    const now=nowT();
+    for(const n of N) n.hit=0;
+    for(const i of ids) if(N[i]){ N[i].hit=1; N[i].hitT=now; }
+  },
+  /* One signal stage: fire one beam from every point in from to every point in to.
+     Starts only after ``delay`` seconds, so a few calls lay out "stage after stage".
+     ``hue``: in / recall / out — input coming in, retrieval, answer flowing back. */
+  fire(from,to,{delay=0,hue='recall',dur=PULSE.dur}={}){
+    const src=(from||[]).filter(i=>N[i]), dst=(to||[]).filter(i=>N[i]);
+    if(!src.length||!dst.length) return 0;
+    // Don't fire too many at once: 8x8=64 beams blur into a mess and eat frame rate. At most 4 targets per source.
+    for(const a of src) for(const b of dst.slice(0,4)){
+      if(a===b) continue;
+      BEAM.push({a,b,hue,dur,t:-PULSE.trail-Math.max(0,delay)/dur,lit:false});
+    }
+    return 1;
+  },
+  beam(from,to){ this.fire(from,to,{hue:'recall'}); },
+  /* Make the brain move once a turn is spoken. beam(left, right) only draws a line if both sides have hits — an empty store or
+     turns that hit only the left brain leave no line on the right, which looks like "the brain map did not react".
+     think() fires light from the you node to the hit nodes; when nothing hits, at least you itself pulses,
+     so "it is thinking" is always visible. */
+  /* Input arrives: the you node lights first. The signal starts here, so it is the start of the pipeline. */
+  spark(){ if(N[USER]){ N[USER].hit=1; N[USER].hitT=nowT(); } },
+
+  /* The signal pipeline for a whole turn, laid out after the steps that really happen on the backend:
+
+       you ──in──▶ hit slot regions ──recall──▶ specific hit memory nodes
+                                    └──recall──▶ right brain (cross-hemisphere)
+
+     Each step starts a little later than the previous one, so it looks like "passing inward stage by stage", not every line
+     flashing at once. The parameters are all things the backend really computed this turn: slots are the local E5 classification,
+     left/right are the retrieval hits — so this animation is not decoration, it is that pipeline. */
+  cascade({slots=[], left=[], right=[]}={}){
+    this.spark();
+    const hubs=slots.map(c=>labelOf(c)).filter(i=>i>=0&&N[i]);
+    if(hubs.length){
+      this.fire([USER],hubs,{hue:'in',delay:0,dur:.7});
+      if(left.length)  this.fire(hubs,left,{hue:'recall',delay:.5});
+      if(right.length) this.fire(hubs,right,{hue:'recall',delay:.75,dur:1.1});
+    }else{
+      // no slot classified (common on typed turns): fire straight from you to the hit nodes
+      if(left.length)  this.fire([USER],left,{hue:'in',delay:0});
+      if(right.length) this.fire([USER],right,{hue:'in',delay:.2,dur:1.1});
+    }
+    // not a single memory hit: at least let you pulse, so "it is thinking" is always visible
+    if(!left.length&&!right.length&&!hubs.length) this.spark();
+  },
+
+  /* Answer starts coming out: the signal flows back from the hit nodes to you. */
+  answer(ids){ this.fire((ids&&ids.length)?ids:[USER],[USER],{hue:'out',dur:.8}); },
+
+  think(ids){ this.cascade({left:(ids||[])}); },
+  clear(){ for(const n of N){ n.hit=0; n.act=0; } BEAM=[]; },
+  /* Three read hooks for debugging/tests. Same nature as __dump(): the console shows which signals are queued
+     right now and whether the start node is lit. The signal pipeline is **staged**, and staging is hard to confirm by eye
+     (it flashes by in a few hundred milliseconds), so leave an entry point that can be asserted on. */
+  __beams(){ return BEAM.map(p=>({a:p.a,b:p.b,hue:p.hue,t:p.t,dur:p.dur})); },
+  userNode(){ return USER; },
+  userLit(){ return !!(N[USER]&&N[USER].hit); },
+
+  // Debug: dump node coordinates (console: VMBrain.__dump())
+  __dump(){ return N.map(n=>({id:n.id,side:n.side,kind:n.kind,cluster:n.cluster,
+                              w:n.w,x:n.x,y:n.y,sx:n.sx,sy:n.sy})); }
+};
+})();
+</script>
+
+<script>
+/* ══════════════════════════════════════════════════════════════════════
+   B. Data · UI · simulation
+   ══════════════════════════════════════════════════════════════════════ */
+(function(){
+const $ = id => document.getElementById(id);
+const app = $('app');
+let toastT=null;
+function toast(m){ const el=$('toast'); el.textContent=m; el.classList.add('on');
+  clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove('on'),2200); }
+function trunc(s){ s=String(s||''); return s.length>40?s.slice(0,40)+'…':s; }
+
+/* ── Two Memory Spaces, each with its own set of preset memories, chats and simulation script ─────── */
+/* Front-end mirror of the Memory Spaces. All content comes from the backend (see loadSpaces / loadMemories) —
+   this used to hold two sets of demo data and a script that "auto-plays a line every 3 seconds"; the page started
+   performing on its own as soon as it opened, mixed into the same map as real memories, so you could not tell what was really remembered. */
+const SPACES = {};
+const SPACE_IDS=[];
+
+/* ── Sessions ─────────────────────────────────────────────────────────── */
+function blankUI(){ return { input:'', reply:'', speaker:i18n('you'),
+  tags:{emo:'',ent:'',sch:''}, recallL:[], recallR:[] }; }
+let sessions=[], currentId=0, nextId=1, activeSpace='demo', searchQ='';
+
+
+function findSession(id){ for(const s of sessions) if(s.id===id) return s; return null; }
+function currentSession(){ return findSession(currentId); }
+function spaceSessions(sid){ return sessions.filter(s=>s.space===sid); }
+
+function createSession(spaceId){
+  const s={ id:nextId++, space:spaceId, title:i18n('newChat'), turns:[], ui:blankUI(), named:false };
+  sessions.unshift(s); currentId=s.id;
+  if(activeSpace!==spaceId){ activeSpace=spaceId; buildGraph(spaceId); }
+  else window.VMBrain.clear();
+  renderAll(); $('textIn').focus();
+  return s;
+}
+function selectSession(id){
+  const s=findSession(id); if(!s||id===currentId) return;
+  currentId=id; turnSess=null;
+  if(s.space!==activeSpace){ activeSpace=s.space; buildGraph(s.space); }
+  else window.VMBrain.clear();
+  renderAll();
+}
+/* ── Memory Space: really created on disk ─────────────────────────────────────
+
+   This block used to only create objects in browser memory; nothing happened on disk, and switching was not wired to the backend
+   (switchSpace was not even defined; clicking a sidebar space threw and took down all the later listeners).
+   Now all three go through the backend: list the spaces on disk, create an empty one, switch to it.            */
+
+/* Merge the spaces listed by the backend into SPACES. Existing ones (like demo, with its demo script) only get their counts updated. */
+async function loadSpaces(){
+  try{
+    const r=await fetch('/api/spaces'); if(!r.ok) return;
+    const d=await r.json();
+    for(const it of (d.spaces||[])){
+      if(!SPACES[it.id]){
+        SPACES[it.id]={ id:it.id, name:it.name, desc:i18n('diskSpace'),
+                        left:[], right:[], sessions:[] };
+        SPACE_IDS.push(it.id);
+      }
+      SPACES[it.id].count=it.count;
+    }
+    if(d.active && SPACES[d.active]) activeSpace=d.active;
+    fillSpaceSel();
+    renderSpaces();
+  }catch(e){ console.warn('[space] could not list spaces', e); }
+}
+
+/* The dropdown at the top right: lists every space; picking one switches to it.
+
+   This used to be just a static badge (#spaceBadge); the page had no way to switch at all —
+   the code did call switchSpace (from the sidebar's #spaceList), but that element had long been gone
+   from the HTML, so switching was entirely dead. */
+function fillSpaceSel(){
+  const sel=$('spaceSel'); if(!sel) return;
+  sel.innerHTML='';
+  for(const sid of SPACE_IDS){
+    const sp=SPACES[sid], o=document.createElement('option');
+    o.value=sid;
+    // Compute live rather than using sp.count — that is a snapshot from listing time and does not reflect memories added since,
+    // so the dropdown said (4), the badge said L2/R0 and the backend actually had 3: three numbers, three stories.
+    const n = (sp.left ? sp.left.length : 0) + (sp.right ? sp.right.length : 0);
+    o.textContent=sp.name+' ('+(n || sp.count || 0)+')';
+    if(sid===activeSpace) o.selected=true;
+    sel.appendChild(o);
+  }
+}
+if($('spaceSel')) $('spaceSel').addEventListener('change',e=>switchSpace(e.target.value));
+
+/* The "+" at the top right: pick a name → a folder appears on disk → switch straight to it and start using it.
+   A separate modal that does not compete with "New chat" for #mask (that one needs a space chosen before creating a chat). */
+/* ── Brain map: lay out memories by space ───────────────────────────────────────────── */
+const CLUSTER_KIND={emotion:'emotion',personality:'exper',preference:'prefer'};
+function buildGraph(sid){
+  const sp=SPACES[sid];
+  window.VMBrain.reset();
+  sp.left.forEach(m=>{
+    m.node=window.VMBrain.add('L','entity',trunc(m.text),m.slot,{full:m.text,src:m.slot});
+  });
+  const count={};
+  sp.left.forEach(m=>(m.ents||[]).forEach(e=>count[e]=(count[e]||0)+1));
+  const cap=sp.left.length*0.5, by={};
+  sp.left.forEach(m=>(m.ents||[]).forEach(e=>{
+    if(count[e]<2||count[e]>cap) return;
+    (by[e]=by[e]||[]).push(m.node);
+  }));
+  for(const e in by){ const g=by[e];
+    for(let i=0;i<g.length;i++) for(let j=i+1;j<g.length;j++)
+      window.VMBrain.link(g[i],g[j],'rel',.28); }
+  sp.right.forEach(m=>{
+    // full prefers the entity description (a one-line summary produced by the backend), falling back to the title itself —
+    // demo data has no desc, and both go through the same path.
+    m.node=window.VMBrain.add('R',CLUSTER_KIND[m.cluster]||'exper',trunc(m.text),m.cluster,
+      {full:m.desc||m.text, notes:m.notes||[], src:m.src||''});
+  });
+  window.VMBrain.clear();
+}
+
+/* ── Rendering ─────────────────────────────────────────────────────────── */
+function renderSpaces(){
+  // The badge (#spaceBadgeName) was removed: it showed the same thing as the dropdown right next to it, and the two
+  // numbers came from two sources that disagreed — the badge read left.length/right.length, the dropdown read the sp.count
+  // saved at load time, which does not update with new memories. Only the dropdown remains; for the numbers see fillSpaceSel.
+  // Keep the if() guard here: $('spaceList') is the old structure; fetching it unguarded throws, the script dies, and every later
+  // listener (including "Start talking") fails to attach — the symptom is a button that does nothing.
+  const brain=$('brainSpace');
+  if(brain){
+    const sp=SPACES[activeSpace];
+    brain.textContent='Memory Space · '+sp.name+
+      i18n('badgeStat', '', sp.left.length, sp.right.length).replace(/^\s*/,'');
+  }
+  const ul=$('spaceList');
+  if(!ul) return;
+  ul.innerHTML='';
+  for(const sid of SPACE_IDS){
+    const sp=SPACES[sid], li=document.createElement('li');
+    if(sid===activeSpace) li.className='on';
+    li.dataset.space=sid;
+    li.innerHTML='<span class="dot"></span><span><span class="nm">'+sp.name+'</span>'+
+      '<span class="sub">'+sp.desc+'<br>'+i18n('spaceStat3', sp.left.length, sp.right.length, spaceSessions(sid).length)+'</span></span>';
+    ul.appendChild(li);
+  }
+}
+function renderSessions(){
+  const ul=$('sessList'); if(!ul) return;      // sidebar removed, no container to render into
+  ul.innerHTML='';
+  const q=searchQ.trim().toLowerCase();
+  let list=spaceSessions(activeSpace);
+  if(q) list=list.filter(s=>s.title.toLowerCase().includes(q)||
+                            s.turns.some(t=>t.text.toLowerCase().includes(q)));
+  if($('sessCount')) $('sessCount').textContent=SPACES[activeSpace].name+' · '+list.length;
+  if(!list.length){
+    const d=document.createElement('div'); d.className='side-empty';
+    d.textContent=q?i18n('noMatchInSpace'):i18n('noChatInSpace');
+    ul.appendChild(d); return;
+  }
+  for(const s of list){
+    const li=document.createElement('li');
+    if(s.id===currentId) li.className='on';
+    li.dataset.id=s.id;
+    const t=document.createElement('span'); t.className='t'; t.textContent=s.title;
+    const n=document.createElement('span'); n.className='n';
+    n.textContent=s.turns.length?i18n('turnsN', s.turns.length):'';
+    li.append(t,n); ul.appendChild(li);
+  }
+}
+// Preserve the active caption draft across chat re-renders.
+var liveChatDraft=null, spokenCaption=null;
+function restoreLiveChatDraft(s){
+  if(!s||!spokenCaption||!spokenCaption.active||spokenCaption.session!==s) return;
+  beginLiveChatDraft(s);
+  paintLiveChatDraft(spokenCaption.shown||'');
+}
+function renderChat(){
+  const s=currentSession();
+  $('chatTitle').textContent=s?s.title:i18n('newChat');
+  const csn=$('chatSpaceName');
+  if(csn) csn.textContent=SPACES[s?s.space:activeSpace].name;
+  const box=$('chatLog'); box.innerHTML='';
+  if(!s||!s.turns.length){
+    const e=document.createElement('div'); e.className='empty';
+    e.innerHTML=i18n('startHint', SPACES[s?s.space:activeSpace].name);
+    box.appendChild(e); restoreLiveChatDraft(s); return;
+  }
+  for(const turn of s.turns){
+    const w=document.createElement('div');
+    w.className='turn '+(turn.role==='user'?'user':'ai');
+    const who=document.createElement('div'); who.className='who';
+    who.textContent=turn.role==='user'?(turn.speaker||i18n('you')):'SuperMem';
+    const said=document.createElement('div'); said.className='said'; said.textContent=turn.text;
+    w.append(who,said); box.appendChild(w);
+  }
+  restoreLiveChatDraft(s);
+  box.scrollTop=box.scrollHeight;
+}
+function chip(kind,label,val){
+  const el=document.createElement('span');
+  el.className='tag '+kind+(val?'':' off');
+  const b=document.createElement('b'); b.textContent=label;
+  el.append(b,document.createTextNode(val||'—'));
+  return el;
+}
+// Speaker colours. 'You' is the default speaker hard-coded in blankUI(); everyone else recognised by voiceprint
+// (other names recognised by voiceprint) share one fallback colour; demo names are no longer preset.
+// Speaker names are the keys of this table, so "you" in every UI language must be in it.
+const SPK_COLOR={'You':'#6ba7f0','आप':'#6ba7f0'};
+function renderIO(s){
+  const li=$('liveInput');
+  if(s.ui.input){ li.classList.remove('idle'); li.textContent=s.ui.input; }
+  else { li.classList.add('idle'); li.textContent=i18n('waitingYou'); }
+  const rp=$('reply');
+  rp.textContent=s.ui.reply||i18n('noReplyYet');
+  rp.classList.toggle('idle',!s.ui.reply);
+  const box=$('tags'); box.innerHTML='';
+  box.append(chip('emo','emotion',s.ui.tags.emo),chip('ent','entity',s.ui.tags.ent),
+             chip('sch','schema',s.ui.tags.sch));
+  const spk=s.ui.speaker||i18n('you');
+  $('spkNm').textContent=spk;
+  $('spkAv').textContent=spk.slice(0,1);
+  $('spkAv').style.background=SPK_COLOR[spk]||'#9b8cf0';
+  $('spkId').textContent= spk===i18n('you') ? i18n('voiceMatched')
+    : 'speaker '+(spk.charCodeAt(0)%7+1)+i18n('voiceKnown', spk);
+  renderRecall('l',s.ui.recallL); renderRecall('r',s.ui.recallR);
+}
+function renderRecall(side,items){
+  const ul=$(side==='r'?'recallR':'recallL'); ul.innerHTML='';
+  if(!items.length){
+    const li=document.createElement('li'); li.className='none';
+    // There are several reasons it can be empty; a hard-coded "Waiting for retrieval…" cannot tell them apart, so you could only guess.
+    li.textContent = !live ? i18n('notConnected')
+      : (LAST_HITS.at===0 ? i18n('waitRetrieve')
+      : (side==='r' && LAST_HITS.rAll>0 ? i18n('rbInternalOnly', LAST_HITS.rAll)
+      : i18n('noHitThisTurn')));
+    ul.appendChild(li); return;
+  }
+  for(const it of items){
+    const li=document.createElement('li');
+    const a=document.createElement('span'); a.textContent=it.text;
+    const b=document.createElement('span'); b.className='sc'; b.textContent=it.score;
+    li.append(a,b); ul.appendChild(li);
+  }
+}
+
+/* ── A/B compare ──────────────────────────────────────────────────────────────
+   The same utterance goes to two arms: one gets the retrieved memory injected into system, one does not. Persona/language/chat history
+   are identical on both sides (backend _compare_shared_system), so any difference on screen can only come from memory.
+   No judge — see for yourself.
+
+   The state is **not attached to the session**: this is a glance-and-go view; keeping the previous turn's two arms
+   on screen after switching sessions would only make it unclear which turn is which. */
+const CMP={ on:false, ctx:'',
+            a:{text:'',ms:0,err:'',memory:true,cartridge:false},
+            b:{text:'',ms:0,err:'',memory:false,cartridge:false} };
+
+/* A panel's title follows what the server says it actually ran. */
+function cmpTitle(st){
+  return i18n(st.memory ? (st.cartridge ? 'cmpWithCart' : 'cmpWith') : 'cmpWithout');
+}
+
+/* "KV reused 93% · 14,210/15,280 tok": straight from the engine's usage.
+   Nothing when the engine did not report cached tokens -- no guessing. */
+function kvPct(u){
+  if(!u || u.prompt_tokens==null || u.cached_tokens==null) return null;
+  return u.prompt_tokens ? Math.round(100*u.cached_tokens/u.prompt_tokens) : 0;
+}
+function kvText(u){
+  const pct=kvPct(u); if(pct===null) return '';
+  return i18n('cmpKvReused')+' '+pct+'% · '+u.cached_tokens.toLocaleString()+'/'
+         +u.prompt_tokens.toLocaleString()+' tok';
+}
+
+function cmpArms(){
+  return ['A','B'].map(u=>({ label:u.toLowerCase(),
+    model:$('cmpModel'+u).value.trim(),
+    memory:$('cmpMem'+u).checked,
+    cartridge:$('cmpCart'+u).checked,
+    base_url:$('cmpUrl'+u).value.trim(),
+    api_key:$('cmpKey'+u).value }));
+}
+
+/* The backend is the single authority for this config: only what POST returns is drawn, no local optimistic update — otherwise after a 400
+   the screen shows a config the backend is not actually using, and the compare results cannot be explained. */
+async function cmpPost(enabled){
+  try{
+    const r=await fetch('/api/compare',{ method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ enabled, arms:cmpArms() }) });
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){ toast('compare: '+(d.detail||r.status)); return; }
+    cmpApply(d);
+  }catch(e){ toast('compare: '+e.message); }
+}
+
+function cmpApply(d){
+  CMP.on=!!d.enabled;
+  for(const a of (d.arms||[])){
+    const u=(a.label||'').toUpperCase();
+    if(!$('cmpModel'+u)) continue;
+    // Don't overwrite the box being typed in (change only fires on blur)
+    if($('cmpModel'+u)!==document.activeElement) $('cmpModel'+u).value=a.model||'';
+    if($('cmpUrl'+u)!==document.activeElement) $('cmpUrl'+u).value=a.base_url||'';
+    $('cmpMem'+u).checked=!!a.memory;
+    $('cmpCart'+u).checked=!!a.cartridge;
+    CMP[a.label].memory=!!a.memory;
+    CMP[a.label].cartridge=!!(a.cartridge && a.memory);
+    $('cmpCol'+u).classList.toggle('mem',!!a.memory);
+  }
+  $('cmpTg').classList.toggle('on',CMP.on);
+  $('cmp').hidden=!CMP.on;
+  // By default the centre column is "height split by viewport, no scrolling". With compare on that height cannot fit both arms, so only
+  // in this mode does the centre column scroll and this panel get a usable minimum.
+  document.querySelector('.center').classList.toggle('cmp-on',CMP.on);
+  document.querySelector('.p-out').classList.toggle('cmp-on',CMP.on);
+  // A compare turn sends no answer_*, so the single-arm box would sit on "No reply yet" forever; keeping it only misleads.
+  $('reply').hidden=CMP.on;
+  renderCmp();
+}
+
+function cmpReset(){
+  // Don't clear the memory flag: it is this arm's identity, updated by cmp_start, not a per-turn output.
+  CMP.ctx='';
+  CMP.a={text:'',ms:0,err:'',memory:CMP.a.memory,cartridge:CMP.a.cartridge};
+  CMP.b={text:'',ms:0,err:'',memory:CMP.b.memory,cartridge:CMP.b.cartridge};
+}
+
+function renderCmp(){
+  for(const u of ['A','B']){
+    const st=CMP[u.toLowerCase()], el=$('cmpTxt'+u);
+    if(!el) continue;
+    // The title follows **whether this arm actually has memory**, not a hard-coded label. Hard-coded, anyone ticking B's
+    // checkbox would make B carry memory while labelled "Without SuperMem".
+    const lab=$('cmpCol'+u).querySelector('.lab');
+    if(lab) lab.textContent=cmpTitle(st);
+    $('cmpCol'+u).classList.toggle('mem',!!st.memory);
+    if(st.err){ el.className='cmp-body err'; el.textContent=st.err; }
+    else if(st.text){ el.className='cmp-body'; el.textContent=st.text; }
+    else { el.className='cmp-body idle'; el.textContent=i18n('cmpWaiting'); }
+    // TTFB first: total time follows answer length, so the wordier arm looks slower even if it started speaking first.
+    $('cmpMs'+u).textContent = ((st.ttfb!==undefined&&st.ttfb!==null) ? st.ttfb+'ms'
+                             : (st.ms?st.ms+'ms':'')) + (kvPct(st.usage)!==null ? ' · KV '+kvPct(st.usage)+'%' : '');
+  }
+  // Show the injected text verbatim. "What memory helped with" is only clear once you see those lines.
+  $('cmpCtx').textContent=CMP.ctx||i18n('cmpCtxEmpty');
+  // Retrieval runs **every turn**, regardless of which arm has memory on — so with both arms off there is still
+  // content here, and not a word of it went into any prompt. Without saying who got it, this title would be lying.
+  const to=['A','B'].filter(u=>CMP[u.toLowerCase()].memory).join('+');
+  $('cmpCtxN').textContent = !CMP.ctx ? ''
+    : CMP.ctx.length+' chars → '+(to||i18n('cmpCtxNobody'));
+}
+
+async function cmpLoad(){
+  try{ const r=await fetch('/api/compare'); if(r.ok) cmpApply(await r.json()); }
+  catch(e){ /* backend not up: leave the toggle off, the page works as usual */ }
+}
+
+$('cmpTg').addEventListener('click',()=>cmpPost(!CMP.on));
+for(const u of ['A','B']){
+  $('cmpGear'+u).addEventListener('click',()=>{
+    const box=$('cmpAdv'+u); box.hidden=!box.hidden;
+    $('cmpGear'+u).classList.toggle('on',!box.hidden);
+  });
+}
+async function cartridgePrefetch(){
+  try{
+    const r=await fetch('/api/cartridge',{method:'POST'});
+    const d=await r.json();
+    if(d.error){ toast('cartridge: '+d.error); return; }
+    const p=(d.prefetch||[]).map(x=>x.error ? x.panel.toUpperCase()+': '+x.error
+      : x.panel.toUpperCase()+' '+Math.round(x.ms)+'ms').join(', ');
+    toast('KV cartridge "'+d.space+'" ~'+d.tokens.toLocaleString()+' tok'+(p?' · pre-filled '+p:''));
+  }catch(e){ toast('cartridge: '+e.message); }
+}
+for(const u of ['A','B']){
+  $('cmpCart'+u).addEventListener('change',async()=>{
+    await cmpPost(CMP.on);
+    if($('cmpCart'+u).checked) cartridgePrefetch();
+  });
+  $('cmpMem'+u).addEventListener('change',()=>cmpPost(CMP.on));
+  for(const f of ['cmpModel','cmpUrl','cmpKey'])
+    $(f+u).addEventListener('change',()=>cmpPost(CMP.on));
+}
+
+
+/* ── Per-turn compare feed (lower half of the right column) ────────────────────────────────────────────────
+   There used to be only the two boxes in the centre column, always showing just the **last turn** — what was said before and how the two arms
+   answered was gone once it was said; no scrolling back. Now each turn appends a block to #chatLog: the user's line
+   centred, the two arms side by side below, each with its TTFB. Older turns stay above; scroll up to see them. */
+let FEED=null;                     // DOM refs for the current turn
+
+function feedNewTurn(said){
+  const box=$('chatLog'); if(!box) return null;
+  const wrap=document.createElement('div'); wrap.className='turn';
+
+  const line=document.createElement('div'); line.className='turn-said';
+  const bub=document.createElement('span');
+  const tag=document.createElement('b'); tag.textContent=i18n('you');
+  bub.append(tag, document.createTextNode(said||''));
+  bub.title=said||'';
+  line.appendChild(bub); wrap.appendChild(line);
+
+  const cols=document.createElement('div'); cols.className='turn-cols';
+  const cards={};
+  for(const panel of ['a','b']){
+    const card=document.createElement('div'); card.className='tc';
+    const h=document.createElement('div'); h.className='tc-h';
+    const who=document.createElement('span'); who.className='who';
+    const ttfb=document.createElement('span'); ttfb.className='ttfb';
+    const tot=document.createElement('span'); tot.className='tot';
+    h.append(who,ttfb,tot);
+    const kv=document.createElement('div'); kv.className='tc-kv';
+    const body=document.createElement('div');
+    body.className='tc-body idle'; body.textContent=i18n('cmpWaiting');
+    card.append(h,body,kv); cols.appendChild(card);
+    cards[panel]={card,who,ttfb,tot,kv,body,text:''};
+  }
+  wrap.appendChild(cols);
+
+  const det=document.createElement('details'); det.className='turn-ctx';
+  const sum=document.createElement('summary');
+  const lbl=document.createElement('span'); lbl.textContent=i18n('cmpCtx');
+  const cnt=document.createElement('span'); cnt.className='tot';
+  sum.append(lbl,cnt);
+  const pre=document.createElement('pre');
+  det.append(sum,pre); wrap.appendChild(det);
+
+  box.appendChild(wrap);
+  box.scrollTop=box.scrollHeight;
+  return {wrap,cards,ctxCount:cnt,ctxPre:pre,ctxDet:det};
+}
+
+function feedCtx(text){
+  if(!FEED) return;
+  FEED.ctxPre.textContent=text||i18n('cmpCtxEmpty');
+  FEED.ctxCount.textContent=text?(text.length+' chars'):'';
+}
+
+function feedStart(panel,memory,cartridge){
+  if(!FEED||!FEED.cards[panel]) return;
+  const c=FEED.cards[panel];
+  c.text=''; c.body.className='tc-body idle'; c.body.textContent=i18n('cmpWaiting');
+  c.ttfb.textContent=''; c.tot.textContent=''; c.kv.textContent='';
+  // The title follows whether the server says this arm has memory, same reasoning as the two boxes in the centre column
+  c.who.textContent=cmpTitle({memory,cartridge});
+  c.card.classList.toggle('mem',!!memory);
+}
+
+function feedDelta(panel,text,ttfb){
+  if(!FEED||!FEED.cards[panel]) return;
+  const c=FEED.cards[panel], box=$('chatLog');
+  const atBottom = box && (box.scrollHeight-box.scrollTop-box.clientHeight < 60);
+  c.text+=(text||'');
+  c.body.className='tc-body'; c.body.textContent=c.text;
+  if(ttfb!==undefined && ttfb!==null) c.ttfb.textContent=ttfb+'ms';
+  // Only follow-scroll if it was already stuck to the bottom. Yanking the user back while they scroll through old turns is the most annoying thing.
+  if(atBottom && box) box.scrollTop=box.scrollHeight;
+}
+
+function feedDone(panel,m){
+  if(!FEED||!FEED.cards[panel]) return;
+  const c=FEED.cards[panel];
+  if(m.error){ c.body.className='tc-body err'; c.body.textContent=m.error; }
+  else if(m.text){ c.body.className='tc-body'; c.body.textContent=m.text; c.text=m.text; }
+  if(m.ttfb!==undefined && m.ttfb!==null) c.ttfb.textContent=m.ttfb+'ms';
+  if(m.ms!==undefined) c.tot.textContent='· '+m.ms+'ms total';
+  c.kv.textContent=kvText(m.usage);
+}
+
+function renderAll(){
+  renderSpaces(); renderSessions(); renderChat();
+  renderIO(currentSession()||{ui:blankUI()});
+}
+
+/* ── New chat ───────────────────────────────────────────────────────── */
+/* Sidebar removed (the collapse, search and session-list listeners went with it): it only held a session list,
+   and every turn now stays in the compare feed in the right column, so those 264px are better spent on the feed.
+   Note this is not an "incidental cleanup": fetching something like $('btnCollapse') that does not exist throws, the script dies,
+   and none of the later addEventListener calls attach — including "Start talking", whose symptom is a button that
+   does nothing. So removing an element must remove its listeners too. */
+$('btnNew').addEventListener('click',()=>{
+  createSession(activeSpace);
+  $('textIn').focus();
+});
+
+/* ── Right column ─────────────────────────────────────────────────────────── */
+/* The two side-swiped screens (.track) became a top/bottom split: brain map on top, compare feed below, both always present,
+   so there is no longer a need for a switch control, or to pin the container to one screen. */
+setTimeout(window.VMBrain.resize,60);
+
+/* ── Export ─────────────────────────────────────────────────────────── */
+function saveFile(text,name,mime){
+  const url=URL.createObjectURL(new Blob([text],{type:mime}));
+  const a=document.createElement('a'); a.href=url; a.download=name;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url),800);
+}
+function stamp(){ const d=new Date(), p=n=>String(n).padStart(2,'0');
+  return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+'-'+p(d.getHours())+p(d.getMinutes()); }
+$('dlBtn').addEventListener('click',async()=>{
+  const scope=$('dlScope').value, sp=SPACES[activeSpace];
+  if(scope==='chat'){
+    const s=currentSession();
+    if(!s||!s.turns.length){ toast(i18n('emptyChat')); return; }
+    const md='# '+s.title+'\n\n> Memory Space: '+sp.name+'\n\n'+
+      s.turns.map(t=>(t.role==='user'?('**'+(t.speaker||i18n('you'))+'**\n\n'):'**SuperMem**\n\n')+t.text)
+        .join('\n\n---\n\n');
+    saveFile(md,'supermem-'+sp.id+'-chat-'+stamp()+'.md','text/markdown');
+    toast(i18n('downloadedChat')); return;
+  }
+  let left=sp.left, right=sp.right;
+  try{ const r=await fetch('/api/memories?space='+sp.id);
+       if(r.ok){ const m=await r.json(); left=m.left||left; right=m.right||right; } }catch(e){}
+  const out={exported_at:new Date().toISOString(), space:sp.id, space_name:sp.name};
+  if(scope!=='right') out.left_brain=left;
+  if(scope!=='left')  out.right_brain=right;
+  const n=(out.left_brain||[]).length+(out.right_brain||[]).length;
+  if(!n){ toast(i18n('noMemInSpace')); return; }
+  saveFile(JSON.stringify(out,null,2),'supermem-'+sp.id+'-'+scope+'-'+stamp()+'.json','application/json');
+  toast(i18n('downloadedN', n, sp.name));
+});
+
+/* ── Voice state / waveform / level / orb ─────────────────────────────────── */
+const voice=$('voice'), voiceLab=$('voiceLab');
+const LAB={idle:i18n('idle'),user:i18n('listening'),ai:i18n('replying'),paused:i18n('paused')};
+function setVoice(s){
+  voice.className='voice'+(s==='ai'?' ai':s==='user'?' user':'');
+  voiceLab.textContent=LAB[s]||s;
+  $('spk').classList.toggle('live',s==='user');
+}
+const wave=$('wave'), wc=wave.getContext('2d');
+let vt=0, amp=0, aiSpeaking=false, lvOn=false;
+let lastSpark=0;              // throttle gate for partial pulses
+let LAST_HIT_NODES=[];        // nodes hit this turn; the answer flows back from them
+function sizeWave(){ const r=wave.getBoundingClientRect(), d=Math.min(2,window.devicePixelRatio||1);
+  wave.width=Math.max(1,r.width*d); wave.height=Math.max(1,r.height*d); wc.setTransform(d,0,0,d,0,0); }
+new ResizeObserver(sizeWave).observe(wave); sizeWave();
+(function waveFrame(){
+  vt+=.06; const w=wave.clientWidth||96,h=wave.clientHeight||24,mid=h/2;
+  amp+=((aiSpeaking?1:0)-amp)*.12;
+  wc.clearRect(0,0,w,h); wc.beginPath();
+  for(let x=0;x<=w;x++){
+    const env=Math.sin(x/w*Math.PI);
+    const y=mid+Math.sin(x*.14-vt*2.2)*env*(h*.4)*amp*(.5+.5*Math.sin(vt*1.7+x*.05));
+    x?wc.lineTo(x,y):wc.moveTo(x,y);
+  }
+  wc.strokeStyle='rgba(121,215,162,'+(.3+.5*amp).toFixed(2)+')'; wc.lineWidth=1.5; wc.stroke();
+  requestAnimationFrame(waveFrame);
+})();
+const lvBars=Array.prototype.slice.call($('spkLv').querySelectorAll('i'));
+setInterval(()=>{ lvBars.forEach(b=>b.style.height=(lvOn?4+Math.random()*10:4)+'px'); },110);
+
+const ORB={strands:3,lines:7,points:88,spacing:.06,base:.34,shrink:.45,
+  idleAmp:.14,liveAmp:1.0,idleSpeed:.10,liveSpeed:.5,rot:.5,liveRot:1.2,
+  spread:.3,lw:1.1,squish:.88,halo:5,haloA:.34,mid:2,midA:.42,
+  dark:[58,116,220],light:[150,205,245]};
+let orbLevel=0,orbPhase=0,orbRot=0;
+const orbGlow=document.createElement('canvas');
+function orbPoint(th,t,si,R,a,sq){
+  const ph=(si/ORB.strands)*Math.PI*2;
+  const r=R*(1+a*(.4*Math.sin(3*th+ph+t)+.24*Math.sin(5*th-ph*2+t*.6)+.16*Math.sin(2*th+ph*1.5-t*1.4)));
+  const wob=.09*R*a*Math.sin(4*th-t*1.8+ph);
+  return {x:r*Math.cos(th)+wob*Math.cos(th+Math.PI/2), y:r*Math.sin(th)*sq+wob*Math.sin(th+Math.PI/2)};
+}
+(function startOrb(){
+  const cvs=$('orb'), c=cvs.getContext('2d'), W=cvs.width, H=cvs.height;
+  orbGlow.width=W; orbGlow.height=H; const g=orbGlow.getContext('2d');
+  let last=performance.now(), acc=0;
+  (function f(now){
+    requestAnimationFrame(f);
+    const dt=Math.min((now-last)/1000,.1); last=now; acc+=dt;
+    if(orbLevel<.03&&acc<.05) return; acc=0;
+    const want=aiSpeaking?.55:(lvOn?.85:0);
+    orbLevel+=(want-orbLevel)*(want>orbLevel?.2:.05);
+    const a=ORB.idleAmp+(ORB.liveAmp-ORB.idleAmp)*orbLevel;
+    const sq=1-(1-ORB.squish)*orbLevel;
+    orbPhase+=dt*(ORB.idleSpeed+(ORB.liveSpeed-ORB.idleSpeed)*orbLevel);
+    orbRot+=dt*(ORB.rot+(ORB.liveRot-ORB.rot)*orbLevel);
+    const R=Math.min(W,H)*ORB.base*(1-ORB.shrink*orbLevel);
+    g.clearRect(0,0,W,H); g.save(); g.translate(W/2,H/2); g.rotate(orbRot);
+    const grad=g.createRadialGradient(0,0,0,0,0,R*2.1);
+    grad.addColorStop(0,'rgba('+ORB.dark+',1)');
+    grad.addColorStop(.55,'rgba('+ORB.dark+',1)');
+    grad.addColorStop(1,'rgba('+ORB.light+',1)');
+    const M=ORB.lines, half=(M-1)/2, sp=R*ORB.spacing;
+    g.strokeStyle=grad; g.lineWidth=ORB.lw; g.lineJoin='round'; g.lineCap='round';
+    for(let si=0;si<ORB.strands;si++){
+      const spin=orbRot*ORB.spread*si, cs=Math.cos(spin), sn=Math.sin(spin);
+      for(let k=0;k<M;k++){
+        const Rk=R+(k-half)*sp, edge=1-Math.abs(k-half)/(half+.001);
+        g.beginPath();
+        for(let i=0;i<=ORB.points;i++){
+          const th=(i/ORB.points)*Math.PI*2, p=orbPoint(th,orbPhase,si,Rk,a,sq);
+          const x=p.x*cs-p.y*sn, y=p.x*sn+p.y*cs;
+          i?g.lineTo(x,y):g.moveTo(x,y);
+        }
+        g.globalAlpha=.5+.5*edge; g.stroke();
+      }
+    }
+    g.globalAlpha=1; g.restore();
+    c.clearRect(0,0,W,H); c.save(); c.translate(W/2,H/2);
+    const bg=c.createRadialGradient(0,0,0,0,0,R*2.1);
+    bg.addColorStop(0,'rgba(60,130,255,'+(.2+.28*orbLevel)+')');
+    bg.addColorStop(.5,'rgba(30,70,190,'+(.09+.13*orbLevel)+')');
+    bg.addColorStop(1,'rgba(0,0,0,0)');
+    c.fillStyle=bg; c.beginPath(); c.arc(0,0,R*2.1,0,Math.PI*2); c.fill(); c.restore();
+    c.save(); c.globalCompositeOperation='lighter';
+    c.filter='blur('+ORB.halo+'px)'; c.globalAlpha=ORB.haloA; c.drawImage(orbGlow,0,0);
+    c.filter='blur('+ORB.mid+'px)';  c.globalAlpha=ORB.midA;  c.drawImage(orbGlow,0,0);
+    c.filter='none'; c.globalAlpha=1; c.drawImage(orbGlow,0,0); c.restore();
+  })(last);
+})();
+
+/* ── One Q&A turn (shared by simulation / typing) ──────────────────────────────────── */
+let busy=false, turnSess=null;
+function addTurn(s,role,text,speaker){
+  s.turns.push({role,text,speaker});
+  if(role==='user'&&!s.named){ s.title=text.length>20?text.slice(0,20)+'…':text; s.named=true; }
+  renderSessions(); if(s===currentSession()) renderChat();
+}
+function paint(s){ if(s===currentSession()) renderIO(s); }
+function applyHits(s,sp,ex){
+  const L=(ex.left||[]).map((i,k)=>({m:sp.left[i],score:(0.88-k*0.09).toFixed(2)})).filter(x=>x.m);
+  const R=(ex.right||[]).map((i,k)=>({m:sp.right[i],score:(0.82-k*0.11).toFixed(2)})).filter(x=>x.m);
+  s.ui.recallL=L.map(x=>({text:trunc(x.m.text),score:x.score}));
+  s.ui.recallR=R.map(x=>({text:trunc(x.m.text),score:x.score}));
+  paint(s);
+  const li=L.map(x=>x.m.node).filter(v=>v!==undefined);
+  const ri=R.map(x=>x.m.node).filter(v=>v!==undefined);
+  window.VMBrain.highlight(li.concat(ri));
+  window.VMBrain.beam(li,ri);
+}
+
+
+/* ── Typed turn ───────────────────────────────────────────────────────── */
+$('textIn').addEventListener('keydown',e=>{
+  if(e.key!=='Enter') return;
+  const t=e.target.value.trim(); if(!t) return;
+  e.target.value='';
+  // With no session yet, currentSession() is null — since the demo data was removed, that is the state the page
+  // opens in. This used to read s.space directly, so typing threw a TypeError and the whole script stopped here.
+  const send=()=>{
+    let s2=currentSession() || createSession(activeSpace);
+    s2.ui.input=t; s2.ui.speaker=i18n('you'); paint(s2);
+    ws.send(JSON.stringify({type:'user_text',text:t}));
+  };
+  if(live&&ws&&ws.readyState===1){ send(); return; }   // already connected
+  // Not connected yet: open one ourselves (without the mic), and send the line once connected. This used to just pop up
+  // "Not connected", making the user click "Start talking" first — even though typing clearly needs no microphone.
+  goLive({withMic:false}, send);
+});
+
+/* ── Real backend ─────────────────────────────────────────────────────── */
+const params=new URLSearchParams(location.search);
+// Follow the page's own address; don't hard-code the port.
+//
+// location.host already includes the port (locally localhost:8787), while behind Tailscale Funnel /
+// a reverse proxy it is 443 with no port in the URL — hard-coding ':8787' makes the deployed version connect to a port that is not
+// open at all: the page loads, but clicking "Start talking" cannot connect.
+// ?ws=host:port can still set it manually (for running frontend and backend separately).
+const WS_HOST=params.get('ws')||location.host||'localhost:8787';
+const WS_URL=(location.protocol==='https:'?'wss://':'ws://')+WS_HOST+'/ws';
+const SAMPLE_RATE=24000;          // must match MIC_RATE in run.py
+let ws=null, live=false, paused=false;
+
+/* --- Playback ---------------------------------------------------------- */
+/* Continuous PCM playback with adaptive jitter buffering. */
+let playCtx=null, pcmNode=null, pcmReady=null, pcmPending=[], pcmDrainPending=false;
+let pcmStreaming=false, pcmDrainWaiters=[], pcmPrebuffer=0.08, pcmWorkletFailed=false;
+let pcmBargePaused=false, pcmOutputId='', pcmOutputSampleRate=SAMPLE_RATE;
+let scheduled=[], nextPlay=0;             // only for complete AudioBuffers like "replay the original recording"
+
+function resolvePcmDrain(){
+  pcmStreaming=false;
+  for(const done of pcmDrainWaiters.splice(0)) done();
+}
+function configurePcmPlayer(){
+  if(pcmNode) pcmNode.port.postMessage({type:'config',prebuffer:pcmPrebuffer});
+}
+function reportPlaybackCheckpoint(m){
+  if(!m.outputId||!ws||ws.readyState!==WebSocket.OPEN) return;
+  const state={buffer:'playing',started:'playing',resumed:'playing',
+               paused:'paused',underflow:'stalled',drained:'drained',
+               interrupted:'interrupted'}[m.type]||m.type;
+  try{
+    ws.send(JSON.stringify({type:'playback_checkpoint',output_id:m.outputId,
+      rendered_samples:Number(m.renderedSamples||0),sample_rate:Number(m.sampleRate||SAMPLE_RATE),
+      buffered_samples:Math.round(Number(m.bufferedMs||0)*Number(m.sampleRate||SAMPLE_RATE)/1000),
+      state}));
+  }catch(e){}
+}
+function beginPcmOutput(outputId,sampleRate=SAMPLE_RATE){
+  pcmOutputId=String(outputId||'');
+  pcmOutputSampleRate=Number(sampleRate||SAMPLE_RATE);
+  if(pcmNode) pcmNode.port.postMessage({type:'start',outputId:pcmOutputId,
+                                       sampleRate:pcmOutputSampleRate});
+}
+function initPcmPlayer(){
+  if(pcmReady||!playCtx) return pcmReady;
+  if(!playCtx.audioWorklet){ pcmWorkletFailed=true; return Promise.resolve(); }
+  pcmReady=playCtx.audioWorklet.addModule('/pcm-player-worklet.js').then(()=>{
+    pcmNode=new AudioWorkletNode(playCtx,'supermem-pcm-player',{outputChannelCount:[1]});
+    pcmNode.connect(playCtx.destination);
+    pcmNode.port.onmessage=e=>{
+      const m=e.data||{};
+      reportPlaybackCheckpoint(m);
+      if(m.type==='started') setSpokenCaptionPlaying(true);
+      else if(m.type==='drained'){
+        setSpokenCaptionPlaying(false);
+        resolvePcmDrain();
+      }else if(m.type==='underflow'){
+        setSpokenCaptionPlaying(false);
+        if(window.VM_DEBUG) console.debug('[audio] adaptive buffer',m.targetMs+'ms');
+      }
+    };
+    configurePcmPlayer();
+    if(pcmOutputId) pcmNode.port.postMessage({type:'start',outputId:pcmOutputId,
+                                             sampleRate:pcmOutputSampleRate});
+    if(pcmBargePaused) pcmNode.port.postMessage({type:'pause'});
+    for(const item of pcmPending.splice(0)) enqueuePcm(item.samples,item.sourceFrames);
+    if(pcmDrainPending){ pcmDrainPending=false; pcmNode.port.postMessage({type:'drain'}); }
+  }).catch(e=>{
+    pcmWorkletFailed=true; pcmReady=null;
+    console.warn('[audio] AudioWorklet unavailable, falling back to the old player',e);
+    for(const item of pcmPending.splice(0)) legacyPlayPcm(item.samples);
+    if(pcmDrainPending){ pcmDrainPending=false; resolvePcmDrain(); }
+  });
+  return pcmReady;
+}
+function ensurePlayback(){
+  if(!playCtx){
+    playCtx=new (window.AudioContext||window.webkitAudioContext)({latencyHint:'interactive'});
+    initPcmPlayer();
+  }
+  if(playCtx.state==='suspended') playCtx.resume();
+  return playCtx;
+}
+function legacyPlayPcm(f32){
+  if(!playCtx||!f32.length) return;
+  const b=playCtx.createBuffer(1,f32.length,playCtx.sampleRate); b.copyToChannel(f32,0);
+  const s=playCtx.createBufferSource(); s.buffer=b; s.connect(playCtx.destination);
+  scheduled.push(s); s.onended=()=>{ const i=scheduled.indexOf(s); if(i>=0) scheduled.splice(i,1); };
+  const now=playCtx.currentTime, at=nextPlay>now?nextPlay:now+pcmPrebuffer;
+  s.start(at); nextPlay=at+b.duration;
+}
+function enqueuePcm(f32,sourceFrames){
+  if(!pcmNode){ pcmPending.push({samples:f32,sourceFrames}); return; }
+  pcmNode.port.postMessage({type:'audio',samples:f32,sourceFrames},[f32.buffer]);
+}
+function playPcm(buf){
+  const ctx=ensurePlayback();
+  if(buf.byteLength<2) return;
+  const even=buf.byteLength-(buf.byteLength%2);
+  const i16=new Int16Array(buf,0,even/2), native=new Float32Array(i16.length);
+  for(let i=0;i<i16.length;i++) native[i]=i16[i]/32768;
+  // Match PCM samples to the AudioContext rate.
+  const f32=ctx.sampleRate===SAMPLE_RATE?native:resampleLinear(native,SAMPLE_RATE,ctx.sampleRate);
+  pcmStreaming=true;
+  if(pcmWorkletFailed) legacyPlayPcm(f32); else enqueuePcm(f32,i16.length);
+}
+function finishPcmStream(){
+  if(pcmWorkletFailed){ resolvePcmDrain(); return; }
+  if(pcmNode) pcmNode.port.postMessage({type:'drain'}); else pcmDrainPending=true;
+}
+function waitForPcmDrain(maxMs=20000){
+  if(!pcmStreaming) return Promise.resolve();
+  return new Promise(resolve=>{
+    let done=false;
+    const finish=()=>{ if(done)return; done=true; clearTimeout(timer); resolve(); };
+    const timer=setTimeout(finish,maxMs);
+    pcmDrainWaiters.push(finish);
+  });
+}
+function stopPlayback(reason='reset'){
+  setSpokenCaptionPlaying(false);
+  pcmBargePaused=false;
+  pcmPending.length=0; pcmDrainPending=false;
+  if(pcmNode) pcmNode.port.postMessage({type:'clear',reason});
+  pcmOutputId='';
+  resolvePcmDrain();
+  for(const s of scheduled.splice(0)){ try{ s.stop(); }catch(e){} }
+  releaseMic();                 // playback was interrupted; the mic shouldn't stay held
+  if(playCtx) nextPlay=playCtx.currentTime;
+}
+function pausePlaybackForBarge(){
+  if(pcmBargePaused) return;
+  pcmBargePaused=true; setSpokenCaptionPlaying(false);
+  if(pcmNode) pcmNode.port.postMessage({type:'pause'});
+  else if(playCtx) playCtx.suspend();
+}
+function resumePlaybackAfterBarge(){
+  if(!pcmBargePaused) return;
+  pcmBargePaused=false;
+  if(pcmNode) pcmNode.port.postMessage({type:'resume'});
+  else if(playCtx) playCtx.resume();
+  setSpokenCaptionPlaying(true);
+}
+
+/* --- Microphone -------------------------------------------------------- */
+// Whether to mute the mic while the assistant speaks (half duplex).
+//
+// getUserMedia already enables echoCancellation, but the browser's AEC cannot fully suppress speaker output:
+// once the residue reaches ASR there are two consequences — it starts a turn with nobody speaking, and it treats what it is saying as
+// a barge-in and stops mid-sentence. The llm_tts path has no other echo cancellation (the realtime path has OpenAI
+// doing it server-side), so it can only be blocked at the source.
+//
+// The cost is **no barge-in while it speaks**, so it is off by default.
+// Default **off**: echo is blocked server-side by content instead (_is_echo); the mic stays open so barge-in works.
+// With loudspeakers in a really bad environment where the server still can't block it, localStorage.setItem('vm-half-duplex','1')
+// switches to muting — that trades barge-in for cleanliness, a last resort.
+const HALF_DUPLEX = localStorage.getItem('vm-half-duplex') === '1';
+// Tail: keep muted a little longer after audio scheduling ends, to absorb room reverb and speaker ring-out.
+const AEC_TAIL_S = 0.25;
+// Whether the assistant is still audible right now. nextPlay is the end time of all queued audio, more accurate than a timer —
+// answer_done only means the text finished generating; the buffered audio often plays for several more seconds.
+function assistantAudible(){
+  return !!playCtx && playCtx.currentTime < nextPlay + AEC_TAIL_S;
+}
+let micStream=null, micCtx=null, micProc=null;
+function toPCM16(f32){
+  const o=new Int16Array(f32.length);
+  for(let i=0;i<f32.length;i++){ const s=Math.max(-1,Math.min(1,f32[i])); o[i]=s<0?s*0x8000:s*0x7fff; }
+  return o;
+}
+function downsample(f32,from,to){
+  if(from===to) return f32;
+  const ratio=from/to, out=new Float32Array(Math.floor(f32.length/ratio));
+  for(let i=0;i<out.length;i++) out[i]=f32[Math.floor(i*ratio)];
+  return out;
+}
+function resampleLinear(f32,from,to){
+  if(from===to) return f32;
+  const ratio=from/to, out=new Float32Array(Math.max(1,Math.round(f32.length/ratio)));
+  for(let i=0;i<out.length;i++){
+    const p=i*ratio, a=Math.floor(p), b=Math.min(a+1,f32.length-1), t=p-a;
+    out[i]=f32[a]*(1-t)+f32[b]*t;
+  }
+  return out;
+}
+async function startMic(){
+  micStream=await navigator.mediaDevices.getUserMedia(
+    {audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+  if(!micCtx) micCtx=new (window.AudioContext||window.webkitAudioContext)();
+  if(micCtx.state==='suspended') await micCtx.resume();
+  const src=micCtx.createMediaStreamSource(micStream);
+  // Smaller capture blocks reduce uplink latency.
+  micProc=micCtx.createScriptProcessor(2048,1,1);
+  micProc.onaudioprocess=e=>{
+    if(!ws||ws.readyState!==1||paused||replaying) return;
+    if(HALF_DUPLEX && assistantAudible()) return;   // mic muted, see above
+    const f32=e.inputBuffer.getChannelData(0);
+    let peak=0; for(let i=0;i<f32.length;i++){ const v=Math.abs(f32[i]); if(v>peak) peak=v; }
+    lvOn=peak>0.02;
+    ws.send(toPCM16(downsample(f32,micCtx.sampleRate,SAMPLE_RATE)).buffer);
+  };
+  src.connect(micProc); micProc.connect(micCtx.destination);
+}
+function stopMic(){
+  if(micProc){ micProc.disconnect(); micProc.onaudioprocess=null; micProc=null; }
+  if(micStream){ for(const t of micStream.getTracks()) t.stop(); micStream=null; }
+  lvOn=false;
+}
+
+/* --- Backend memory → a separate space -------------------------------------- */
+/* Don't stuff it into demo/mine: those two are scripted spaces, and once real memories mix in, indexes in the script like left:[2,3]
+   point at the wrong item. Real data gets its own space; they don't interfere. */
+/* The Memory Space currently open on the backend is activeSpace.
+   
+   The backend used to have just one fixed space, and the front end held it in a virtual space called 'live', so
+   loadMemories had `if(activeSpace!==LIVE) return;` — after switching to demo
+   activeSpace was 'demo', that check was always true, and the brain map never rebuilt again.
+   Now the backend can switch spaces, real memories land directly on activeSpace, and that virtual layer is gone. */
+function ensureSpaceObj(id){
+  if(SPACES[id]) return;
+  SPACES[id]={id, name:id, desc:i18n('diskSpace'),
+              left:[], right:[], sessions:[]};
+  if(!SPACE_IDS.includes(id)) SPACE_IDS.push(id);
+}
+
+async function loadMemories(){
+  ensureSpaceObj(activeSpace);
+  let m;
+  try{
+    const r=await fetch('/api/memories');
+    if(!r.ok) return;
+    m=await r.json();
+  }catch(e){ return; }
+  const sp=SPACES[activeSpace];
+
+  // Record how many notes each node had before the refresh. A new utterance usually attaches under an **existing** node
+  // (e.g. yet another "anxious"), so the node count doesn't change and nothing is visible on the map — so diff it here
+  // and flash whichever node gained a note, so the user knows what they just said went in.
+  const before={};
+  for(const x of sp.left)  before['L:'+x.text]=1;
+  for(const x of sp.right) before['R:'+x.text]=(x.notes||[]).length;
+
+  // The shape is aligned **field by field** with the demo data in SPACES above; the brain map and cards accept only one structure:
+  //   left brain {text, slot, ents}
+  //   right brain {text, cluster, src, desc, notes:[{text, emotion, cause}]}
+  // src is written as "emotion log ×4" — that is how the demo data looks, shown directly at the bottom of the card.
+  sp.left=(m.left||[]).map(x=>({text:x.text,slot:x.slot||'daily_life',ents:x.entities||[]}));
+  sp.right=(m.right||[]).map(x=>{
+    const notes=x.notes||[];
+    const src=(x.slot||'')+(notes.length?' ×'+notes.length:'');
+    // The right hemisphere of the brain map has only three anchors (RIGHT_SLOTS: emotion/personality/preference).
+    // The backend word is experiences (the coping_style / expression_style / people-places-attitudes slots),
+    // which have no anchor → labelOf() returns -1 → the node has nowhere to go; measured 12 of 28
+    // vanished this way. Align them to the UI's three categories at the boundary.
+    let cl=x.cluster||'personality';
+    if(cl!=='emotion'&&cl!=='preference') cl='personality';
+    return {text:x.text,cluster:cl,src:src,desc:x.desc||'',notes:notes};
+  });
+
+  const grew=[];
+  sp.left.forEach((x,i)=>{ if(!before['L:'+x.text]) grew.push(['L',i]); });
+
+  // Entities in the tag bar: memory_hits is sent **before** the reply, when this utterance has not been extracted yet,
+  // so only a zero-cost approximation is possible (the backend picks the ones this utterance mentioned from the hit memories). The real entities
+  // come out of the same LLM call that extracts the fact / assigns the slot, and are stored with the new memory — replace them once they arrive.
+  // Exclude the ones "kept in the map only because retrieval hit them" — those are old memories, not grown this turn.
+  const fresh=grew.filter(g=>g[0]==='L').map(g=>sp.left[g[1]]).filter(x=>!x.hit);
+  if(fresh.length){
+    const ents=[];
+    fresh.forEach(x=>(x.ents||[]).forEach(e=>{ if(e&&ents.indexOf(e)<0) ents.push(e); }));
+    // Only write back to **the turn that started this poll**. Without this check, the previous turn's poll can return after you
+    // have already said the next line, and stick the previous line's entities onto this line's tag bar — it looks like
+    // "a turn with no entities keeps showing the previous turn's".
+    const cur=currentSession();
+    if(cur&&ents.length&&watchTurn===turnSeq){
+      cur.ui.tags.ent=ents.slice(0,6).join(listSep()); paint(cur);
+    }
+  }
+  sp.right.forEach((x,i)=>{
+    const was=before['R:'+x.text];
+    if(was===undefined || (x.notes||[]).length>was) grew.push(['R',i]);
+  });
+
+
+  console.log('[vm] loadMemories: left '+sp.left.length+' right '+sp.right.length+' → rebuilding brain map');
+  buildGraph(activeSpace); renderAll();
+
+  // node indexes are only valid after buildGraph
+  const ids=[];
+  for(const [side,i] of grew){
+    const item=(side==='L'?sp.left:sp.right)[i];
+    if(item && item.node!==undefined) ids.push(item.node);
+  }
+  if(ids.length){
+    window.VMBrain.highlight(ids);
+    setTimeout(()=>window.VMBrain.clear(), 2600);
+  }
+}
+
+/* Which node on the brain map a hit from the backend corresponds to.
+   Left brain is matched by the memory text; the right brain sends the heartnote content, while nodes are entities,
+   so look through the entity's notes for the one that contains it. */
+function leftNodesOf(hits){
+  const sp=SPACES[activeSpace]; if(!sp) return [];
+  const out=[];
+  for(const h of hits){
+    const i=sp.left.findIndex(m=>m.text===h.text);
+    if(i>=0&&sp.left[i].node!==undefined) out.push(sp.left[i].node);
+  }
+  return out;
+}
+/* The content from the backend carries a prefix, like "[2026-08-22] ⚠ avoid repeating: body…",
+   while the note in the snapshot is the clean body — exact equality never matches. Strip the prefix before comparing. */
+function bareNote(s){
+  return String(s||'')
+    .replace(/^\s*\[[^\]]*\]\s*/,'')      // [2026-08-22]
+    .replace(/^[⚠✱*\s]+/,'')              // ⚠
+    .replace(/^[^\uff1a:]{2,8}[\uff1a:]\s*/,'')    // avoid repeating:
+    .trim();
+}
+function rightNodesOf(hits){
+  const sp=SPACES[activeSpace]; if(!sp) return [];
+  const out=[];
+  for(const h of hits){
+    const c=bareNote(h.raw||h.content);   // raw is the original text with prefix; the note was stored from it
+    if(!c) continue;
+    // A memory is often attached under several nodes at once: both a specific trait like "wants comfort when stressed"
+    // and the catch-all person node "Jiaqi" (measured 52 notes).
+    // Pick the one with the fewest notes — fewer notes means more specific, so the beam pointing there carries information.
+    const cands=[];
+    sp.right.forEach((m,k)=>{
+      if((m.notes||[]).some(n=>{
+        const t=bareNote(n.text);
+        return t&&(t===c||t.indexOf(c)>=0||c.indexOf(t)>=0);
+      })) cands.push(k);
+    });
+    cands.sort((a,b)=>(sp.right[a].notes||[]).length-(sp.right[b].notes||[]).length);
+    let i = cands.length ? cands[0] : -1;
+    // Ones not attached to a specific note (e.g. response_experience isn't in the snapshot at all)
+    // fall back to matching by whether the entity name / description mentions it
+    if(i<0) i=sp.right.findIndex(m=>m.text&&c.indexOf(m.text)>=0);
+    if(i>=0&&sp.right[i].node!==undefined&&out.indexOf(sp.right[i].node)<0){
+      out.push(sp.right[i].node); continue;
+    }
+    // A profile hit is slot-level ("likes_dislikes: …") and has no matching entity node.
+    // Light the nodes under that slot — those are exactly what this profile was summarised from.
+    if(h.slot){
+      sp.right.forEach(m=>{
+        if(m.node!==undefined && (m.src||'').indexOf(h.slot)===0
+           && out.indexOf(m.node)<0) out.push(m.node);
+      });
+    }
+  }
+  return out;
+}
+
+/* --- Message handling ------------------------------------------------------ */
+let liveReply='', pendingMemoryClip='';
+let replyPlaybackGeneration=0;
+spokenCaption={session:null,target:'',shown:'',index:0,budget:0,playing:false,
+               active:false,frame:0,lastAt:0};
+function beginLiveChatDraft(s){
+  // A/B कम्पेयर चालू हो तो यह सिंगल "SuperMem" ड्राफ्ट बबल feedNewTurn() के
+  // turn-cols पर लिख देता था (renderChat() पूरा chatLog rebuild करता है सिर्फ़
+  // s.turns से) — इसी वजह से "Without SuperMem" वाला कार्ड ग़ायब हो जाता था।
+  if(CMP.on) return;
+  if(!s||s!==currentSession()) return;
+  const box=$('chatLog');
+  const empty=box.querySelector('.empty'); if(empty) empty.remove();
+  if(liveChatDraft&&liveChatDraft.wrap.isConnected) liveChatDraft.wrap.remove();
+  const wrap=document.createElement('div'); wrap.className='turn ai streaming';
+  const who=document.createElement('div'); who.className='who'; who.textContent='SuperMem';
+  const said=document.createElement('div'); said.className='said'; said.textContent='';
+  wrap.append(who,said); box.appendChild(wrap); box.scrollTop=box.scrollHeight;
+  liveChatDraft={sessionId:s.id,wrap,said,box};
+}
+function paintLiveChatDraft(text){
+  const draft=liveChatDraft;
+  if(!draft||!draft.wrap.isConnected) return;
+  draft.said.textContent=text;
+  draft.box.scrollTop=draft.box.scrollHeight;
+}
+function paintSpokenCaption(text){
+  const s=spokenCaption.session;
+  if(s){
+    s.ui.reply=text;
+    if(s===currentSession()){
+      const rp=$('reply');
+      rp.textContent=text||i18n('noReplyYet');
+      rp.classList.toggle('idle',!text);
+    }
+  }
+  paintLiveChatDraft(text);
+}
+function finishLiveChatDraft(s,text){
+  if(spokenCaption&&spokenCaption.session===s) spokenCaption.active=false;
+  if(liveChatDraft&&liveChatDraft.sessionId===s.id) liveChatDraft=null;
+  if(CMP.on) return;   // compare turn: feedDone() ने turn-cols में दोनों जवाब पहले ही लिख दिए
+  if(text) addTurn(s,'ai',text); else if(s===currentSession()) renderChat();
+}
+function captionCost(ch){
+  if(/[\u3400-\u9fff\uf900-\ufaff]/.test(ch)) return 1;
+  if(/[\u3002\uff01\uff1f!?]/.test(ch)) return 1.15;
+  if(/[\uff0c\u3001\uff1b;\uff1a:,.]/.test(ch)) return .55;
+  if(/\s/.test(ch)) return .16;
+  return .34;                              // Latin letters are timed per "word", not per equal-length character
+}
+function resetSpokenCaption(s){
+  if(spokenCaption.frame) cancelAnimationFrame(spokenCaption.frame);
+  spokenCaption={session:s,target:'',shown:'',index:0,budget:0,playing:false,
+                 active:true,frame:0,lastAt:performance.now()};
+  paintSpokenCaption('');
+}
+function setSpokenCaptionTarget(text){
+  spokenCaption.target=text||'';
+  if(spokenCaption.playing) scheduleSpokenCaption();
+}
+function setSpokenCaptionPlaying(playing){
+  spokenCaption.playing=!!playing;
+  spokenCaption.lastAt=performance.now();
+  if(playing) scheduleSpokenCaption();
+  else if(spokenCaption.frame){ cancelAnimationFrame(spokenCaption.frame); spokenCaption.frame=0; }
+}
+function scheduleSpokenCaption(){
+  if(!spokenCaption.frame&&spokenCaption.playing)
+    spokenCaption.frame=requestAnimationFrame(stepSpokenCaption);
+}
+function stepSpokenCaption(now){
+  spokenCaption.frame=0;
+  if(!spokenCaption.playing) return;
+  const dt=Math.min(.12,Math.max(0,(now-spokenCaption.lastAt)/1000));
+  spokenCaption.lastAt=now;
+  // Weight punctuation and Latin text to approximate spoken pacing.
+  spokenCaption.budget+=dt*5.2;
+  const chars=Array.from(spokenCaption.target);
+  let changed=false;
+  while(spokenCaption.index<chars.length){
+    const cost=captionCost(chars[spokenCaption.index]);
+    if(spokenCaption.budget<cost) break;
+    spokenCaption.budget-=cost;
+    spokenCaption.index++; changed=true;
+  }
+  if(changed){
+    spokenCaption.shown=chars.slice(0,spokenCaption.index).join('');
+    paintSpokenCaption(spokenCaption.shown);
+  }
+  scheduleSpokenCaption();
+}
+function completeSpokenCaption(text){
+  setSpokenCaptionPlaying(false);
+  spokenCaption.target=text||spokenCaption.target;
+  spokenCaption.shown=spokenCaption.target;
+  spokenCaption.index=Array.from(spokenCaption.target).length;
+  paintSpokenCaption(spokenCaption.shown);
+  return spokenCaption.shown;
+}
+function handle(m){
+  if(window.VM_DEBUG) console.log('[vm]', m.type, m);
+  const s=currentSession();
+  if(!s){ console.warn('[vm] received '+m.type+' but there is no current session, dropping'); return; }
+  switch(m.type){
+    case 'session_ready':
+      // Chained TTS uses a larger initial jitter buffer.
+      pcmPrebuffer=m.mode==='realtime'?0.08:0.16;
+      configurePcmPlayer();
+      toast(i18n('connected', m.mode||'')); break;
+
+    case 'partial_transcript':
+      setVoice('user'); s.ui.input=m.text; paint(s);
+      // Speaking: the signal is coming in, keep the start node pulsing. partial arrives every ~100ms;
+      // lighting on every one blurs into a mess, so once per 400ms.
+      if(Date.now()-lastSpark>400){ lastSpark=Date.now(); window.VMBrain.spark(); }
+      break;
+
+    case 'user_transcript':
+      // A new turn: clear the previous turn's tags first. Whatever this turn extracts is filled in once ingest finishes.
+      // Without clearing, saying something with nothing to extract ("la la la") leaves the previous line's entities in the tag bar.
+      s.ui.tags={emo:'',ent:'',sch:''};
+      lvOn=false; s.ui.input=m.text; paint(s);
+      // In compare mode, no longer push a single user bubble into the feed: the centred line in feedNewTurn is it,
+      // two copies would duplicate. Non-compare mode (A/B off) works as before.
+      if(CMP.on) FEED=feedNewTurn(m.text);
+      else addTurn(s,'user',m.text,s.ui.speaker||i18n('you'));
+      window.VMBrain.spark();            // retrieval not back yet: light the start node first, the signal starts here
+      break;
+
+    case 'memory_hits': {
+      const L=m.left_brain||[], R=m.right_brain_hits||[];
+      s.ui.tags={emo:m.emotion||'',
+                 ent:(m.entities||[]).join(listSep()),
+                 sch:(m.slots||[]).join(listSep())};
+      s.ui.recallL=L.map(h=>({text:trunc(h.text),score:Number(h.score||0).toFixed(2)}));
+      s.ui.recallR=R.filter(h=>!h.internal)
+                    .map(h=>({text:trunc(h.content),score:Number(h.priority||0).toFixed(2)}));
+      paint(s);
+      LAST_HITS={at:Date.now(), l:L.length, rAll:R.length,
+                 r:R.filter(h=>!h.internal).length};
+      const li=leftNodesOf(L), ri=rightNodesOf(R);
+      const sp=SPACES[activeSpace];
+      console.log('[vm] brain map: space has left '+(sp?sp.left.length:'?')+'/right '+(sp?sp.right.length:'?')+
+                  ' nodes; hits this turn left '+li.length+'/right '+ri.length+
+                  (ri.length?'':'  <- no right-brain node to light'));
+      window.VMBrain.highlight(li.concat(ri));
+      // Signal pipeline: you → hit slot regions → specific hit memories → right brain.
+      // The parameters are all what the backend really computed this turn (slots are the local E5 classification, li/ri are
+      // the retrieval-hit nodes), so this is not a decorative animation; it draws that very pipeline.
+      LAST_HIT_NODES=li.concat(ri);
+      window.VMBrain.cascade({slots:m.slots||[], left:li, right:ri});
+      break;
+    }
+
+    case 'answer_start':
+      // First drop the previous turn's audio that **hasn't finished playing**. The server cancels the old task before starting a new turn,
+      // but by then the old audio was long sent and queued in playCtx's schedule — without clearing it the new turn
+      // plays after it, the two interleave, and it sounds like "the sentences don't make sense".
+      // Synthesising the next segment ahead makes the buffer deeper, so the problem is more visible.
+      stopPlayback('reset');
+      beginPcmOutput(m.output_id,m.sample_rate);
+      replyPlaybackGeneration++;
+      setVoice('ai'); aiSpeaking=true; liveReply=''; s.ui.reply=''; paint(s);
+      beginLiveChatDraft(s);
+      resetSpokenCaption(s);
+      ensurePlayback(); break;
+
+    case 'answer_delta':
+      // Advance both captions on the playback clock.
+      liveReply+=m.text;
+      setSpokenCaptionTarget(liveReply); break;
+
+    case 'cmp_ctx':
+      // Start of a turn. Both arms' cmp_start follow right after, so clear the previous turn here.
+      cmpReset(); CMP.ctx=m.context||''; renderCmp();
+      // When a typed turn has no user_transcript before it (e.g. the backend sent cmp_ctx directly),
+      // open a block here, otherwise this turn's two arms have nowhere to go.
+      if(!FEED) FEED=feedNewTurn(currentSession()?currentSession().ui.input:'');
+      feedCtx(CMP.ctx);
+      break;
+
+    case 'cmp_start': {
+      const st=CMP[m.panel];
+      if(st){ st.text=''; st.err=''; st.ms=0; st.memory=!!m.memory;
+              st.cartridge=!!m.cartridge; st.usage=null; }
+      // The server says whether this arm actually got memory — it is the source of truth. Previously the title and the "injected into"
+      // badge were computed from the local checkbox, and the checkbox can drift from the server (someone else
+      // POSTed /api/compare, or this page was left open without refreshing). The result: the server gave the memory
+      // to B while the UI said → A and the title said With SuperMem — the UI was lying,
+      // and the whole point of this demo is to make people trust those two columns on screen.
+      if($('cmpMem'+m.panel.toUpperCase()))
+        $('cmpMem'+m.panel.toUpperCase()).checked=!!m.memory;
+      renderCmp(); feedStart(m.panel,!!m.memory,!!m.cartridge); break;
+    }
+
+    case 'cmp_delta': {
+      const st=CMP[m.panel];
+      if(st){ st.text+=(m.text||''); if(m.ttfb!==undefined) st.ttfb=m.ttfb; }
+      renderCmp(); feedDelta(m.panel,m.text,m.ttfb);
+      // First token: the answer is starting; the signal flows back from the hit memories to you.
+      // Only on the first token of the arm with memory — firing for both gives a double flash,
+      // and "memory took part in this answer" is only true for that arm.
+      if(m.ttfb!==undefined && CMP[m.panel] && CMP[m.panel].memory)
+        window.VMBrain.answer(LAST_HIT_NODES);
+      break;
+    }
+
+    case 'cmp_done': {
+      const st=CMP[m.panel];
+      if(st){ st.text=m.text||st.text; st.ms=m.ms||0; st.err=m.error||'';
+              if(m.ttfb!==undefined) st.ttfb=m.ttfb; st.usage=m.usage||null; }
+      renderCmp(); feedDone(m.panel,m); break;
+    }
+
+    case 'answer_pause':
+      pausePlaybackForBarge(); setVoice('user'); break;
+
+    case 'answer_resume':
+      resumePlaybackAfterBarge(); setVoice('ai'); break;
+
+    case 'answer_done':
+      finishPcmStream();
+      const playbackGeneration=replyPlaybackGeneration;
+      const completedReply=liveReply;
+      liveReply='';
+      const memoryClip=pendingMemoryClip; pendingMemoryClip='';
+      waitForPcmDrain().then(()=>{
+        if(playbackGeneration!==replyPlaybackGeneration) return;
+        completeSpokenCaption(completedReply);
+        finishLiveChatDraft(s,completedReply);
+        aiSpeaking=false; setVoice('idle');
+        if(memoryClip) playMemoryClip(memoryClip);
+      });
+      titleFor(s);
+      // Facts and the graph are written by a background thread (async_facts=True). Measured 15.9s per turn — the fact-extraction
+      // LLM round trip itself is the bulk, and turns that trigger consolidation take longer. Refreshing at fixed times
+      // always guesses wrong (it used to refresh only at 2.5s, always before the write finished, so the right brain never moved after new info).
+      // Instead poll until it actually changes, watching for at most 40 seconds.
+      watchMemories();
+      break;
+
+    case 'answer_interrupt':
+      replyPlaybackGeneration++;
+      const heardReply=typeof m.heard_text==='string'?m.heard_text:spokenCaption.shown;
+      setSpokenCaptionPlaying(false);
+      paintSpokenCaption(heardReply);
+      finishLiveChatDraft(s,heardReply);
+      liveReply='';
+      stopPlayback('interrupted'); aiSpeaking=false; setVoice('user'); break;
+
+    case 'tag_update': {
+      // Acoustic emotion is computed in the background (2.3s); only add this once it is ready. The hot path first sent the text-
+      // semantic one; here only the emotion is overwritten, leave entities and slots alone.
+      const s2=currentSession(); if(!s2) break;
+      if(m.emotion){ s2.ui.tags.emo=m.emotion; paint(s2); }
+      break;
+    }
+
+    case 'play_memory':
+      // Defer memory playback until the reply audio drains.
+      pendingMemoryClip=m.memory_id||''; break;
+
+    case 'error':
+      toast(m.message||i18n('backendGone')); break;
+  }
+}
+
+/* After a turn, watch the backend until the background thread has finished writing memories.
+   The sign of completion is that the memory changes; give up after 40 seconds with no change (this turn may have had nothing to store,
+   e.g. a question, or a fact that is already in the store). */
+let watchTimer=null, watchTurn=0, turnSeq=0;
+//: count from the most recent memory_hits, used to explain the empty state
+let LAST_HITS={at:0,l:0,r:0,rAll:0};
+// The snapshot is capped (48 left-brain entries / 7 per slot, right brain 6 per slot), so adding a memory
+// often **does not change the total**, it just swaps one entry. So compare a content fingerprint, not the count.
+function memSignature(){
+  const sp=SPACES[activeSpace];
+  if(!sp) return '';
+  const l=sp.left.map(x=>x.text).join('|');
+  const r=sp.right.map(x=>x.text+':'+(x.notes||[]).length).join('|');
+  return l+'##'+r;
+}
+function watchMemories(){
+  if(watchTimer) clearInterval(watchTimer);
+  watchTurn=++turnSeq;
+  const sig0=memSignature();
+  let tries=0;
+  watchTimer=setInterval(async function(){
+    tries++;
+    await loadMemories();
+    if(memSignature()!==sig0||tries>=20){ clearInterval(watchTimer); watchTimer=null; }
+  },2000);
+}
+
+/* Play back the original audio from that moment. Uses the AudioContext that plays replies, queued after the reply,
+   otherwise it would overlap with a reply still playing. */
+/* While replaying that recording, don't treat it as the user speaking again.
+
+   The played sound loops from the speaker back into the mic. The browser's echoCancellation blocks the assistant's TTS,
+   but not this — measured: after playing a clip of music, the backend immediately gained an extra empty turn (`[speculate] '' -> 0
+   hits`), neither brain hit, the model had nothing, and replied "sorry, I can't replay it directly".
+   The log also recognised that music as "heard for the 2nd time".
+   So during replay just stop sending upstream, and leave a little margin after it ends for room reverb. */
+//: the most replay waits for the assistant's queued speech.
+//:
+//: The recording goes **after** the assistant's lead-in line — first hear it say "I found that clip", then the recording.
+//: This cap is only a safeguard: if the TTS queue piles up for some other reason, nobody is left waiting forever.
+//: It used to be 4 seconds, and the recording cut in before the assistant finished speaking, reversing the whole order.
+const REPLAY_MAX_WAIT_S=20;
+let replaying=false, replayTimer=null;
+function holdMic(ms){
+  replaying=true; lvOn=false;
+  clearTimeout(replayTimer);
+  replayTimer=setTimeout(()=>{ replaying=false; }, Math.max(0,ms));
+}
+function releaseMic(){ clearTimeout(replayTimer); replaying=false; }
+
+async function playMemoryClip(id){
+  if(!id) return;
+  try{
+    const r=await fetch('/api/audio/'+encodeURIComponent(id));
+    if(!r.ok){ console.warn('[replay] failed to fetch recording', id, r.status); return; }
+    const ctx=ensurePlayback();
+    const buf=await ctx.decodeAudioData(await r.arrayBuffer());
+    const src=ctx.createBufferSource(); src.buffer=buf; src.connect(ctx.destination);
+    scheduled.push(src);
+    // Queue after the assistant's lead-in line, but **don't wait forever**: realtime audio chunks queue as a stream,
+    // nextPlay keeps getting pushed back, and waiting for it to drain could mean ten-plus seconds — the user would think "it didn't play".
+    // Queue after the speech already queued (nextPlay); don't jump in before the assistant finishes.
+    const wait=Math.min(Math.max(0,nextPlay-ctx.currentTime),REPLAY_MAX_WAIT_S);
+    const at=ctx.currentTime+wait+0.25;
+    src.start(at); nextPlay=at+buf.duration;
+    console.log('[replay] playing recording', id, buf.duration.toFixed(1)+'s',
+                wait>REPLAY_MAX_WAIT_S?'(not waiting for TTS to drain)':'(waiting '+wait.toFixed(1)+'s)');
+    holdMic((at-ctx.currentTime+buf.duration)*1000+400);
+    src.onended=()=>{ setTimeout(releaseMic,400); };
+  }catch(e){ console.warn('[replay] playback failed', e); releaseMic(); }
+}
+
+/* Have the backend's small model give this conversation a summary title; called only once, after the second turn */
+async function titleFor(s){
+  if(s.titled||s.turns.length<2) return;
+  s.titled=true;
+  try{
+    const text=s.turns.map(t=>t.text).join('\n');
+    const r=await fetch('/api/title',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({text})});
+    if(!r.ok) return;
+    const j=await r.json();
+    if(j.title){ s.title=j.title; s.named=true; renderSessions(); }
+  }catch(e){}
+}
+
+/* --- Start / end --------------------------------------------------- */
+const talkBtn=$('talkBtn'), pauseBtn=$('pauseBtn');
+function syncButtons(){
+  talkBtn.textContent=live?i18n('talkEnd'):i18n('talkStart');
+  talkBtn.classList.toggle('primary',!live);
+  talkBtn.classList.toggle('live',live);
+  pauseBtn.disabled=!live; pauseBtn.textContent=paused?i18n('resume'):i18n('pause');
+}
+function endLive(note){
+  live=false; paused=false;
+  stopMic(); stopPlayback();
+  if(ws){ ws.onclose=null; ws.close(); ws=null; }
+  aiSpeaking=false; syncButtons(); setVoice('idle');
+  if(note) toast(note);
+}
+/* Connect to the backend. ``withMic`` decides whether to also open the microphone.
+   It is split because **typed turns need no microphone at all**: the connection used to be created only by the single "Start talking" button,
+   so typing into the box and pressing Enter right after opening the page only popped up "Not connected" — the box looked usable, pressing did
+   nothing. Typing is itself a user gesture, good enough to create an AudioContext, so this path can produce sound too. */
+function goLive({withMic}={withMic:true}, onReady){
+  if(withMic && (!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)){
+    toast(i18n('micUnsupported')); return false; }
+  ensurePlayback();               // must be created inside a user gesture, see the ensurePlayback comment
+  try{ ws=new WebSocket(WS_URL); }catch(e){ toast(i18n('cantConnect', WS_HOST)); return false; }
+  ws.binaryType='arraybuffer';
+  ws.onopen=async()=>{
+    live=true;
+    // Create the session first, then fetch memories. The other way round, if memory_hits arrived during the few hundred
+    // milliseconds of loadMemories, it would render into the **old** session, and the moment the new session was created the panel
+    // went empty — the symptom is the right-brain column stuck on "Waiting for retrieval…".
+    ensureSpaceObj(activeSpace);
+    createSession(activeSpace);
+    await loadMemories();
+    syncButtons(); setVoice(withMic?'user':'idle');
+    if(withMic){
+      try{ await startMic(); }
+      catch(e){ endLive(i18n('disconnected', i18n('micFailed', e.name))); return; }
+    }
+    if(onReady) onReady();
+  };
+  ws.onmessage=ev=>{
+    if(ev.data instanceof ArrayBuffer){
+      try{ playPcm(ev.data); }catch(e){ console.warn('[audio] dropped frame',e); }
+      return;
+    }
+    let msg;
+    try{ msg=JSON.parse(ev.data); }
+    catch(e){ console.error('[vm] JSON parse failed', e, ev.data); return; }
+    // Errors must be visible: if any line in handle throws, no later turn renders again,
+    // the symptom is "nothing updates after clicking Start talking", and a console warn alone is easy to miss.
+    try{ handle(msg); }
+    catch(e){ console.error('[vm] error handling '+msg.type+':', e); }
+  };
+  ws.onclose=()=>{ endLive(i18n('backendGone')); };
+  ws.onerror=()=>{ toast(i18n('cantConnect', WS_HOST)); };
+  return true;
+}
+talkBtn.addEventListener('click',()=>{
+  if(live){ endLive(i18n('ended')); return; }
+  goLive({withMic:true});
+});
+pauseBtn.addEventListener('click',()=>{
+  if(!live) return;
+  paused=!paused;
+  if(paused){ lvOn=false; stopPlayback(); }
+  setVoice(paused?'paused':'user'); syncButtons();
+});
+syncButtons();
+
+/* ── Language switch ─────────────────────────────────────────────────────── */
+if($('langSel')){
+  $('langSel').value = LANG;
+  $('langSel').addEventListener('change', async e=>{
+    LANG = LANGS.includes(e.target.value) ? e.target.value : 'en';
+    localStorage.setItem('vm-lang', LANG);
+    applyLang();
+    renderAll();                       // dynamic text (sidebar, empty states, tags) redraws too
+    renderCmp();                       // the compare boxes' placeholder text is not in renderAll
+    syncButtons();                     // Start/End and Pause/Resume text is written from live state
+    fillSpaceSel();
+    buildGraph(activeSpace);           // the ten region labels on the brain map only change language on rebuild
+    loadMemories();
+    // The assistant switches language too: tell the backend, so later replies and extraction use this language
+    try{ await fetch('/api/lang',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({lang:LANG})}); }
+    catch(err){ console.warn('[lang] backend unreachable', err); }
+  });
+}
+
+/* ── Startup ─────────────────────────────────────────────────────────── */
+applyLang();
+// SPACES starts empty (with the demo data removed there is no preset content), so put a placeholder in first
+// so the first buildGraph/renderAll does not read undefined; real content is fetched by loadSpaces.
+ensureSpaceObj(activeSpace);
+buildGraph(activeSpace);
+renderAll();
+// Fetch the space list first, then fetch the current space's memories to lay out the brain map.
+//
+// Without the second step the brain map is empty on page load — buildGraph ran before this, when SPACES
+// was still an empty shell. Switching to another space and back did show content (switchSpace calls
+// loadMemories), which looked like "memories get lost the first time you enter".
+loadSpaces().then(loadMemories);
+cmpLoad();
+fetch('/api/lang',{method:'POST',headers:{'Content-Type':'application/json'},
+                   body:JSON.stringify({lang:LANG})}).catch(()=>{});
+})();
+</script>
+</body>
+</html>

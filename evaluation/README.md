@@ -1,97 +1,103 @@
-# evaluation — 跑一条命令，出一个数字
+# evaluation — one command, one number
 
 ```bash
 export OPENAI_API_KEY=sk-...
 
 python evaluation/run.py --dataset locomo --data data/locomo.json
 ```
-跑完直接打印，结果同时写进 `results/locomo.json`：
+The result is printed when the run finishes and also written to `results/locomo.json`:
 
 ```text
-locomo  10 段对话 · 152 题
-得分 139/152  =  91.4%
-   multi_hop                88.2%
-   temporal                 85.7%
-   single_hop               95.1%
-检索中位数 12ms · 记忆中位数 298 tokens
-结果已存 results/locomo.json
+LoCoMo: 10 conversations · 152 questions
+
+Score: 139/152 = 91.4%
+
+  multi_hop     88.2%
+  single_hop    95.1%
+  temporal      85.7%
+
+Median retrieval latency: 12 ms
+Median retrieved memory: 298 tokens
+
+Saved to results/locomo.json
 ```
 
-## 常用参数
+## Common options
 
-| 参数 | 干什么 | 默认 |
+| Option | What it does | Default |
 |---|---|---|
-| `--dataset` / `--data` | 用哪个适配器 / 数据文件 | 必填 |
-| `--answer-model` | 拿记忆作答的模型 | `gpt-4o-mini` |
-| `--judge` | 判分的裁判模型 | `gpt-4o-mini` |
-| `--top-k` | 每题检索几条记忆 | `5` |
-| `--mode` | `left_brain_single`=只测事实记忆；`text_mode`=连右脑一起 | `left_brain_single` |
-| `--workers` | 并发跑几段对话 | `4` |
-| `--limit` | 只跑前 N 段（调试用） | 全部 |
-| `--resume` | 接着上次跑，跳过已完成的对话 | 关 |
-| `--save-memory` | 把每题检索到的记忆也存进结果，便于人工复核 | 关 |
-| `--inspect` | 只解析数据集并打印，不跑评测 | 关 |
-| `--no-score` | 只生成答案不判分，之后用 `score.py` 判 | 关 |
+| `--dataset` / `--data` | Which adapter / data file to use | required |
+| `--answer-model` | Model that answers using the memories | `gpt-4o-mini` |
+| `--judge` | Judge model for scoring | `gpt-4o-mini` |
+| `--top-k` | Memories retrieved per question | `5` |
+| `--mode` | `left_brain_single` = fact memory only; `text_mode` = include the right brain | `left_brain_single` |
+| `--workers` | Conversations run concurrently | `4` |
+| `--limit` | Only run the first N conversations (for debugging) | all |
+| `--resume` | Continue the previous run, skipping finished conversations | off |
+| `--save-memory` | Also store each question's retrieved memories in the results, for manual review | off |
+| `--inspect` | Only parse the dataset and print it, no evaluation | off |
+| `--no-score` | Generate answers without scoring; score later with `score.py` | off |
 
-结果每跑完一段就落盘，所以跑几小时的评测中途挂了，加 `--resume` 接着跑即可。
+Results are written to disk after every conversation, so if a multi-hour run dies midway, add `--resume` to continue.
 
-## 重新判分
+## Re-scoring
 
-检索 + 作答是贵的那一半（每题一次 search 加一次生成），判分是便宜的一半。想换裁判
-模型、或者修了判分口径的 bug，不用重跑贵的那半：
+Retrieval + answering is the expensive half (one search plus one generation per question); scoring is the cheap
+half. To switch judge models, or after fixing a scoring bug, you don't need to re-run the expensive half:
 
 ```bash
 python evaluation/score.py --file results/locomo.json --judge gpt-4o
 ```
 
-原始问题是从数据集重新读的（按对话 id + 题 id 对上），不是从结果文件里凑——rubric、
-meta 这些判分要用的字段结果文件里没存。会打印改判了几题。
+The original questions are re-read from the dataset (matched by conversation id + question id), not reconstructed
+from the results file -- fields needed for scoring such as rubric and meta are not stored there. It prints how many
+verdicts changed.
 
-想彻底分两段跑，生成时加 `--no-score`。
+To split the run into two stages entirely, pass `--no-score` when generating.
 
-## 结果文件里有什么
+## What's in the results file
 
 ```json
 {
   "summary":    { "accuracy": ..., "by_category": {...}, "median_search_ms": ... },
-  "config":     { 这次用的全部参数 },
+  "config":     { every parameter used for this run },
   "provenance": { "git_commit": ..., "git_dirty": ..., "python": ..., "packages": {...} },
-  "results":    [ 每段对话每道题的 gold / predicted / 判分理由 ]
+  "results":    [ gold / predicted / scoring rationale for every question of every conversation ]
 }
 ```
 
-`provenance` 是为了半年后看到一个数字，还能查出它是哪份代码、什么环境跑出来的。
-`git_dirty` 为 true 表示跑的时候工作区有未提交改动，这个数字对不回任何一个 commit
-——跑正式结果前先提交。
+`provenance` exists so that a number seen six months later can still be traced to the code and environment that
+produced it. `git_dirty` true means the working tree had uncommitted changes during the run and the number maps
+to no commit -- commit before producing official results.
 
-## 评测新 benchmark
+## Evaluating a new benchmark
 
-一个文件、两个函数，主流程一行不用动。
+One file, two functions, and not a single line of the main flow changes.
 
-**1. 复制 `datasets/locomo.py` 改成 `datasets/你的数据集.py`**，实现两个函数：
+**1. Copy `datasets/locomo.py` to `datasets/your_dataset.py`** and implement two functions:
 
 ```python
 def load(path: str) -> list[Conversation]:
-    """读你的数据文件，转成统一结构。
+    """Read your data file and convert it to the common structure.
     Conversation(id, turns=[Turn(speaker, text, observed_at)], questions=[Question(...)])
     """
 
 def score(q: Question, answer: str, judge) -> Score:
-    """判这道题对不对。judge(system, user) -> str 是注入进来的裁判模型。
-    Score(correct=1.0, total=1.0, note="判分理由")
-    rubric 类的评分：correct=满足的要点数, total=总要点数
+    """Decide whether this question is answered correctly. judge(system, user) -> str is the injected judge model.
+    Score(correct=1.0, total=1.0, note="scoring rationale")
+    For rubric scoring: correct = points satisfied, total = total points
     """
 ```
 
-**2. 登记到 `datasets/__init__.py` 的 `get()`**：
+**2. Register it in `DATASETS` in `datasets/__init__.py`**:
 
 ```python
-table = {"locomo": locomo, "你的数据集": 你的模块}
+DATASETS = {"locomo": "evaluation.datasets.locomo", "your_dataset": "evaluation.datasets.your_dataset"}
 ```
 
-**3. 跑**：
+**3. Run**:
 
 ```bash
-python evaluation/run.py --dataset 你的数据集 --data data/xxx.json --inspect   # 先验证解析
-python evaluation/run.py --dataset 你的数据集 --data data/xxx.json
+python evaluation/run.py --dataset your_dataset --data data/xxx.json --inspect   # verify parsing first
+python evaluation/run.py --dataset your_dataset --data data/xxx.json
 ```

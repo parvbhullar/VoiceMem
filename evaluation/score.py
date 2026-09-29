@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""对一次已经跑完的评测重新判分——不重跑检索和作答。
+"""Re-score a finished evaluation run -- without re-running retrieval and answering.
 
     python evaluation/score.py --file results/locomo.json
     python evaluation/score.py --file results/locomo.json --judge gpt-4o --out results/locomo-gpt4o.json
 
-检索和作答是贵的那一半（每题一次 search + 一次生成），判分是便宜的一半。分开之后：
-换裁判模型、修了判分口径的 bug、想看换个裁判分数稳不稳——都只重跑便宜的那半。
-run.py --no-score 则是只做贵的那半。
+Retrieval and answering are the expensive half (one search + one generation per question); scoring is the cheap half.
+With them split: switching judge models, fixing a scoring bug, or checking whether scores are stable across judges
+all re-run only the cheap half. run.py --no-score does only the expensive half.
 
-原始问题从数据集重新读（按 question_id 对上），不是从结果文件里凑——rubric、meta
-这些判分要用的字段结果文件里没存。
+The original questions are re-read from the dataset (matched by question_id), not reconstructed from the results file --
+fields needed for scoring such as rubric and meta are not stored in the results file.
 """
 from __future__ import annotations
 
@@ -26,13 +26,13 @@ from evaluation.run import make_llm, provenance, summarize   # noqa: E402
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="对已有评测结果重新判分")
-    p.add_argument("--file", required=True, help="run.py 产出的结果 json")
-    p.add_argument("--out", default="", help="写到哪，默认覆盖 --file")
-    p.add_argument("--judge", default="", help="裁判模型，默认沿用原来那次的")
+    p = argparse.ArgumentParser(description="Re-score existing evaluation results")
+    p.add_argument("--file", required=True, help="results json produced by run.py")
+    p.add_argument("--out", default="", help="where to write, default overwrites --file")
+    p.add_argument("--judge", default="", help="judge model, defaults to the one from the original run")
     p.add_argument("--dataset", default="", choices=[""] + datasets.names(),
-                   help="默认沿用结果文件里记的")
-    p.add_argument("--data", default="", help="数据集文件路径，默认沿用结果文件里记的")
+                   help="defaults to the one recorded in the results file")
+    p.add_argument("--data", default="", help="dataset file path, defaults to the one recorded in the results file")
     args = p.parse_args()
 
     src = Path(args.file)
@@ -43,25 +43,25 @@ def main() -> None:
     data = args.data or cfg.get("data", "")
     judge_model = args.judge or cfg.get("judge", "gpt-4o-mini")
     if not dataset or not data:
-        raise SystemExit("结果文件里没记 dataset/data，用 --dataset 和 --data 指定")
+        raise SystemExit("The results file does not record dataset/data; specify --dataset and --data")
     if not Path(data).exists():
-        raise SystemExit(f"数据集不在了：{data}\n用 --data 指到它现在的位置")
+        raise SystemExit(f"Dataset not found: {data}\nUse --data to point to its current location")
 
     ds = datasets.get(dataset)
-    # 按 (对话 id, 题 id) 索引：question_id 只在单段对话内唯一，跨段会撞
-    # （LoCoMo 每段都是 q0/q1/…），只用 q.id 会拿到别段的标准答案。
+    # Index by (conversation id, question id): question_id is unique only within one conversation and collides across them
+    # (every LoCoMo conversation has q0/q1/...), so using q.id alone would pick up another conversation's gold answer.
     questions = {(c.id, q.id): q for c in ds.load(data) for q in c.questions}
     judge = make_llm(judge_model)
 
     n = sum(len(r["items"]) for r in blob["results"])
-    print(f"重新判分：{n} 题，裁判 {judge_model}（原来是 {cfg.get('judge', '?')}）", flush=True)
+    print(f"Re-scoring: {n} questions, judge {judge_model} (originally {cfg.get('judge', '?')})", flush=True)
 
     changed, missing = 0, 0
     for r in blob["results"]:
         got = total = 0.0
         for it in r["items"]:
             q = questions.get((r["conversation_id"], it["question_id"]))
-            if q is None:               # 数据集变了，这题对不上——保留原分并记一笔
+            if q is None:               # the dataset changed and this question no longer matches -- keep the old score and count it
                 missing += 1
                 got += it["correct"]
                 total += it["total"]
@@ -84,10 +84,10 @@ def main() -> None:
 
     s = blob["summary"]
     if missing:
-        print(f"警告：{missing} 题在数据集里找不到，保留了原分数")
-    print(f"改判 {changed}/{n} 题")
-    print(f"得分 {s['score']:.0f}/{s['total']:.0f}  =  {s['accuracy']:.1%}")
-    print(f"结果已存 {out}")
+        print(f"Warning: {missing} questions not found in the dataset, kept their original scores")
+    print(f"Changed verdict on {changed}/{n} questions")
+    print(f"Score {s['score']:.0f}/{s['total']:.0f}  =  {s['accuracy']:.1%}")
+    print(f"Saved to {out}")
 
 
 if __name__ == "__main__":

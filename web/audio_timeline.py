@@ -6,7 +6,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
-from voicemem.audio_timing import OUTPUT_SAMPLE_RATE, TextTimestamp
+from supermem.audio_timing import OUTPUT_SAMPLE_RATE, TextTimestamp
 
 
 DEFAULT_SPEECH_UNITS_PER_SECOND = 5.2
@@ -24,9 +24,9 @@ class SpeechRateEstimator:
 def _text_cost(ch: str) -> float:
     if "\u3400" <= ch <= "\u9fff" or "\uf900" <= ch <= "\ufaff":
         return 1.0
-    if ch in "。！？!?":
+    if ch in "\u3002\uff01\uff1f!?":
         return 1.15
-    if ch in "，、；;：:,.":
+    if ch in "\uff0c\u3001\uff1b;\uff1a:,.":
         return 0.55
     if ch.isspace():
         return 0.16

@@ -1,0 +1,13 @@
+# EXPERIMENTAL: LMCache CacheBlend (non-prefix reuse). Each cartridge between
+# separators is cached on its own and can be attached at any position; ~15% of
+# tokens are recomputed to repair cross-cartridge attention.
+# blend_special_str must equal supermem.cartridge.runtime.BLEND_SEPARATOR.
+# Non-prefix blending through the vLLM V1 connector has open upstream issues:
+# check the LMCache docs for the version you install before trusting this arm.
+chunk_size: 256
+local_cpu: true
+max_local_cpu_size: 20
+enable_blending: true
+blend_special_str: " # # "
+use_layerwise: true
+blend_recompute_ratios: 0.15

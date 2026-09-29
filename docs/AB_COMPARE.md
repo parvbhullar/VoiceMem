@@ -1,6 +1,6 @@
 # A/B compare demo — how it works
 
-One reference for everything built on top of VoiceMem's web demo: what the
+One reference for everything built on top of SuperMem's web demo: what the
 compare view is, how a turn flows end to end, what actually gets written into
 memory and what gets sent to the LLM, and where every piece lives in the code.
 
@@ -19,8 +19,8 @@ So every turn now runs **twice**, side by side:
 
 | arm | gets |
 |---|---|
-| **With VoiceMem** | persona + language + session history + **retrieved memory** |
-| **Without VoiceMem** | persona + language + session history |
+| **With SuperMem** | persona + language + session history + **retrieved memory** |
+| **Without SuperMem** | persona + language + session history |
 
 Same utterance, same retrieval result, same model, same persona. The only
 variable is whether the memory block is in the system prompt. Whatever differs
@@ -63,7 +63,7 @@ stopped, `Pending.memory_context` is already computed. Neither arm waits for it.
 
 | step | code |
 |---|---|
-| streaming ASR + VAD + speculation | `voicemem/stream.py` |
+| streaming ASR + VAD + speculation | `supermem/stream.py` |
 | turn announce (transcript, hits, emotion) | `web/run.py:1375` `_announce_turn` |
 | shared system prompt | `web/run.py:1396` `_compare_shared_system` |
 | the compare turn | `web/run.py:1413` `_compare_turn` |
@@ -79,7 +79,7 @@ stopped, `Pending.memory_context` is already computed. Neither arm waits for it.
 This is the part most people get wrong, so it is worth being precise: **the
 user's words and the agent's words are treated differently.**
 
-`VoiceMem.Ingest()` — `voicemem/orchestrator.py:1092` — is called once per turn
+`SuperMem.Ingest()` — `supermem/orchestrator.py:1092` — is called once per turn
 with both halves:
 
 ```python
@@ -88,17 +88,17 @@ vm.ingest(text, agent_reply=reply, async_facts=True, …)
 
 ### The user's utterance → extracted into facts
 
-`_finish_ingest` (`voicemem/orchestrator.py:1259`) runs LLM fact extraction and writes to
+`_finish_ingest` (`supermem/orchestrator.py:1259`) runs LLM fact extraction and writes to
 both hemispheres:
 
-- **Left brain** — hard facts (`ingest_facts`, `voicemem/orchestrator.py:1291`)
+- **Left brain** — hard facts (`ingest_facts`, `supermem/orchestrator.py:1291`)
   `"User has a cat named Mocha who is three years old."`
 - **Right brain** — persona and emotion notes (`_write_right_brain`, plus
   `learn_from_reaction` for emotion attribution)
 
 ### The agent's reply → stored verbatim, never extracted
 
-`voicemem/orchestrator.py:1308` writes one row with `attributed_to="assistant"` and **no
+`supermem/orchestrator.py:1308` writes one row with `attributed_to="assistant"` and **no
 fact extraction**. The reason is in the code comment, and it matters:
 
 - Extracting it yields things like *"the assistant recommended asparagus"* —
@@ -110,7 +110,7 @@ fact extraction**. The reason is in the code comment, and it matters:
 
 ### Retrieval excludes the assistant by default
 
-`voicemem/leftbrain/mem0_backend_store.py:402`:
+`supermem/leftbrain/mem0_backend_store.py:402`:
 
 ```python
 if not include_assistant:
@@ -118,11 +118,11 @@ if not include_assistant:
 ```
 
 Those rows come back only when the question is *about the assistant* —
-`asks_about_assistant(query)`, `voicemem/leftbrain/brain.py:147`.
+`asks_about_assistant(query)`, `supermem/leftbrain/brain.py:147`.
 
 ### The reply is also used twice, for two different jobs
 
-`Ingest` keeps two separate replies (`voicemem/orchestrator.py` ~1145):
+`Ingest` keeps two separate replies (`supermem/orchestrator.py` ~1145):
 
 | value | which reply | used by |
 |---|---|---|
@@ -142,7 +142,7 @@ in ~0.01s — that is dedup working, not a failure.
 ### Building the memory block
 
 `Search()` returns hits; `build_memory_context()`
-(`voicemem/memory_api.py:40`) renders them:
+(`supermem/memory_api.py:40`) renders them:
 
 ```
 factual memory CONTEXT you know about the user (top5 in left brain):
@@ -175,7 +175,7 @@ context_for(arm, memory_context) ← the only difference
 Two deliberate decisions here:
 
 - **Session history is shared.** A plain LLM with a conversation window really
-  does see recent turns. VoiceMem's value is recall *beyond* that window, so
+  does see recent turns. SuperMem's value is recall *beyond* that window, so
   giving only one arm the history would be measuring the wrong thing.
 - **A `memory=False` arm gets `""`, not `_NO_MEMORY_NOTE`.** That note ("say you
   don't know, don't invent") is for a memory-enabled turn that retrieved
@@ -211,10 +211,10 @@ you just said is not recall. Memory only shows up on things said *earlier*.
 
 Two traps, both handled:
 
-**1. `vm.reply_stream()` remembers on your behalf.** `voicemem/core.py:241`
+**1. `vm.reply_stream()` remembers on your behalf.** `supermem/core.py:241`
 wraps the provider in `capture(…, remember_reply)`. Calling it once per arm
 would store **two agent replies for one user turn**. So the arms call the plain
-provider `voicemem.reply.openai_reply()` directly, and the turn is ingested by
+provider `supermem.reply.openai_reply()` directly, and the turn is ingested by
 the existing `queue_remember_turn` path — with **panel A's** reply. Panel B's
 reply is a baseline; it never enters memory.
 
@@ -233,14 +233,14 @@ back to it on unclear audio:
 ```
 spoken: "hello how are you"
 paraformer-zh (Chinese-only)  → 'lohow are youmycat is nameda and sheis three yearsold'
-sherpa zh-en (bilingual)      → 'HELLO HOW ARE YOU MY CAD IS NAMED MOKA…'   then 狗日按摩
+sherpa zh-en (bilingual)      → 'HELLO HOW ARE YOU MY CAD IS NAMED MOKA…'   then <garbage Chinese characters>
 transcription API             → 'Hello, how are you? My cat is named Mocha…'
 ```
 
 That garbage transcript is what got extracted and stored, so one bad turn
 poisoned the memory. `models/asr/` is now empty; nothing is downloaded.
 
-`OpenAIStreamingASR` — `voicemem/utils/audio/asr.py:222`:
+`OpenAIStreamingASR` — `supermem/utils/audio/asr.py:222`:
 
 - **Partials also go over the network,** one request at a time (single-flight).
   `feed()` returns the last text it has and starts a request only when none is
@@ -254,7 +254,7 @@ poisoned the memory. `models/asr/` is now empty; nothing is downloaded.
 
 ### Language must be pinned
 
-`VOICEMEM_ASR_LANGUAGE=en`, not `auto`. Spoken Hindi and Urdu are the same
+`SUPERMEM_ASR_LANGUAGE=en`, not `auto`. Spoken Hindi and Urdu are the same
 language phonetically, so `auto` flip-flopped between scripts:
 
 ```
@@ -269,7 +269,7 @@ but then speak only Hindi.
 
 Note the split: what the assistant **says** follows `UI_LANG` (switchable per
 turn, `_lang_note()`), while what gets **stored** is a property of the space,
-fixed at creation — `voicemem/lang.py` supports only `en`/`zh`. So Hindi replies
+fixed at creation — `supermem/lang.py` supports only `en`/`zh`. So Hindi replies
 come out of an English memory space without mixing scripts in one vector store.
 
 ---
@@ -283,7 +283,7 @@ come out of an English memory space without mixing scripts in one vector store.
 │  emotion/entity/schema ││                                     │
 ├────────────────────────┤├─────────────────────────────────────┤
 │ TOP-K RECALL           ││ YOU  where do i work?               │
-│  left facts + scores   ││ ┌── With VoiceMem ─┐┌─ Without ───┐ │
+│  left facts + scores   ││ ┌── With SuperMem ─┐┌─ Without ───┐ │
 │  right profile         ││ │ 1072ms · 1756ms  ││ 1053ms      │ │
 ├────────────────────────┤│ │ You work on…     ││ You work at…│ │
 │ AI REPLY  ⚖ A/B        ││ └──────────────────┘└─────────────┘ │
@@ -303,7 +303,7 @@ come out of an English memory space without mixing scripts in one vector store.
   server's own per-arm `memory` flag; the heading, the "injected into" badge and
   the checkbox all read that. Earlier they read the local checkbox, so when the
   two drifted the screen described the opposite of what happened — *"212 chars →
-  A"* above a panel titled *With VoiceMem*, while the server had handed the
+  A"* above a panel titled *With SuperMem*, while the server had handed the
   memory to B. A demo whose purpose is to be believed cannot lie about which
   side got the memory.
 - **Compare mode is silent.** One audio stream cannot speak two replies. Switch
@@ -368,17 +368,17 @@ Everything comes from `.env` (chmod 600):
 
 ```
 OPENAI_API_KEY=…
-VOICEMEM_ASR=openai
-VOICEMEM_ASR_MODEL=gpt-4o-mini-transcribe
-VOICEMEM_ASR_LANGUAGE=en
+SUPERMEM_ASR=openai
+SUPERMEM_ASR_MODEL=gpt-4o-mini-transcribe
+SUPERMEM_ASR_LANGUAGE=en
 ```
 
 Overrides:
 
 ```bash
-VOICEMEM_PORT=8788           bash run_demo.sh   # 8787 taken
-VOICEMEM_REPLY_MODEL=gpt-4o-mini bash run_demo.sh
-VOICEMEM_ASR_LANGUAGE=hi     bash run_demo.sh   # Hindi speech
+SUPERMEM_PORT=8788           bash run_demo.sh   # 8787 taken
+SUPERMEM_REPLY_MODEL=gpt-4o-mini bash run_demo.sh
+SUPERMEM_ASR_LANGUAGE=hi     bash run_demo.sh   # Hindi speech
 ```
 
 ### Compare state over HTTP
@@ -445,7 +445,7 @@ node   tests/test_brain_signal.mjs  #  7  signal cascade staging
 ```
 
 No network, no models — providers and transcribe calls are injected, and the two
-`.mjs` suites load the real functions out of `voicemem.html` against a stub DOM
+`.mjs` suites load the real functions out of `supermem.html` against a stub DOM
 (there is no browser on this machine).
 
 `tests/` is in `.gitignore`; the existing test files are force-added, so new ones
@@ -456,7 +456,7 @@ need `git add -f`.
 ## 11. Limits worth knowing
 
 - **No Hindi speech input while pinned to `en`.** Hindi replies work; Hindi
-  speech needs `VOICEMEM_ASR_LANGUAGE=hi`, and then don't mix in English.
+  speech needs `SUPERMEM_ASR_LANGUAGE=hi`, and then don't mix in English.
 - **Every turn is a network round trip now.** Local ASR was ~150ms; the API is
   ~650ms plus concurrency. That is the cost of not shipping a model.
 - **Dedup is similarity-based, not exact.** The same fact in different wording

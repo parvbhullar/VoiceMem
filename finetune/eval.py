@@ -53,15 +53,15 @@ def table(key):
     for name, rows_ in sorted(groups.items()):
         empty = sum(1 for o in rows_ if not (o["pred"] or "").strip())
         print(f"  {name:<12} n={len(rows_):<4} "
-              f"回答长度中位数 {median([o['pred_chars'] for o in rows_]):<5} "
-              f"(参考 {median([o['ref_chars'] for o in rows_])})"
-              f"{f'  空回答 {empty}' if empty else ''}")
+              f"median answer length {median([o['pred_chars'] for o in rows_]):<5} "
+              f"(ref {median([o['ref_chars'] for o in rows_])})"
+              f"{f'  empty answers {empty}' if empty else ''}")
 
 
 print(f"\n{'=' * 56}")
-print(f"{len(out)} 条 · base {args.base} · adapter {args.adapter}")
-print("按 category:")
+print(f"{len(out)} rows · base {args.base} · adapter {args.adapter}")
+print("By category:")
 table("category")
-print("按 lang:")
+print("By lang:")
 table("lang")
-print("\n注：这里只报覆盖和长度，不报正确率——回复质量得人看或另接裁判模型。")
+print("\nNote: this only reports coverage and length, not accuracy -- reply quality needs human review or a separate judge model.")

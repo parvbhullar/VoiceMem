@@ -1,7 +1,7 @@
 /* Compare panel rendering: the labels and the "injected into" badge must follow
    the server's per-arm memory flag, never the local checkbox.
  *
- * Runs the real functions, pulled out of web/voicemem.html, against a stub DOM --
+ * Runs the real functions, pulled out of web/supermem.html, against a stub DOM --
  * so it needs no browser. Run: node tests/test_compare_ui.mjs
  */
 import { readFileSync } from 'fs';
@@ -10,11 +10,11 @@ import { dirname, join } from 'path';
 import assert from 'assert';
 
 const html = readFileSync(join(dirname(fileURLToPath(import.meta.url)),
-                               '..', 'web', 'voicemem.html'), 'utf8');
+                               '..', 'web', 'supermem.html'), 'utf8');
 
 function slice(startMarker, endMarker) {
   const a = html.indexOf(startMarker);
-  assert.ok(a > -1, `not found in voicemem.html: ${startMarker}`);
+  assert.ok(a > -1, `not found in supermem.html: ${startMarker}`);
   const b = html.indexOf(endMarker, a);
   assert.ok(b > -1, `end not found: ${endMarker}`);
   return html.slice(a, b);
@@ -24,7 +24,8 @@ function slice(startMarker, endMarker) {
 const src = slice('const CMP={ on:false', 'async function cmpLoad(');
 
 // ── stub DOM ──────────────────────────────────────────────────────────────────
-const EN = { cmpWith: 'With VoiceMem', cmpWithout: 'Without VoiceMem',
+const EN = { cmpWith: 'With SuperMem', cmpWithout: 'Without SuperMem',
+             cmpWithCart: 'With SuperMem · KV cartridge', cmpKvReused: 'KV reused',
              cmpWaiting: 'waiting for this turn…', cmpCtxEmpty: 'Nothing retrieved',
              cmpCtxNobody: 'neither arm has memory on' };
 const nodes = {};
@@ -39,7 +40,7 @@ function el(id) {
   nodes[id] = n; return n;
 }
 for (const u of ['A', 'B']) {
-  el('cmpTxt' + u); el('cmpMs' + u); el('cmpMem' + u); el('cmpModel' + u);
+  el('cmpTxt' + u); el('cmpMs' + u); el('cmpMem' + u); el('cmpCart' + u); el('cmpModel' + u);
   el('cmpUrl' + u); el('cmpKey' + u); el('cmpAdv' + u); el('cmpGear' + u);
   const col = el('cmpCol' + u);
   col._lab = { textContent: '' };
@@ -58,14 +59,14 @@ ctx.window = ctx;
 
 // eval the real code in that context
 const fn = new Function('$', 'i18n', 'toast', 'fetch', 'document',
-                        src + '\nreturn {CMP, renderCmp, cmpReset, cmpApply};');
-const { CMP, renderCmp, cmpReset, cmpApply } =
+                        src + '\nreturn {CMP, renderCmp, cmpReset, cmpApply, kvText};');
+const { CMP, renderCmp, cmpReset, cmpApply, kvText } =
   fn(ctx.$, ctx.i18n, ctx.toast, ctx.fetch, ctx.document);
 
 const labelOf = (u) => nodes['cmpCol' + u]._lab.textContent;
 const isMemStyled = (u) => nodes['cmpCol' + u].classList.contains('mem');
 
-// Mirrors what web/voicemem.html does in the ws 'cmp_start' case.
+// Mirrors what web/supermem.html does in the ws 'cmp_start' case.
 function serverStart(panel, memory) {
   const st = CMP[panel];
   st.text = ''; st.err = ''; st.ms = 0; st.memory = !!memory;
@@ -82,8 +83,8 @@ console.log('compare panel rendering');
 
 t('default: A is the memory arm, B is the baseline', () => {
   renderCmp();
-  assert.strictEqual(labelOf('A'), 'With VoiceMem');
-  assert.strictEqual(labelOf('B'), 'Without VoiceMem');
+  assert.strictEqual(labelOf('A'), 'With SuperMem');
+  assert.strictEqual(labelOf('B'), 'Without SuperMem');
   assert.strictEqual(isMemStyled('A'), true);
   assert.strictEqual(isMemStyled('B'), false);
 });
@@ -91,8 +92,8 @@ t('default: A is the memory arm, B is the baseline', () => {
 t('server flipping the arms flips the labels too', () => {
   serverStart('a', false);
   serverStart('b', true);
-  assert.strictEqual(labelOf('A'), 'Without VoiceMem');
-  assert.strictEqual(labelOf('B'), 'With VoiceMem');
+  assert.strictEqual(labelOf('A'), 'Without SuperMem');
+  assert.strictEqual(labelOf('B'), 'With SuperMem');
   assert.strictEqual(isMemStyled('A'), false);
   assert.strictEqual(isMemStyled('B'), true);
 });
@@ -144,8 +145,23 @@ t('cmpApply from GET/POST also updates the arm identity', () => {
                                    { label: 'b', memory: true, model: '', base_url: '' }] });
   assert.strictEqual(CMP.a.memory, false);
   assert.strictEqual(CMP.b.memory, true);
-  assert.strictEqual(labelOf('A'), 'Without VoiceMem');
-  assert.strictEqual(labelOf('B'), 'With VoiceMem');
+  assert.strictEqual(labelOf('A'), 'Without SuperMem');
+  assert.strictEqual(labelOf('B'), 'With SuperMem');
+});
+
+t('a cartridge arm is titled as one, but only while it has memory', () => {
+  cmpApply({ enabled: true, arms: [{ label: 'a', memory: true, cartridge: true, model: '', base_url: '' },
+                                   { label: 'b', memory: false, cartridge: true, model: '', base_url: '' }] });
+  assert.strictEqual(labelOf('A'), 'With SuperMem · KV cartridge');
+  assert.strictEqual(labelOf('B'), 'Without SuperMem', 'no memory -> no cartridge to carry');
+  assert.strictEqual(CMP.b.cartridge, false);
+  assert.strictEqual(nodes.cmpCartA.checked, true);
+});
+
+t('KV reuse is shown only from what the engine reported', () => {
+  assert.strictEqual(kvText({ prompt_tokens: 2000, cached_tokens: 1500 }), 'KV reused 75% · 1,500/2,000 tok');
+  assert.strictEqual(kvText({ prompt_tokens: 2000, cached_tokens: null }), '', 'no cached_tokens -> say nothing');
+  assert.strictEqual(kvText(null), '');
 });
 
 console.log(`\n${pass} passed`);

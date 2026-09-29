@@ -7,51 +7,51 @@ dist/
 .pytest_cache/
 tests/
 
-# 运行时数据：记忆库、评测结果、录音归档
+# Runtime data: memory stores, evaluation results, recording archives
 results/
-/rtc_gateway/voicemem-rtc
+/rtc_gateway/supermem-rtc
 memory/
 out/
 
-# 环境与本地配置
+# Environment and local config
 .env
 .venv/
 .claude/
 .DS_Store
 
-# 模型权重：由 scripts/download_models.sh 拉取，不进仓库
+# Model weights: fetched by scripts/download_models.sh, not committed
 *.onnx
 *.ckpt
 *.pt
 *.pth
 *.safetensors
 *.bin
-# models/ 下的内容由下载脚本或运行时缓存生成，不进仓库
+# Contents of models/ come from the download script or runtime cache, not committed
 /models/
 
-# 本地演示分叉与个人种子脚本
+# Local demo forks and personal seed scripts
 demo_local/
 scripts/seed_*.py
 
-# Electron 桌面壳
+# Electron desktop shell
 node_modules/
 
-# 默认记忆根目录（不传 memory_root 时落在当前目录）
-voicemem_memory/
+# Default memory root (lands in the current directory when memory_root is not passed)
+supermem_memory/
 examples/example_memory/
-# 记忆空间：**目录结构**进仓库，里面的数据不进。
-# clone 下来是两个空文件夹——demo（跑 demo 用）和 myvoicemem（你自己的），
-# 谁跑谁自己积累，不把任何人的记忆推上去。
-# Memory Space：只提交空目录，**任何记忆内容都不进仓库**。
-# 一种语言一个空间（demo-zh / demo-en）——检索是按向量做的，中英混在一个库里
-# 会让一半记忆检索不到。demo 启动时按语言落到对应空间，右上角切语言就换库。
-voicemem_memoryspace/*
-!voicemem_memoryspace/demo-zh/
-!voicemem_memoryspace/demo-en/
-!voicemem_memoryspace/myvoicemem/
-voicemem_memoryspace/demo-zh/*
-voicemem_memoryspace/demo-en/*
-voicemem_memoryspace/myvoicemem/*
-!voicemem_memoryspace/demo-zh/.gitkeep
-!voicemem_memoryspace/demo-en/.gitkeep
-!voicemem_memoryspace/myvoicemem/.gitkeep
+# Memory spaces: the **directory structure** is committed, the data inside is not.
+# A fresh clone gets empty folders -- demo (for running the demo) and mysupermem (your own);
+# whoever runs it accumulates their own memories, nobody's memories get pushed.
+# Memory Space: only empty directories are committed, **no memory content ever goes in the repo**.
+# One space per language (demo-zh / demo-en) -- retrieval is vector-based, and mixing languages
+# in one store makes half the memories unreachable. The demo picks the space by language on start.
+supermem_memoryspace/*
+!supermem_memoryspace/demo-zh/
+!supermem_memoryspace/demo-en/
+!supermem_memoryspace/mysupermem/
+supermem_memoryspace/demo-zh/*
+supermem_memoryspace/demo-en/*
+supermem_memoryspace/mysupermem/*
+!supermem_memoryspace/demo-zh/.gitkeep
+!supermem_memoryspace/demo-en/.gitkeep
+!supermem_memoryspace/mysupermem/.gitkeep

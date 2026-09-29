@@ -7,7 +7,7 @@ from utils import ADAPTER, BASE, DATA, TRAIN, warmup_steps
 
 p = argparse.ArgumentParser()
 p.add_argument("--data", default=str(DATA))
-p.add_argument("--out", default="out/voicemem-qlora")
+p.add_argument("--out", default="out/supermem-qlora")
 p.add_argument("--base", default=BASE)
 p.add_argument("--rank", type=int, default=ADAPTER["rank"])
 p.add_argument("--alpha", type=int, default=ADAPTER["alpha"])
@@ -28,13 +28,13 @@ sft_main(SftArguments(
     lora_alpha=args.alpha,
     lora_dropout=ADAPTER["dropout"],
     lora_bias=ADAPTER["bias"],
-    # 这条正则按 Qwen3.6-35B-A3B 的模块命名写死，换基座必须换
+    # This regex is hard-coded to Qwen3.6-35B-A3B module names; change it when switching base models
     target_regex=ADAPTER["target_modules"],
     quant_bits=None if args.no_4bit else 4,
     quant_method=None if args.no_4bit else "bnb",
     torch_dtype="bfloat16",
     max_length=args.max_len,
-    # 只有最后一轮 assistant 算 loss，历史轮不算
+    # Only the last assistant turn contributes to the loss, history turns do not
     loss_scale="last_round",
     num_train_epochs=args.epochs,
     learning_rate=args.lr,

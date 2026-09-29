@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>VoiceMem — memory graph</title>
+<title>SuperMem — memory graph</title>
 <style>
   :root{
     --ink:#f2f4f8;
@@ -44,7 +44,7 @@
   #brain{
     position:absolute;inset:0;width:100%;height:100%;
     object-fit:contain;mix-blend-mode:screen;
-    /* contrast 拉高让外圈那层软光衰减更快（光晕变窄），brightness 压低让它不抢戏 */
+    /* higher contrast makes the soft outer glow fall off faster (narrower halo); lower brightness keeps it from stealing the show */
     filter:brightness(.72) contrast(1.5);
     opacity:0;transition:opacity 1.4s ease .1s;
     pointer-events:none;user-select:none;
@@ -142,9 +142,9 @@
     .hint{animation:none}
   }
 
-  /* ===================== 布局：左板块 1 : 右板块 2 =====================
-     左板块内部再分 sidebar : 实时区 = 2 : 5。
-     sidebar 收起时变成一条 46px 的窄条，只留展开按钮。 */
+  /* ===================== Layout: left block 1 : right block 2 =====================
+     Inside the left block, sidebar : live area = 2 : 5.
+     When collapsed the sidebar becomes a 46px strip holding only the expand button. */
   #app{
     position:fixed;inset:0;display:grid;
     grid-template-columns:1fr 2fr;
@@ -172,9 +172,9 @@
   .rail-toggle:hover{color:#fff;border-color:rgba(255,255,255,.4)}
   .rail-body{flex:1;overflow:auto;padding:14px 14px 24px;transition:opacity .2s}
   #app.rail-collapsed .rail-body,#app.rail-collapsed .rail-top h1{opacity:0;pointer-events:none}
-  /* 流线动效：常驻，没声音时静态呼吸，有输入时大幅波动 */
-  /* 占中间列 40% 高；aspect-ratio 保证它始终是正圆（画布 backing 是 264×264，
-     CSS 只管显示尺寸）。min-height 0 让它在窄屏上能被压下去而不是撑破布局。 */
+  /* Streamline animation: always on, breathes statically when silent, swings widely on input */
+  /* Takes 40% of the centre column height; aspect-ratio keeps it a perfect circle (the canvas backing is 264×264,
+     CSS only sets display size). min-height 0 lets it be squeezed on narrow screens instead of breaking the layout. */
   #orb{display:block;flex:0 1 40%;height:40%;min-height:0;width:auto;aspect-ratio:1/1;
     margin:0 auto 4px;opacity:.6;transition:opacity .5s ease;pointer-events:none;
     border-radius:50%}
@@ -205,11 +205,11 @@
   .block-h{flex:0 0 auto;display:flex;align-items:center;gap:9px;margin-bottom:10px;
     font-size:10px;letter-spacing:.24em;text-transform:uppercase;color:#7d8496}
   .block-h::after{content:"";flex:1;height:1px;background:var(--line)}
-  /* 召回框只要够看出"每轮取到的东西不一样"就行，不占满高度；
-     省下的给回复——那才是要让人读的地方。 */
+  /* The recall box only needs enough room to show "each turn retrieves something different"; it does not take full height;
+     the space saved goes to the reply — that is what people are meant to read. */
   .io-in{flex:0 0 auto}
   .recall{flex:0 0 auto;max-height:190px}
-  /* 回复区保底：窗口矮时宁可把上面那个圆压小，也不能让回复只剩一条缝 */
+  /* Reply area floor: when the window is short, better to shrink the circle above than leave the reply a thin slit */
   .io-out{flex:1 1 auto;min-height:180px;display:flex;flex-direction:column}
   .live-text{font-family:var(--serif);font-size:15px;line-height:1.5;color:#eef1f7;min-height:23px}
   .textin{width:100%;box-sizing:border-box;margin-top:10px;font-size:13px;padding:8px 10px;
@@ -225,7 +225,7 @@
   .tag.ent{border-color:rgba(74,168,240,.45);color:#9fd0ff}
   .tag.sch{border-color:rgba(88,224,141,.45);color:#8ce9b3}
   .recall-cols{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:14px}
-  .recall .rc ul{overflow:auto}          /* 条目多了自己滚，不把框撑开 */
+  .recall .rc ul{overflow:auto}          /* scrolls on its own when there are many items, instead of stretching the box */
   .io-out .reply{flex:1;min-height:0;overflow:auto}
   .rc{display:flex;flex-direction:column;min-height:0}
   .rc-h{flex:0 0 auto;font-size:11px;letter-spacing:.1em;margin-bottom:7px}
@@ -255,7 +255,7 @@
   @keyframes earpulse{0%{transform:scale(.55);opacity:.85}100%{transform:scale(1.5);opacity:0}}
 
   /* ③ brain column (center-right) */
-  /* 右板块：顶部一个切换，下面两个视图只显示一个 */
+  /* Right block: one toggle on top, only one of the two views below is shown */
   .rightpane{display:flex;flex-direction:column;min-width:0;min-height:0}
   .switch{flex:0 0 auto;display:flex;gap:4px;padding:10px 14px;
     border-bottom:1px solid var(--line)}
@@ -274,8 +274,8 @@
   .view.hide{display:none}
   .brainwrap{position:relative;width:100%;height:100%;overflow:hidden}
 
-  /* Chat 视图：当前 session 的一来一回原文 */
-  /* 对话气泡：你的靠右、蓝色实心；VoiceMem 的靠左、白色描边 */
+  /* Chat view: the verbatim back-and-forth of the current session */
+  /* Chat bubbles: yours on the right, solid blue; SuperMem's on the left, white outline */
   .chat{height:100%;overflow:auto;padding:22px 26px;
     display:flex;flex-direction:column;gap:14px}
   .chat .turn{max-width:74%;display:flex;flex-direction:column;gap:4px}
@@ -293,7 +293,7 @@
     border:1px solid rgba(255,255,255,.5);border-bottom-left-radius:4px}
   .chat .empty{align-self:center;color:var(--dim);font-size:13px;padding-top:40px}
 
-  /* sidebar：session 列表 */
+  /* sidebar: session list */
   .sess-new{display:block;width:100%;margin:0 0 12px;padding:7px 10px;
     border:1px solid var(--line);border-radius:7px;background:none;
     color:var(--dim);font-size:12px;cursor:pointer;text-align:left}
@@ -310,9 +310,9 @@
     #app{grid-template-columns:1fr;grid-template-rows:auto auto 1fr;overflow:auto}
   }
 
-  /* ═══════════════ 视觉增强层（纯 CSS，追加式）═══════════════
-     只用后置覆盖，不改上面任何选择器，也不碰画布绘制逻辑。
-     整段删掉即可回到原样。 */
+  /* ═══════════════ Visual enhancement layer (pure CSS, additive) ═══════════════
+     Only appended overrides; does not change any selector above, nor touch the canvas drawing logic.
+     Delete this whole block to return to the original. */
 
   :root{
     --glass:linear-gradient(160deg,rgba(255,255,255,.055),rgba(255,255,255,.012) 42%,rgba(255,255,255,0));
@@ -321,7 +321,7 @@
     --lift:0 1px 0 rgba(255,255,255,.055) inset, 0 18px 44px -28px rgba(0,0,0,.95);
   }
 
-  /* ---- 环境层：左蓝右粉的半球辉光 + 细网格。铺在所有面板之下 ---- */
+  /* ---- Ambient layer: blue-left / pink-right hemisphere glow + fine grid. Laid under every panel ---- */
   body::before{
     content:"";position:fixed;inset:0;z-index:0;pointer-events:none;
     background:
@@ -331,7 +331,7 @@
       repeating-linear-gradient(0deg,  rgba(255,255,255,.018) 0 1px, transparent 1px 46px),
       repeating-linear-gradient(90deg, rgba(255,255,255,.018) 0 1px, transparent 1px 46px);
   }
-  /* 极慢的一道扫掠。1% 的亮度，只在余光里察觉得到——再亮就成了装饰 */
+  /* A very slow sweep. 1% brightness, only noticed in peripheral vision — any brighter and it becomes decoration */
   body::after{
     content:"";position:fixed;left:0;right:0;height:38vh;top:-38vh;z-index:0;pointer-events:none;
     background:linear-gradient(180deg,transparent,rgba(150,190,255,.035),transparent);
@@ -340,7 +340,7 @@
   @keyframes scanfall{to{transform:translateY(160vh)}}
   #app{position:fixed;z-index:1}
 
-  /* ---- 面板：玻璃 + 顶缘高光 ---- */
+  /* ---- Panels: glass + top-edge highlight ---- */
   .block,.rail,#card{
     background-image:var(--glass);
     backdrop-filter:blur(14px) saturate(118%);
@@ -355,7 +355,7 @@
   .block:hover{border-color:var(--hair-lit)}
   .rail{background-color:rgba(7,9,14,.52)}
 
-  /* 区块标题：前面一枚会呼吸的小方块 */
+  /* Block titles: a small breathing square in front */
   .block-h{gap:8px}
   .block-h::before{
     content:"";width:5px;height:5px;flex:0 0 5px;border-radius:1px;
@@ -365,7 +365,7 @@
   @keyframes tick{0%,100%{opacity:.35}50%{opacity:1}}
   .block-h::after{background:linear-gradient(90deg,var(--hair),transparent)}
 
-  /* ---- 脑图：半球染色 + 四角括号 + 中线 ---- */
+  /* ---- Brain map: hemisphere tint + corner brackets + midline ---- */
   .brainwrap::before{
     content:"";position:absolute;inset:0;z-index:0;pointer-events:none;
     background:
@@ -373,7 +373,7 @@
       radial-gradient(46% 62% at 76% 50%, rgba(255,61,139,.09), transparent 70%),
       linear-gradient(90deg,transparent 49.85%,rgba(255,255,255,.05) 50%,transparent 50.15%);
   }
-  /* 四角括号：科幻取景框，纯边框画的 */
+  /* Corner brackets: a sci-fi viewfinder, drawn purely with borders */
   .brainwrap::after{
     content:"";position:absolute;inset:16px;z-index:4;pointer-events:none;
     border:1px solid transparent;
@@ -388,7 +388,7 @@
       linear-gradient(var(--hair-lit),var(--hair-lit)) right bottom/1px 22px no-repeat;
   }
 
-  /* ---- 控件 ---- */
+  /* ---- Controls ---- */
   .switch button{transition:color .25s,border-color .25s,background .25s,box-shadow .25s}
   .switch button.on{
     background:linear-gradient(180deg,rgba(255,255,255,.12),rgba(255,255,255,.04));
@@ -405,19 +405,19 @@
     box-shadow:0 0 24px -7px rgba(255,61,139,.95), 0 1px 0 rgba(255,255,255,.14) inset;
   }
 
-  /* ---- 标签：描边之外补一圈同色辉光 ---- */
+  /* ---- Tags: a same-colour glow outside the outline ---- */
   .tag{background:rgba(255,255,255,.028);transition:box-shadow .3s,color .3s}
   .tag.emo{box-shadow:0 0 16px -8px rgba(255,95,162,.95)}
   .tag.ent{box-shadow:0 0 16px -8px rgba(74,168,240,.95)}
   .tag.sch{box-shadow:0 0 16px -8px rgba(88,224,141,.95)}
 
-  /* ---- 召回条目：命中感 ---- */
+  /* ---- Recall items: a sense of "hit" ---- */
   .rc li{transition:color .25s,border-color .25s}
   .rc li:hover{color:#e9edf5;border-bottom-color:var(--hair-lit)}
   .rc li .sc{font-variant-numeric:tabular-nums}
   .rc.l .rc-h,.rc.r .rc-h{letter-spacing:.16em;text-transform:uppercase;font-size:10px}
 
-  /* ---- 对话气泡 ---- */
+  /* ---- Chat bubbles ---- */
   .chat .turn.user .said{
     background:linear-gradient(160deg,#3b7ee0,#2657ab);border-color:rgba(255,255,255,.18);
     box-shadow:0 10px 26px -14px rgba(47,111,208,.95);
@@ -427,7 +427,7 @@
     border-color:rgba(255,255,255,.28);backdrop-filter:blur(8px);
   }
 
-  /* ---- 输入框 ---- */
+  /* ---- Input box ---- */
   .textin{background:rgba(255,255,255,.035);transition:border-color .25s,box-shadow .25s}
   .textin:focus{box-shadow:0 0 20px -8px rgba(74,168,240,.9)}
 
@@ -442,54 +442,54 @@
 
  <section class="leftpane">
 
-  <!-- ① 最左：可收起/展开的记忆栏板（左脑 + 右脑，按类别分好）-->
+  <!-- (1) Far left: collapsible/expandable memory rail (left brain + right brain, grouped by category) -->
   <aside class="rail">
     <div class="rail-top">
-      <h1>VoiceMem</h1>
-      <button class="rail-toggle" id="railToggle" title="收起 / 展开">‹</button>
+      <h1>SuperMem</h1>
+      <button class="rail-toggle" id="railToggle" title="Collapse / expand">‹</button>
     </div>
     <div class="rail-body">
-      <button class="sess-new" id="newSess">+ 新对话</button>
+      <button class="sess-new" id="newSess">+ New chat</button>
       <ul class="sess" id="sessList"></ul>
     </div>
   </aside>
 
-  <!-- ② 中间：上下三块 -->
+  <!-- (2) Middle: three blocks stacked -->
   <section class="center">
-    <!-- 流线动效：常驻，说话时随音量大幅起伏 -->
+    <!-- Streamline animation: always on, rises and falls with volume while speaking -->
     <canvas id="orb" width="264" height="264" aria-hidden="true"></canvas>
-    <!-- 上：每轮流式输入 + 情绪/实体/schema 标签 -->
+    <!-- Top: per-turn streaming input + emotion/entity/schema tags -->
     <div class="block io-in">
-      <div class="block-h">流式输入 · Live input</div>
+      <div class="block-h">Live input</div>
       <div class="live-text" id="liveInput">…</div>
-      <input id="textIn" class="textin" placeholder="或直接打字回车测试（无需麦克风/ASR 模型）" />
+      <input id="textIn" class="textin" placeholder="Or just type and press Enter to test (no microphone/ASR model needed)" />
       <div class="tags" id="tags"></div>
     </div>
-    <!-- 中：左右脑分别召回 top-k -->
+    <!-- Middle: top-k recall for left and right brain separately -->
     <div class="block recall">
-      <div class="block-h">Top-K 召回 · left / right</div>
+      <div class="block-h">Top-K recall · left / right</div>
       <div class="recall-cols">
         <div class="rc l">
-          <div class="rc-h">左脑 · 事实</div>
+          <div class="rc-h">Left brain · Facts</div>
           <ul id="recallL">
-            <li><span>上次也在这家拉面店吃过</span><span class="sc">0.82</span></li>
-            <li><span>Alex 是同组同事</span><span class="sc">0.77</span></li>
-            <li><span>今天下午有季度评审</span><span class="sc">0.71</span></li>
+            <li><span>Ate at this ramen place last time too</span><span class="sc">0.82</span></li>
+            <li><span>Alex is a teammate</span><span class="sc">0.77</span></li>
+            <li><span>Quarterly review this afternoon</span><span class="sc">0.71</span></li>
           </ul>
         </div>
         <div class="rc r">
-          <div class="rc-h">右脑 · 画像</div>
+          <div class="rc-h">Right brain · Profile</div>
           <ul id="recallR">
-            <li><span>评审场景常伴随焦虑</span><span class="sc">0.79</span></li>
-            <li><span>偏好清汤、口味清淡</span><span class="sc">0.68</span></li>
-            <li><span>压力大时喜欢被安抚</span><span class="sc">0.61</span></li>
+            <li><span>Reviews often come with anxiety</span><span class="sc">0.79</span></li>
+            <li><span>Prefers clear broth, light flavours</span><span class="sc">0.68</span></li>
+            <li><span>Likes to be comforted when stressed</span><span class="sc">0.61</span></li>
           </ul>
         </div>
       </div>
     </div>
-    <!-- 下：流式 AI 回复 + 语音指示器 -->
+    <!-- Bottom: streaming AI reply + voice indicator -->
     <div class="block io-out">
-      <div class="block-h">AI 回复 · Reply</div>
+      <div class="block-h">AI reply · Reply</div>
       <div class="reply" id="reply">…</div>
       <div class="io-foot">
         <div class="voice" id="voice">
@@ -502,26 +502,26 @@
           <canvas id="wave"></canvas>
           <span class="lab" id="voiceLab">idle</span>
         </div>
-        <button class="talk" id="talkBtn">开始对话</button>
+        <button class="talk" id="talkBtn">Start talking</button>
       </div>
     </div>
   </section>
 
   </section><!-- /leftpane -->
 
-  <!-- ③ 右板块：Chat（当前 session 原文） / Memory Space（全局脑图）-->
+  <!-- (3) Right block: Chat (verbatim current session) / Memory Space (global brain map) -->
   <section class="rightpane">
     <div class="switch">
       <button id="tabChat" class="on">Chat</button>
       <button id="tabMem">Memory Space</button>
       <div class="dl">
-        <input id="dlName" class="dl-name" value="voicemem-memories" spellcheck="false" />
-        <button id="dlBtn" class="dl-btn">下载记忆</button>
+        <input id="dlName" class="dl-name" value="supermem-memories" spellcheck="false" />
+        <button id="dlBtn" class="dl-btn">Download memories</button>
       </div>
     </div>
 
     <div class="view" id="viewChat">
-      <div class="chat" id="chatLog"><div class="empty">还没有对话。说点什么，或在左边打字。</div></div>
+      <div class="chat" id="chatLog"><div class="empty">No conversation yet. Say something, or type on the left.</div></div>
     </div>
 
     <div class="view hide" id="viewMem">
@@ -570,18 +570,18 @@ const cSw   = document.getElementById('c-sw');
 const cSrc  = document.getElementById('c-src');
 const cBody = document.getElementById('c-body');
 
-// SlotV2 簇的简短描述（悬停簇标签时显示；键为 label 的 w）
+// Short descriptions of SlotV2 clusters (shown when hovering a cluster label; keys are the label's w)
 const SLOT_DESC = {
-  work:'工作 · 职业/公司/项目/同事/会议/汇报',
-  finance:'财务 · 收入/薪资/投资/支出/存款/理财',
-  relationships:'人际 · 家人/朋友/感情/社交',
-  health:'健康 · 运动/饮食/睡眠/身体/情绪/压力',
-  goals:'目标 · 计划/梦想/未来/成长/自我提升',
-  daily_life:'日常 · 爱好/习惯/娱乐/生活方式',
-  knowledge:'知识 · 学习/技能/概念/技术/研究',
-  emotion:'情绪 · 当前及历史的情感倾向',
-  experiences:'经历 · 值得记住的事件与回应经验',
-  preference:'偏好 · 沟通与内容上的个人偏好',
+  work:'Work · career/company/projects/colleagues/meetings/reports',
+  finance:'Money · income/salary/investing/spending/savings/finances',
+  relationships:'People · family/friends/relationships/social',
+  health:'Health · exercise/food/sleep/body/mood/stress',
+  goals:'Goals · plans/dreams/future/growth/self-improvement',
+  daily_life:'Daily life · hobbies/habits/entertainment/lifestyle',
+  knowledge:'Knowledge · learning/skills/concepts/tech/research',
+  emotion:'Emotion · current and past emotional tendencies',
+  experiences:'Experiences · memorable events and response experience',
+  preference:'Preference · personal preferences in communication and content',
 };
 const brain = document.getElementById('brain');
 
@@ -615,7 +615,7 @@ const N = G.nodes.map((n,i)=>({
   dl: 0.35 + n.x*1.05 + (n.k==='hub'?-0.3:0)
 }));
 const L = G.links;
-// 这一次检索的跨脑光束：[{l:{a,b}}]，走完就清空。搜索时由 brainBeam() 填。
+// Cross-brain beams for this one retrieval: [{l:{a,b}}], cleared once they finish. Filled by brainBeam() on search.
 const BEAM = [];
 const USER = N.findIndex(n=>n.k==='user');
 const PULSE = { t:-0.6, dur:2.3, gap:1.9, trail:0.30, seg:30 };
@@ -661,7 +661,7 @@ function resize(){
     n.sx = CX + (n.bx-mcx)*K + (n.side==='R' ? CFG.rightShift*IW : 0);
     n.sy = CY + (n.by-mcy)*P*K;
   }
-  // 背景脑图跟着 CFG.scale 一起缩放（绕脑轮廓中心），和节点图谱同步放大、保持对齐
+  // The background brain image scales with CFG.scale (around the brain outline centre), zooming in sync with the node graph and staying aligned
   const pcx=(d.x0+d.x1)/2, pcy=(d.y0+d.y1)/2;
   brain.style.transformOrigin = ((OX+pcx*IW)/W*100)+'% '+((OY+pcy*IH)/H*100)+'%';
   brain.style.transform = 'translate('+(CFG.dx*K).toFixed(1)+'px,'+(CFG.dy*K).toFixed(1)+'px) scale('+CFG.scale+')';
@@ -728,7 +728,7 @@ function frame(now){
   }
 
   // positions
-  // 3.1 只有 2-4 像素，静止时看不出在动。4.6 仍然是飘，不是晃。
+  // 3.1 is only 2-4 pixels, you cannot tell it is moving when still. 4.6 still drifts rather than shakes.
   const amp = REDUCED ? 0 : 4.6*S;
   for(const n of N){
     n.x = n.sx + Math.sin(t*n.sp + n.ph)*amp*n.ax;
@@ -788,8 +788,8 @@ function frame(now){
   }
 
   /* one synchronised pulse of light runs every callosum strand */
-  // 检索完才放这道光：从左脑命中的事实射向右脑命中的画像，
-  // 走完一遍就停（BEAM 清空），不再无限循环——它表示"这一次检索发生了跨脑联合"。
+  // This light is released only after retrieval: from the facts hit in the left brain to the profile hit in the right brain,
+  // it stops after one pass (BEAM cleared), no infinite loop — it means "this retrieval joined across the brain".
   if(!REDUCED && BEAM.length){
     PULSE.t += dt/PULSE.dur;
     if(PULSE.t > 1 + PULSE.trail){ BEAM.length = 0; PULSE.t = -0.02; }
@@ -828,10 +828,10 @@ function frame(now){
     const g = GLOW[n.k]; if(!g) continue;
     const base = n.r*2.0*S;
     const k = (base*2.6) * (1 + n.h*1.15 + n.p*.24);
-    // 基线从 .36 压到 .16。composite=lighter 是相加的，一屏节点静止全亮必然过曝。
-    // 但压完之后静止的脑图就死了——原来那层常亮的光本身在起伏，看着是活的。
-    // 补一层极慢的呼吸微光：±25% 幅度、约 8 秒一轮、按 n.ph 错开相位。
-    // 幅度必须小：一屏节点同步亮起来像心跳，错开且轻才像有生命。
+    // Baseline lowered from .36 to .16. composite=lighter is additive, so a screen of still, fully lit nodes is bound to overexpose.
+    // But once lowered the still brain map looked dead — that constant layer of light used to undulate, which looked alive.
+    // Add a very slow breathing shimmer: ±25% amplitude, about one 8-second cycle, phase-offset by n.ph.
+    // The amplitude must be small: a screen of nodes lighting in sync looks like a heartbeat; offset and gentle looks alive.
     const idle = REDUCED ? 1 : (1 + 0.25*Math.sin(t*0.78 + n.ph));
     const a = (0.16*idle + n.h*.62 + n.p*.22) * n.f * n.iv;
     ctx.globalAlpha = Math.min(1,a);
@@ -892,9 +892,9 @@ function frame(now){
   }
   if('letterSpacing' in ctx) ctx.letterSpacing = '0px';
 
-  /* 被检索命中的点：外圈亮一道白光。
-     跟 hover 那个旋转虚线环是两回事——那个表示"鼠标指着"，这个表示
-     "这一轮检索取到了它"，所以一直亮着到下一次检索，并且轻微呼吸。 */
+  /* A point hit by retrieval: a white ring lights up around it.
+     This is different from the rotating dashed hover ring — that one means "the mouse is pointing here", this one means
+     "this turn's retrieval fetched it", so it stays lit until the next retrieval, breathing slightly. */
   ctx.globalCompositeOperation = 'lighter';
   for(const n of N){
     if(!n.hit) continue;
@@ -974,13 +974,13 @@ function shape(n,r){
   ctx.fill(); ctx.stroke();
 
   const col = PAL[n.k];
-  // 实心核：没有它节点就是"一圈描边 + 一团软光"，读起来是个模糊的球。
+  // Solid core: without it a node is "an outline ring + a blob of soft light", which reads as a blurry ball.
   ctx.beginPath();
   ctx.arc(x, y, Math.max(0.9, r*0.26), 0, 6.2832);
   ctx.fillStyle = hexa(col, Math.min(1, 0.5 + n.h*0.5));
   ctx.fill();
 
-  // 悬停 / 命中时套一圈带缺口的环 + 四个刻度，缓慢旋转。
+  // On hover / hit, wrap it in a notched ring + four ticks, rotating slowly.
   const lit = Math.max(n.h, n.hit || 0) * n.iv;
   if(lit > 0.02){
     const R = r * 1.8, a = lit * 0.6;
@@ -1014,8 +1014,8 @@ function updateCard(t){
     const n = N[sel];
     if(sel!==selPrev){
       selPrev = sel;
-      // 右脑节点写真实 slot 名（情绪 / 应对方式 / 喜好与厌恶…）。脑图只有三个簇，
-      // 6 个 slot 压进去后卡片写 EXPERIENCE 而内容是"应对方式"，对不上号。
+      // Right-brain nodes show the real slot name (emotion / coping_style / likes_dislikes…). The brain map has only three clusters;
+      // with 6 slots squeezed in, the card would say EXPERIENCE while the content was "coping_style" — they did not match.
       cKd.textContent = n.k==='label' ? n.w
                       : n.k==='user' ? 'You · owner'
                       : ((window.rbSlotOf && window.rbSlotOf(n.id)) || LABEL[n.k]);
@@ -1026,14 +1026,14 @@ function updateCard(t){
       cSrc.textContent = n.k==='label' ? ('cluster · '+n.cnt+' items')
                        : rbSlot        ? ('right brain · ' + rbSlot)
                        : (s.endsWith('00:') ? s+String(10+n.id%49).padStart(2,'0') : s);
-      // 内容区：簇 → 描述；实体/记忆节点 → 该节点的记忆文本(n.w)；无内容给占位
-      // 右脑节点：除了这个"点"本身，还要显示它是怎么来的——挂在下面的一条条
-      // 感受，以及每条感受对应的那件事。光说"用户感到委屈"没有信息量。
+      // Content area: cluster → description; entity/memory node → that node's memory text (n.w); no content → placeholder
+      // Right-brain nodes: besides the "point" itself, also show where it came from — the feelings hanging below it
+      // one by one, and the event behind each feeling. Just saying "the user felt wronged" carries no information.
       const rb = window.rbDetailOf && window.rbDetailOf(n.id);
       cBody.textContent = n.k==='label' ? ((window.SLOT_SUMMARIES && window.SLOT_SUMMARIES[n.w]) || SLOT_DESC[n.w] || n.w)
-                        : n.k==='user'  ? '账号主人 · this account'
+                        : n.k==='user'  ? 'account owner · this account'
                         : rb            ? rb
-                        : (n.w || '（暂无记忆内容）');
+                        : (n.w || '(no memory content yet)');
     }
     const w = card.offsetWidth, h = card.offsetHeight;
     const gap = 34*Math.max(.8,S);
@@ -1122,9 +1122,9 @@ function plateLoaded(){
 if(brain.complete && brain.naturalWidth) plateLoaded();
 else brain.addEventListener('load', plateLoaded);
 
-/* ---- 外部激活：按 schema(簇标签) / 节点类型 点亮脑图节点 ----
-   window.brainActivate({schemas:['food'], kinds:['entity','emotion']}) 会把对应
-   的 schema 簇(标签+其成员)和指定类型的节点持续点亮；window.brainClear() 复位。 */
+/* ---- External activation: light up brain-map nodes by schema (cluster label) / node kind ----
+   window.brainActivate({schemas:['food'], kinds:['entity','emotion']}) keeps the matching
+   schema clusters (label + its members) and nodes of the given kinds lit; window.brainClear() resets. */
 const LABEL_BY_W = {};
 N.forEach((n,i)=>{ if(n.k==='label' && n.w) LABEL_BY_W[n.w.toLowerCase()] = i; });
 window.brainActivate = function(opts){
@@ -1132,7 +1132,7 @@ window.brainActivate = function(opts){
   const schemas = (opts.schemas||[]).map(s=>String(s).toLowerCase());
   const kinds = new Set(opts.kinds||[]);
   for(const n of N) n.act = 0;
-  for(const s of schemas){                       // schema 簇：标签节点 + 直接相连的成员
+  for(const s of schemas){                       // schema cluster: label node + directly connected members
     const li = LABEL_BY_W[s];
     if(li==null) continue;
     N[li].act = 1;
@@ -1141,12 +1141,12 @@ window.brainActivate = function(opts){
   if(kinds.size) for(const n of N) if(kinds.has(n.k)) n.act = Math.max(n.act, 0.62);
 };
 window.brainClear = function(){ for(const n of N) n.act = 0; };
-// 脑图藏起来时容器尺寸是 0；从 Chat 切回 Memory Space 后要重算一次。
+// When the brain map is hidden the container size is 0; recompute once after switching back from Chat to Memory Space.
 window.brainResize = resize;
-// 这一轮检索命中了哪些节点 → 它们的外圈亮起来，到下一次检索为止。
-// 簇名（emotion / experiences / preference / work…）→ 该簇标签节点的 id。
-// 给检索光束用：命中的右脑内容如果没有自己的节点（profile / response_experience
-// 是整簇的总结，本来就不该单独占一个点），光束就射向它所属的那个簇。
+// Which nodes this turn's retrieval hit → their outer ring lights up, until the next retrieval.
+// Cluster name (emotion / experiences / preference / work…) → id of that cluster's label node.
+// For the retrieval beam: if right-brain hit content has no node of its own (profile / response_experience
+// are whole-cluster summaries and should not take a point of their own), the beam goes to the cluster it belongs to.
 window.brainClusterNode = function(w){
   return LABEL_BY_W[String(w||'').toLowerCase()];
 };
@@ -1157,17 +1157,17 @@ window.brainHighlight = function(ids){
 };
 
 
-// 两条记忆讲同一个人/同一件事 → 连一条线。由前端在铺记忆时按实体交集调用。
+// Two memories about the same person/event → draw a line. Called by the front end with the entity intersection when laying out memories.
 window.brainLink = function(idA, idB){
   if(idA === idB) return;
-  for(const i of ADJ[idA]) if(L[i].a === idB || L[i].b === idB) return;   // 已连过
+  for(const i of ADJ[idA]) if(L[i].a === idB || L[i].b === idB) return;   // already linked
   const i = L.length;
   L.push({a: idA, b: idB, t: 'rel', w: 0.28});
   ADJ[idA].push(i); ADJ[idB].push(i);
   NB[idA].push(idB); NB[idB].push(idA);
 };
 
-// 检索时放一道光：从左脑命中射向右脑命中。
+// Fire a light on retrieval: from the left-brain hits to the right-brain hits.
 window.brainBeam = function(fromIds, toIds){
   BEAM.length = 0;
   for(const a of fromIds){
@@ -1175,24 +1175,24 @@ window.brainBeam = function(fromIds, toIds){
       if(N[a] && N[b]) BEAM.push({l: {a: a, b: b}});
     }
   }
-  if(BEAM.length) PULSE.t = -PULSE.trail;      // 从头开始走
+  if(BEAM.length) PULSE.t = -PULSE.trail;      // start from the beginning
 };
 
 
-/* ---- 运行时生长：实时对话时往脑图新增节点 + 连线（映射关系）----
-   window.brainAdd(side, kind, label) 在对应半球加一个节点并连到 user 节点，
-   返回 id；带淡入 + 短暂高亮。R_BY_KIND 控制不同类型的点大小。 */
-// 撒点半径。原来 0.092 太紧，同一簇的点挤成一坨看不出结构；放大到 0.135 之后
-// 相邻簇的边缘会轻微交错——那是想要的：记忆本来就不是按格子分的，稍微咬合一点
-// 比泾渭分明更像脑子。半球边界仍然守得住（撒点中心在各自半球，见 brainAdd）。
-//: 半球椭圆。归一化：以半球中心为原点、单位圆为边界，再乘 RX/RY 映射回画布。
+/* ---- Runtime growth: add nodes + links (mapping relations) to the brain map during live conversation ----
+   window.brainAdd(side, kind, label) adds a node in the matching hemisphere and links it to the user node,
+   returning the id; with fade-in + brief highlight. R_BY_KIND controls point size per kind. */
+// Scatter radius. The old 0.092 was too tight, points of one cluster clumped into a blob with no visible structure; at 0.135
+// neighbouring clusters' edges interleave slightly — that is intended: memory is not filed in a grid, a little overlap
+// looks more like a brain than sharp borders. The hemisphere boundary still holds (scatter centres stay in their own hemisphere, see brainAdd).
+//: Hemisphere ellipse. Normalised: origin at the hemisphere centre, the unit circle as boundary, then scaled by RX/RY back to the canvas.
 const HEMI_RX = 0.215, HEMI_RY = 0.385;
 const HEMI_CX = { L: 0.265, R: 0.735 };
-//: 簇心所在的环半径，左右分开给。左脑 7 个簇要撑开（簇与簇之间的距离），
-//: 右脑只有 3 个簇、每簇点多，环收一点、把空间让给团本身。
+//: Radius of the ring the cluster centres sit on, given separately for left and right. The left brain's 7 clusters need spreading out (distance between clusters),
+//: the right brain has only 3 clusters with many points each, so the ring is tighter, leaving room for the clusters themselves.
 const CLUSTER_RING = { L: 0.70, R: 0.58 };
-//: 团半径上限 + 增长系数。右脑一簇十几个点，系数小的话点全挤在团心附近——
-//: 光提上限没用，得让它真的长起来。
+//: Cluster radius cap + growth factor. A right-brain cluster has a dozen-plus points; with a small factor they all crowd near the centre —
+//: raising the cap alone does nothing, it has to actually grow.
 const BLOB_MAX = { L: 0.20, R: 0.38 };
 const BLOB_K   = { L: 0.075, R: 0.11 };
 const CLUSTER_N = 20;
@@ -1208,16 +1208,16 @@ function toCanvas(side, u, v){
 function seatOf(side, li){
   return (li != null && li >= 0) ? (li - (side === 'R' ? 7 : 0)) : 0;
 }
-const _clusterCount = {};      // 每个簇已经撒了几个点，决定下一个点在螺旋上的位置
+const _clusterCount = {};      // how many points each cluster already has; decides the next point's position on the spiral
 const R_BY_KIND = { entity:2.6, know:2.6, person:2.6, emotion:5.4, exper:5.0, prefer:5.2 };
 function _nowT(){ return (performance.now()-t0)/1000; }
 window.brainAdd = function(side, kind, label, slot){
-  // slot 给定且脑图里有该 SlotV2 簇标签 → 新节点落到那个簇的团里
+  // slot given and the brain map has that SlotV2 cluster label → the new node lands in that cluster
   const li0 = slot!=null ? LABEL_BY_W[String(slot).toLowerCase()] : undefined;
 
-  // 每个簇是一个**独立的团**，团心在半球椭圆内的一个环上。扇形从中心发散的话，
-  // 内端全汇在半球中心，标签挤成一堆、靠中心的点也分不清属于哪个簇。
-  // 这里只落初始位置，真正的排布在 relayout()——那时才知道每簇有几个点。
+  // Each cluster is an **independent blob**, its centre on a ring inside the hemisphere ellipse. With sectors fanning out from the centre,
+  // the inner ends all converge at the hemisphere centre, labels pile up, and points near the centre cannot be told apart by cluster.
+  // Only the initial position is set here; the real arrangement is in relayout() — only then is each cluster's count known.
   const sideK = side === 'R' ? 'R' : 'L';
   const kk = sideK === 'R' ? 3 : 7;
   const seat0 = Math.max(0, Math.min(kk - 1, seatOf(sideK, li0)));
@@ -1231,7 +1231,7 @@ window.brainAdd = function(side, kind, label, slot){
     x:0,y:0,h:0,p:0,f:1,iv:0, id:N.length, act:0.95, hit:0, dl:_nowT()
   };
   N.push(n); ADJ.push([]); NB.push([]);
-  // 连线（映射关系）：左脑有槽 → 连到该槽的簇标签（归属）；否则连到 user（跨脑）
+  // Links (mapping relations): left brain with a slot → link to that slot's cluster label (membership); otherwise link to user (cross-brain)
   const tgt = li0!=null ? li0 : USER;
   if(tgt>=0){
     const t = li0!=null ? 'in' : 'cross';
@@ -1244,8 +1244,8 @@ window.brainAdd = function(side, kind, label, slot){
   return n.id;
 };
 
-// 按每个簇**实际有几个点**重排。建点时不知道总数，只能用写死的参考值，结果是
-// 点少的簇缩在内圈、点多的簇铺到外沿——小簇挤在脑子中部就是这么来的。
+// Re-lay out by how many points each cluster **actually has**. When creating a point the total is unknown, so only a hard-coded reference value could be used; the result:
+// small clusters shrank to the inner ring and large ones spread to the outer edge — that is how small clusters ended up crowded in the middle of the brain.
 function relayout(){
   const group = {};
   for(const n of N){
@@ -1261,8 +1261,8 @@ function relayout(){
     const [cu, cv] = clusterCenter(side, seat, k);
     const R = Math.min(BLOB_MAX[side], BLOB_K[side] * Math.sqrt(m + 1));
     for(let i = 0; i < m; i++){
-      const ang = i * 2.399963;                       // 向日葵黄金角
-      const rad = R * Math.sqrt((i + 0.5) / m);       // √ 半径 → 等面积铺满
+      const ang = i * 2.399963;                       // sunflower golden angle
+      const rad = R * Math.sqrt((i + 0.5) / m);       // √ radius → equal-area fill
       const [x, y] = toCanvas(side, cu + Math.cos(ang) * rad, cv + Math.sin(ang) * rad);
       g[i].bx = x; g[i].by = y;
     }
@@ -1273,8 +1273,8 @@ function relayout(){
 </script>
 <script>
 /* ---- rail collapse + voice indicator + data hooks ------------------------
-   脑图那段脚本保持不动；这里只管新加的左栏收起、语音波形/耳朵、以及把数据
-   灌进三个块的对外钩子（window.vm.*，接后端时调用即可）。 */
+   The brain-map script stays untouched; this only handles the newly added collapsible left rail, voice waveform/ear, and the
+   external hooks that pour data into the three blocks (window.vm.*, call them when wiring up the backend). */
 (function(){
   const app = document.getElementById('app');
   const toggle = document.getElementById('railToggle');
@@ -1283,12 +1283,12 @@ function relayout(){
     toggle.textContent = c ? '›' : '‹';
   });
 
-  // 语音指示器：AI 说话时画波形动线，用户说话时显示一只耳朵（画的，非 emoji）
+  // Voice indicator: draws a waveform line while the AI speaks, shows an ear while the user speaks (drawn, not an emoji)
   const voice = document.getElementById('voice');
   const lab   = document.getElementById('voiceLab');
   const wave  = document.getElementById('wave');
   const wc    = wave.getContext('2d');
-  const LAB = { idle:'idle · 待机', user:'listening · 用户说话', ai:'speaking · AI 回复' };
+  const LAB = { idle:'idle', user:'listening · user speaking', ai:'speaking · AI reply' };
   let vstate = 'idle', vt = 0, amp = 0;
 
   function setVoiceState(s){
@@ -1306,11 +1306,11 @@ function relayout(){
   function waveFrame(){
     vt += 0.06;
     const w = wave.clientWidth||150, h = wave.clientHeight||30, mid = h/2;
-    amp += ((vstate==='ai'?1:0) - amp) * 0.12;          // 平滑进出
+    amp += ((vstate==='ai'?1:0) - amp) * 0.12;          // smooth in and out
     wc.clearRect(0,0,w,h);
     wc.beginPath();
     for(let x=0;x<=w;x++){
-      const env = Math.sin(x/w*Math.PI);                 // 两端收窄
+      const env = Math.sin(x/w*Math.PI);                 // taper at both ends
       const y = mid + Math.sin(x*0.14 - vt*2.2) * env * (h*0.4) * amp
                     * (0.5 + 0.5*Math.sin(vt*1.7 + x*0.05));
       x ? wc.lineTo(x,y) : wc.moveTo(x,y);
@@ -1321,7 +1321,7 @@ function relayout(){
   }
   waveFrame();
 
-  // 对外钩子：接后端（WS/REST）时调这些把真实数据灌进来
+  // External hooks: call these to pour real data in when wiring up the backend (WS/REST)
   const $ = id => document.getElementById(id);
   window.vm = {
     setVoiceState,
@@ -1329,7 +1329,7 @@ function relayout(){
     setReply: t => { $('reply').textContent = t; },
     setTags: tags => {
       $('tags').innerHTML = tags.map(t => `<span class="tag ${t.k}"><b>${t.b}</b>${t.v}</span>`).join('');
-      // 标签一变，就按其中的 schema / 类型点亮脑图对应节点
+      // Whenever the tags change, light up the brain-map nodes matching their schema / kind
       const schemas = tags.filter(t=>t.k==='sch').map(t=>t.v);
       const kinds = tags.some(t=>t.k==='ent') ? ['entity'] : [];
       if(tags.some(t=>t.k==='emo')) kinds.push('emotion');
@@ -1343,15 +1343,15 @@ function relayout(){
     clear:   () => window.brainClear && window.brainClear(),
   };
 
-  /* ================= 实时语音：连 openai_voice_demo 的 WS 后端 =================
-     后端默认 pipeline provider，发 partial_transcript / user_transcript /
+  /* ================= Live voice: connects to the openai_voice_demo WS backend =================
+     The backend defaults to the pipeline provider and sends partial_transcript / user_transcript /
      memory_hits{left_brain,right_brain_hits,current_scene} / answer_start|delta|done
-     + 二进制 24kHz PCM16 回复音频；麦克风上行也是 24kHz PCM16 mono。
-     后端地址默认 ws://<本机>:8787/ws，可用 ?ws=host:port 覆盖。 */
+     + binary 24kHz PCM16 reply audio; the mic uplink is also 24kHz PCM16 mono.
+     Backend address defaults to ws://<this host>:8787/ws; override with ?ws=host:port. */
   const SAMPLE_RATE = 24000;
-  // 预缓冲按模式分：realtime 是 WebSocket 推的稳定流，0.08 开口最快；llm_tts 走
-  // TTS 的 HTTP 流，块到达抖动大得多，缓冲太小时前几秒会一顿一顿（排上的块播完了
-  // 下一块还没到），等积压攒够才顺——就是「前期卡、中后期恢复」那个现象。
+  // Pre-buffering depends on mode: realtime is a steady stream pushed over WebSocket, 0.08 opens fastest; llm_tts goes through
+  // the TTS HTTP stream with far more jitter in chunk arrival; with too small a buffer the first seconds stutter (queued chunks finish playing
+  // before the next arrives) until the backlog builds up — that is the "choppy at first, fine later" effect.
   let PREBUFFER = 0.25;
   const params = new URLSearchParams(location.search);
   const WS_HOST = params.get('ws') || ((location.hostname || 'localhost') + ':8787');
@@ -1360,31 +1360,31 @@ function relayout(){
   const talkBtn = $('talkBtn');
   let ws=null, recording=false, micStream=null, micCtx=null, micProc=null;
   let playCtx=null, scheduled=[], nextPlay=0, replyText='';
-  let pendingClip=null;   // 服务端说这一轮要把当时那段原声放回来（memory_id）
-  let clipSrc=null;       // 正在放的那段原声，随时可以掐掉
-  let turnLogged=false;   // 这一轮的回复进没进 chat（answer_done 和 answer_interrupt 都可能来）
+  let pendingClip=null;   // the server says this turn should play back the original audio from that moment (memory_id)
+  let clipSrc=null;       // the original clip currently playing; can be cut at any time
+  let turnLogged=false;   // whether this turn's reply has gone into chat (both answer_done and answer_interrupt may arrive)
 
-  // 脑图去重：同一条记忆文本只长一次节点；再次命中就跳过（避免刷屏）
-  // MAX_NODES 要能装下「开局铺的已有记忆」+「之后对话新长的」两部分。
-  // 48 只够铺开局（现有库就 60+ 条），说话时就再也长不出新节点了。
-  // MAX_NODES 满了之后 growLeft/growRightIn 返回 undefined，于是「这一轮命中了
-  // 哪些节点」拿不到 id——外圈高亮和跨脑光束一起哑掉，看起来就是"检索过程没有
-  // 可视化"。开局铺的记忆就有一百多条，110 根本不够。
+  // Brain-map dedup: the same memory text grows a node only once; a repeat hit is skipped (avoid flooding the screen)
+  // MAX_NODES must fit both "existing memories laid out at start" + "new ones grown during the conversation".
+  // 48 only fits the initial layout (the existing store alone has 60+), and no new nodes could grow while talking.
+  // Once MAX_NODES is full, growLeft/growRightIn return undefined, so "which nodes this turn
+  // hit" gets no ids — the outer-ring highlight and cross-brain beam both go silent, which looks like "the retrieval process has no
+  // visualisation". The initial layout alone has over a hundred memories; 110 is nowhere near enough.
   const seen = new Map(); let addedCount=0; const MAX_NODES=260;
-  let curSlots = [];                           // 本轮 classify 出的 SlotV2 槽（左脑按此分）
+  let curSlots = [];                           // this turn's classified SlotV2 slots (left brain is grouped by these)
   const SRC_KIND = { emotion_trait:'emotion', current_signal:'emotion', response_experience:'exper',
                      situation_pattern:'exper', profile:'prefer', relation:'exper' };
   const RIGHT_CLUSTER = { emotion:'emotion', exper:'experiences', prefer:'preference' };
-  window.SLOT_SUMMARIES = window.SLOT_SUMMARIES || {};   // {slot: 会话级概括}
+  window.SLOT_SUMMARIES = window.SLOT_SUMMARIES || {};   // {slot: session-level summary}
 
-  /* ---- 本轮的 emotion / entity / schema 标签 ----
-     三个都来自这一轮真实算出来的东西，每轮重画；没有就不显示，
-     不留上一轮的残影，更不留写死的占位。
-       schema  ← /api/classify 的 slot
-       entity  ← /api/classify 的实体
-       emotion ← 右脑命中里带的【x】标记（heartnote 的内心OS 就是这个格式） */
+  /* ---- This turn's emotion / entity / schema tags ----
+     All three come from what was really computed this turn, redrawn every turn; if absent they are not shown,
+     no afterimage of the previous turn, let alone a hard-coded placeholder.
+       schema  ← slot from /api/classify
+       entity  ← entities from /api/classify
+       emotion ← the [x] marker in right-brain hits (the heartnote inner monologue uses this format; brackets are U+3010/U+3011) */
 
-  var rbDetail = {};        // 节点 id → {slot, notes:[{text, emotion, cause}]}
+  var rbDetail = {};        // node id → {slot, notes:[{text, emotion, cause}]}
   var curEntities = [];
   var curEmotion = '';
   var curScene = '';
@@ -1393,7 +1393,7 @@ function relayout(){
     if (!hits) return '';
     for (var i = 0; i < hits.length; i++) {
       var text = hits[i].content || '';
-      var m = text.match(/【([^】]{1,6})】/);
+      var m = text.match(/\u3010([^\u3011]{1,6})\u3011/);
       if (m) return m[1];
     }
     return '';
@@ -1414,8 +1414,8 @@ function relayout(){
     box.innerHTML = '';
     if (curEmotion) box.appendChild(makeTag('emo', 'emotion', curEmotion));
     if (curEntities.length > 0) box.appendChild(makeTag('ent', 'entity', curEntities[0]));
-    // "unknown" 是场景分类器说"没测出来"，不是一个场景 —— 当它没有，
-    // 退回用 slot。否则标签永远显示 unknown（麦克风里常常没有明显环境音）。
+    // "unknown" is the scene classifier saying "could not detect", not a scene — treat it as absent
+    // and fall back to the slot. Otherwise the tag always shows unknown (the mic often has no obvious ambient sound).
     var scene = (curScene && curScene !== 'unknown') ? curScene : '';
     var schema = scene || (curSlots.length > 0 ? curSlots[0] : '');
     if (schema) box.appendChild(makeTag('sch', 'schema', schema));
@@ -1429,10 +1429,10 @@ function relayout(){
   }
 
 
-  /* ---- 按实体关系连线 ----
-     两条记忆挂了同一个实体（同一个人、同一门课、同一个地方）就连一条线。
-     账号主人那个实体要跳过——它几乎挂在每条记忆上，连出来是一团毛线，
-     什么信息都没有。判据：出现在超过一半记忆里的实体不算关系。 */
+  /* ---- Link by entity relations ----
+     Two memories attached to the same entity (same person, same course, same place) get a line.
+     Skip the account owner's entity — it is attached to nearly every memory, and linking it produces a ball of yarn
+     with no information. Rule: an entity appearing in more than half of the memories does not count as a relation. */
 
   function linkByEntity(items) {
     var nodeIds = [];
@@ -1441,7 +1441,7 @@ function relayout(){
       nodeIds.push(growLeft(items[i].text, items[i].slot));
     }
 
-    // 先统计每个实体挂了几条记忆
+    // First count how many memories each entity is attached to
     var count = {};
     for (i = 0; i < items.length; i++) {
       var ents = items[i].entities || [];
@@ -1453,7 +1453,7 @@ function relayout(){
     var tooCommon = items.length * 0.5;
     var byEntity = {};
     for (i = 0; i < items.length; i++) {
-      if (nodeIds[i] === undefined) continue;      // 这条没长出节点（去重或超上限）
+      if (nodeIds[i] === undefined) continue;      // this one grew no node (deduped or over the cap)
       var list = items[i].entities || [];
       for (j = 0; j < list.length; j++) {
         var ent = list[j];
@@ -1473,11 +1473,11 @@ function relayout(){
         }
       }
     }
-    console.log('[graph] 按实体连了', linked, '条关系线');
+    console.log('[graph] linked by entity:', linked, 'relation lines');
   }
 
 
-  // 给脑图的悬停卡片用：这个右脑节点挂了哪些感受、每条感受为什么。
+  // For the brain-map hover card: which feelings this right-brain node carries, and why each one.
   window.rbSlotOf = function (id) {
     return rbDetail[id] ? rbDetail[id].slot : '';
   };
@@ -1485,8 +1485,8 @@ function relayout(){
   window.rbDetailOf = function (id) {
     var d = rbDetail[id];
     if (!d || d.notes.length === 0) return '';
-    // 一条一行、最多两条。原来是"原话 + 换行 + ← 抽取出来的事实"，两句说同一件事，
-    // 卡片能撑到十几行还读不出重点。原话太短（"就是这首。"）就用 cause 顶上。
+    // One per line, at most two. It used to be "original words + newline + ← extracted fact", two sentences saying the same thing,
+    // stretching the card to a dozen-plus lines with no clear point. If the original words are too short ("this one.") use cause instead.
     var lines = [], seen = {};
     for (var i = 0; i < d.notes.length && lines.length < 2; i++) {
       var n = d.notes[i];
@@ -1495,14 +1495,14 @@ function relayout(){
       if (body.length > 44) body = body.slice(0, 44) + '…';
       if (seen[body]) continue;
       seen[body] = 1;
-      lines.push((n.emotion ? '【' + n.emotion + '】' : '') + body);
+      lines.push((n.emotion ? '[' + n.emotion + '] ' : '') + body);
     }
     var more = d.notes.length - lines.length;
-    if (more > 0) lines.push('…还有 ' + more + ' 条');
+    if (more > 0) lines.push('…and ' + more + ' more');
     return lines.join('\n');
   };
 
-  function railAdd(slot, text){                // 左侧栏板对应槽的列表里也实时追加
+  function railAdd(slot, text){                // also append live to the matching slot list in the left rail
     const ul = document.getElementById('mem-'+slot); if(!ul) return;
     const li = document.createElement('li'); li.textContent = text.slice(0,42); li.className='new';
     ul.appendChild(li);
@@ -1511,22 +1511,22 @@ function relayout(){
   }
   function growLeft(text, slot){
     const key = 'L|'+text;
-    if(seen.has(key)) return seen.get(key);          // 已经长过：返回原节点，好连线
+    if(seen.has(key)) return seen.get(key);          // already grown: return the existing node so it can be linked
     if(addedCount>=MAX_NODES) return undefined;
     const id = window.brainAdd('L','entity', text, slot);
     seen.set(key, id); addedCount++;
     railAdd(slot, text);
     return id;
   }
-  //: 哪些右脑命中值得在脑图上占一个点。
+  //: Which right-brain hits deserve a point of their own on the brain map.
   var RB_NODE_SOURCES = { situation_pattern:1, relation:1, emotion_trait:1 };
 
-  //: 命中正文 → 节点标签。去掉日期前缀和抬头再截短。
+  //: Hit text → node label. Strip the date prefix and heading, then truncate.
   function rbLabel(text){
     var t = String(text || '')
       .replace(/^\[\d{4}-\d{2}-\d{2}\]\s*/, '')
-      .replace(/^(情感记录|当前情绪相关的性格观察|当前信号)[：:]\s*/, '')
-      .replace(/（内心OS：[^）]*）/g, '')
+      .replace(/^(\u60c5\u611f\u8bb0\u5f55|\u5f53\u524d\u60c5\u7eea\u76f8\u5173\u7684\u6027\u683c\u89c2\u5bdf|\u5f53\u524d\u4fe1\u53f7)[\uff1a:]\s*/, '')
+      .replace(/\uff08\u5185\u5fc3OS\uff1a[^\uff09]*\uff09/g, '')
       .trim();
     return t.length > 14 ? t.slice(0, 14) + '…' : t;
   }
@@ -1534,9 +1534,9 @@ function relayout(){
   function growRight(kind, text){
     return growRightIn(RIGHT_CLUSTER[kind] || 'experiences', text, kind);
   }
-  // 按簇名直接放。后端已经把右脑记忆归好簇了（见 run.py 的 _rb_cluster），
-  // 前端不用再从 memory_class 猜——右脑只有 heartnote / response_experience
-  // 两个 class，猜不出 emotion / preference 的区别。
+  // Place by cluster name directly. The backend has already clustered the right-brain memories (see run.py's _rb_cluster),
+  // so the front end need not guess from memory_class — the right brain has only heartnote / response_experience,
+  // two classes, which cannot tell emotion from preference.
   const KIND_OF_CLUSTER = { emotion:'emotion', preference:'prefer', experiences:'exper' };
   function growRightIn(cluster, text, kind){
     const key = 'R|'+text;
@@ -1557,15 +1557,15 @@ function relayout(){
     const right = (m.right_brain_hits||[]).slice(0,5).map(h=>({text:trunc(h.content), score:(h.priority||0).toFixed(2)}));
     window.vm.setRecall('l', left);
     window.vm.setRecall('r', right);
-    // 标签：场景(schema) + 情绪 + 实体。三个都由服务端跟这一轮检索结果一起送来
-    // （见 utils.hits_payload）——以前 schema 要等另一条 /api/classify 回来，
-    // memory_hits 先到时就空着；情绪是拿正则去 content 里抠「x」，格式变了就再也抠不到。
+    // Tags: scene (schema) + emotion + entity. All three are sent by the server together with this turn's retrieval results
+    // (see utils.hits_payload) — schema used to wait for a separate /api/classify reply,
+    // and was empty when memory_hits arrived first; emotion was regex-scraped out of content, and broke whenever the format changed.
     if (m.slots && m.slots.length) curSlots = m.slots;
     if (m.entities && m.entities.length) curEntities = m.entities;
     curEmotion = m.emotion || emotionFromHits(m.right_brain_hits);
     curScene = m.current_scene || '';
     renderTags();
-    // 脑图生长：左脑事实 → 按 SlotV2 槽归到对应簇；右脑命中 → 右半球对应类型节点
+    // Brain-map growth: left-brain facts → grouped into clusters by SlotV2 slot; right-brain hits → node of the matching kind in the right hemisphere
     const slots = curSlots.length ? curSlots : ['daily_life'];
     var leftIds = [];
     var rightIds = [];
@@ -1576,38 +1576,38 @@ function relayout(){
       if (id !== undefined) leftIds.push(id);
     }
     for (var j = 0; j < hitsR.length; j++) {
-      // profile 是整个 slot 的静态总结（快照里已用干净的实体名画过），
-      // response_experience 是给回复层看的内部笔记——这两类每轮都命中，
-      // 拿正文当标签的话右半球每轮都在堆新的长条。
+      // profile is a static summary of a whole slot (already drawn with clean entity names in the snapshot),
+      // response_experience is an internal note for the reply layer — both kinds hit every turn,
+      // and using their text as labels would pile new long bars onto the right hemisphere every turn.
       var cluster = hitsR[j].cluster || 'experiences';
       var rid;
       if (RB_NODE_SOURCES[hitsR[j].source]) {
-        // 真正的"点"（情感记录 / 对某人的印象 / 性格观察）→ 自己占一个节点
+        // Real "points" (emotion log / impression of someone / personality observation) → a node of their own
         rid = growRightIn(cluster, rbLabel(hitsR[j].content));
       } else {
-        // profile / response_experience 是整簇的总结，不单独占点——但它确实被
-        // 检索到了，光束该射向它所属的那个簇，而不是当它没发生。
+        // profile / response_experience are whole-cluster summaries and take no point of their own — but they really were
+        // retrieved, so the beam should go to the cluster they belong to rather than act as if nothing happened.
         rid = window.brainClusterNode && window.brainClusterNode(cluster);
       }
       if (rid !== undefined && rightIds.indexOf(rid) < 0) rightIds.push(rid);
     }
-    // 这一次检索的跨脑联合：一道光从左脑命中的事实射向右脑命中的画像
-    // 跨脑光束要两侧都有才画得出来；只命中一侧时至少让高亮亮起来，
-    // 别让整个可视化一起消失。
-    // 每一轮都用**这一轮真实的命中**：左脑取到哪几条事实，右脑触发了哪几个情绪/
-    // 画像节点，光束就从这几个点射向那几个点。不是写死的动画。
-    console.log('[graph] 跨脑光束', leftIds.length, '→', rightIds.length);
+    // This retrieval's cross-brain join: a light from the facts hit in the left brain to the profile hit in the right brain
+    // The cross-brain beam needs hits on both sides to draw; with only one side hit, at least light the highlight,
+    // so the whole visualisation doesn't vanish.
+    // Every turn uses **this turn's real hits**: whichever facts the left brain fetched, whichever emotion/
+    // profile nodes the right brain triggered, the beam fires from those points to those points. Not a hard-coded animation.
+    console.log('[graph] cross-brain beam', leftIds.length, '→', rightIds.length);
     if (window.brainBeam) window.brainBeam(leftIds, rightIds);
-    // 这一轮取到的点，外圈亮起来
+    // The points fetched this turn get their outer ring lit
     if (window.brainHighlight) {
       window.brainHighlight(leftIds.concat(rightIds));
     }
   }
 
-  // ---- playback（复用 orb.html 机制）----
-  // 浏览器只允许在用户手势里启动 AudioContext。之前是等第一块音频到了才 new，
-  // 那时候早不在点击上下文里了，创建出来是 suspended 状态——不报错、也没声音。
-  // answer_start 里那句 resume() 也救不回来：那会儿 playCtx 还是 null。
+  // ---- playback (reuses the orb.html mechanism) ----
+  // Browsers only allow starting an AudioContext inside a user gesture. It used to be created only when the first audio chunk arrived,
+  // long outside the click context, so it came out suspended — no error, and no sound.
+  // The resume() in answer_start couldn't save it either: playCtx was still null at that point.
   function ensurePlayback(){
     if(!playCtx) playCtx = new (window.AudioContext||window.webkitAudioContext)();
     if(playCtx.state === 'suspended') playCtx.resume();
@@ -1617,10 +1617,10 @@ function relayout(){
   function playPcm(buf){
     ensurePlayback();
     if(playCtx.state === 'suspended'){
-      console.warn('[audio] AudioContext 被浏览器挂起，点一下页面再试');
+      console.warn('[audio] AudioContext suspended by the browser; click the page and try again');
     }
-    // PCM16 一个样本 2 字节；奇数长度的 buffer 直接 new Int16Array 会抛 RangeError，
-    // 外面那个 catch 一吞就是整块音频没了。服务端已按样本边界切好，这里再兜一道。
+    // PCM16 is 2 bytes per sample; new Int16Array on an odd-length buffer throws RangeError,
+    // and the outer catch swallowing it loses the whole chunk. The server already cuts on sample boundaries; this is a second safeguard.
     if(buf.byteLength & 1) buf = buf.slice(0, buf.byteLength - 1);
     if(!buf.byteLength) return;
     const i16=new Int16Array(buf), f32=new Float32Array(i16.length);
@@ -1632,9 +1632,9 @@ function relayout(){
   }
   function stopPlayback(){ for(const s of scheduled.splice(0)){try{s.stop();}catch(e){}} if(playCtx) nextPlay=playCtx.currentTime; }
 
-  // 一轮的回复只进 chat 一次。answer_done 和 answer_interrupt **都可能到**：
-  // realtime 推音频比播放快，一段十几秒的回复两三秒就推完了，response.done
-  // 先来（记一次），人再插话时前端还在播剩下的（又记一次）——chat 里就出现两遍。
+  // A turn's reply goes into chat only once. answer_done and answer_interrupt **may both arrive**:
+  // realtime pushes audio faster than it plays, a reply of a dozen-plus seconds is fully pushed in two or three, so response.done
+  // comes first (logged once), and when the person barges in the front end is still playing the rest (logged again) — it shows up twice in chat.
   function logTurnOnce(){
     if(turnLogged) return;
     turnLogged = true;
@@ -1651,7 +1651,7 @@ function relayout(){
         stopClip();
         window.vm.setInput(msg.text);
         addTurn('user', msg.text);
-        // 分类本轮文本 → SlotV2 槽（左脑生长据此归槽）；同源 :8000 调 facade
+        // Classify this turn's text → SlotV2 slots (left-brain growth groups by these); same-origin :8000 calls the facade
         fetch('/api/classify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:msg.text})})
           .then(function(r){ return r.json(); })
           .then(function(d){
@@ -1662,7 +1662,7 @@ function relayout(){
           .catch(function(){});
         break;
       case 'memory_hits': onMemoryHits(msg); break;
-      case 'play_memory': pendingClip = msg.memory_id; break;   // 先记着，等回复播完再放
+      case 'play_memory': pendingClip = msg.memory_id; break;   // remember it; play once the reply finishes
       case 'answer_start': stopClip(); setVoiceState('ai'); replyText=''; turnLogged=false; $('reply').textContent=''; ensurePlayback(); break;
       case 'answer_delta': replyText+=msg.text; $('reply').textContent=replyText; break;
       case 'answer_done':
@@ -1674,35 +1674,35 @@ function relayout(){
       case 'answer_interrupt':
         stopPlayback();
         stopClip();
-        pendingClip = null;            // 他都插话了，别再自顾自放那段录音
-        logTurnOnce();                 // 被打断：存他真正听到的那半句
+        pendingClip = null;            // they barged in; don't go on playing that recording anyway
+        logTurnOnce();                 // interrupted: save the half sentence they actually heard
         break;
-      case 'error': console.warn('[backend]', msg.message); $('reply').textContent='⚠ 后端错误：'+msg.message; setVoiceState('idle'); break;
+      case 'error': console.warn('[backend]', msg.message); $('reply').textContent='⚠ Backend error: '+msg.message; setVoiceState('idle'); break;
     }
   }
 
-  // ---- mic（复用 orb.html 机制）----
+  // ---- mic (reuses the orb.html mechanism) ----
   function downsample(f32,from,to){ if(from===to)return f32; const r=from/to,n=Math.round(f32.length/r),o=new Float32Array(n);
     for(let i=0;i<n;i++){const s=i*r,a=Math.floor(s),b=Math.min(a+1,f32.length-1),fr=s-a; o[i]=f32[a]*(1-fr)+f32[b]*fr;} return o; }
   function toPCM16(f32){ const o=new Int16Array(f32.length); for(let i=0;i<f32.length;i++){const s=Math.max(-1,Math.min(1,f32[i])); o[i]=s<0?s*0x8000:s*0x7fff;} return o; }
-  // ---- 流线动效（侧栏左上角）----
-  // 三束正弦叠加出的封闭曲线，每束由多条细线并排组成，形成织网质感。
-  // 常驻运行：没有音频输入时只做缓慢呼吸；一说话就按电平放大形变与转速。
-  // 分析节点复用 startMic 建好的 micCtx —— 一个 source 可以同时连多个节点，
-  // 为可视化再开一个 AudioContext 等于多一份音频线程开销。
+  // ---- Streamline animation (top-left of the sidebar) ----
+  // A closed curve from three superimposed sine strands, each made of several thin parallel lines, giving a woven texture.
+  // Always running: only slow breathing with no audio input; as soon as someone speaks, deformation and spin scale with the level.
+  // The analyser node reuses the micCtx created by startMic — one source can connect to several nodes at once;
+  // opening another AudioContext just for visualisation means one more audio thread of overhead.
   const ORB = {
     strands: 3, linesPerStrand: 7, points: 96, spacingFrac: 0.06,
-    baseRadius: 0.34,                  // 静音时的半径（画布短边的比例）
-    shrink: 0.45,                      // 电平越高基础半径收得越小——丝带向外张开，
-                                       // 圆心那圈跟着收进来，峰值才不会顶出画布
-    idleAmp: 0.14, liveAmp: 1.05,      // 形变幅度：静音时留一点花瓣（起伏 14%），不然转起来看不出来
+    baseRadius: 0.34,                  // radius when silent (fraction of the canvas short side)
+    shrink: 0.45,                      // the higher the level the smaller the base radius — the ribbons flare outward,
+                                       // the ring at the centre pulls in, so the peaks never poke out of the canvas
+    idleAmp: 0.14, liveAmp: 1.05,      // deformation amplitude: keep a few petals when silent (14% undulation), otherwise you cannot see it spin
     idleSpeed: 0.10, liveSpeed: 0.55,
-    rotSpeed: 0.50, liveRotSpeed: 1.30, // 整体自转：静音约 12s 一圈，说话时提到约 5s 一圈
-    strandRotSpread: 0.30,             // 三束差速，外束转得比内束快，织网才有层次
+    rotSpeed: 0.50, liveRotSpeed: 1.30, // overall spin: about 12s per turn when silent, up to about 5s per turn when speaking
+    strandRotSpread: 0.30,             // three strands at different speeds, outer faster than inner, gives the weave depth
     lineWidth: 1.1,
-    liveSquish: 0.88,                  // 满电平时的纵向压扁；静音恒为 1（正圆）
+    liveSquish: 0.88,                  // vertical squash at full level; always 1 when silent (a perfect circle)
     haloBlur: 5, haloAlpha: 0.38, midBlur: 2, midAlpha: 0.46,
-    dark: [45, 115, 245], light: [170, 235, 255],   // 内圈鲜蓝 → 外圈亮青
+    dark: [45, 115, 245], light: [170, 235, 255],   // inner vivid blue → outer bright cyan
   };
   let orbAnalyser=null, orbLevel=0, orbPhase=0, orbRot=0;
   const orbData=new Uint8Array(128);
@@ -1729,14 +1729,14 @@ function relayout(){
     (function frame(now){
       requestAnimationFrame(frame);
       const dt=Math.min((now-last)/1000, 0.1); last=now;
-      // 静音时降到 ~20fps。这个动效常驻在跑，满帧画 3×7×97 条线段再叠三层模糊会
-      // 抢主线程——音频是在主线程上排期的，卡了就表现为"回复变慢"。
-      // 说话时（orbLevel 高）恢复满帧，那才是需要看清起伏的时候。
+      // Drop to ~20fps when silent. This animation always runs; drawing 3×7×97 line segments at full frame rate plus three blur layers would
+      // hog the main thread — audio is scheduled on the main thread, so jank shows up as "replies got slower".
+      // While speaking (orbLevel high) restore full frame rate; that is when the undulation needs to be seen clearly.
       acc += dt;
       if(orbLevel < 0.03 && acc < 0.05) return;
       acc = 0;
 
-      // 电平：起音快、回落慢，免得一停顿图形就塌下去
+      // Level: fast attack, slow release, so the shape does not collapse at every pause
       let lvl=0;
       if(orbAnalyser){
         orbAnalyser.getByteFrequencyData(orbData);
@@ -1746,14 +1746,14 @@ function relayout(){
       orbLevel += (lvl-orbLevel) * (lvl>orbLevel ? 0.35 : 0.06);
 
       const amp=ORB.idleAmp + (ORB.liveAmp-ORB.idleAmp)*orbLevel;
-      const squish=1 - (1-ORB.liveSquish)*orbLevel;   // 静音正圆，说话时略压扁成花瓣
+      const squish=1 - (1-ORB.liveSquish)*orbLevel;   // a perfect circle when silent, slightly squashed into petals when speaking
       orbPhase += dt*(ORB.idleSpeed + (ORB.liveSpeed-ORB.idleSpeed)*orbLevel);
-      // 按 dt 积分而不是用 now 直接算角度：转速随电平变化，直接乘会在电平跳变时闪一下
+      // Integrate over dt instead of computing the angle from now directly: spin speed varies with level, and multiplying directly flickers when the level jumps
       orbRot += dt*(ORB.rotSpeed + (ORB.liveRotSpeed-ORB.rotSpeed)*orbLevel);
       const rot=orbRot;
       const R=Math.min(W,H)*ORB.baseRadius*(1-ORB.shrink*orbLevel);
 
-      // ① 线条画到离屏画布（清晰、不带模糊）
+      // (1) Draw the lines to an offscreen canvas (sharp, no blur)
       g.clearRect(0,0,W,H); g.save(); g.translate(W/2,H/2); g.rotate(rot);
       const grad=g.createRadialGradient(0,0,0,0,0,R*2.1);
       grad.addColorStop(0,   `rgba(${ORB.dark},1)`);
@@ -1762,11 +1762,11 @@ function relayout(){
       const M=ORB.linesPerStrand, half=(M-1)/2, spacing=R*ORB.spacingFrac;
       g.strokeStyle=grad; g.lineWidth=ORB.lineWidth; g.lineJoin='round'; g.lineCap='round';
       for(let si=0; si<ORB.strands; si++){
-        const spin=rot*ORB.strandRotSpread*si;   // 每束再叠一点自己的转速
+        const spin=rot*ORB.strandRotSpread*si;   // each strand adds a bit of its own spin
         const cs=Math.cos(spin), sn=Math.sin(spin);
         for(let k=0;k<M;k++){
           const Rk=R+(k-half)*spacing;
-          const edge=1-Math.abs(k-half)/(half+0.001);   // 束心亮、边缘透
+          const edge=1-Math.abs(k-half)/(half+0.001);   // bright at the strand centre, transparent at the edges
           g.beginPath();
           for(let i=0;i<=ORB.points;i++){
             const th=(i/ORB.points)*Math.PI*2;
@@ -1779,7 +1779,7 @@ function relayout(){
       }
       g.globalAlpha=1; g.restore();
 
-      // ② 主画布：底色 + 中心辉光（亮度也跟电平走）
+      // (2) Main canvas: base colour + centre glow (brightness follows the level too)
       c.clearRect(0,0,W,H);
       c.save(); c.translate(W/2,H/2);
       const bg=c.createRadialGradient(0,0,0,0,0,R*2.1);
@@ -1789,8 +1789,8 @@ function relayout(){
       c.fillStyle=bg; c.beginPath(); c.arc(0,0,R*2.1,0,Math.PI*2); c.fill();
       c.restore();
 
-      // ③ 叠加辉光：柔光 → 中间光 → 清晰线条。
-      // 用 canvas 的 filter:blur 而不是逐段 shadowBlur——后者每条线都要重算模糊，帧率扛不住。
+      // (3) Layered glow: soft light → mid light → sharp lines.
+      // Use canvas filter:blur rather than per-segment shadowBlur — the latter recomputes the blur for every line, the frame rate cannot keep up.
       c.save(); c.globalCompositeOperation='lighter';
       c.filter=`blur(${ORB.haloBlur}px)`; c.globalAlpha=ORB.haloAlpha; c.drawImage(orbGlow,0,0);
       c.filter=`blur(${ORB.midBlur}px)`;  c.globalAlpha=ORB.midAlpha;  c.drawImage(orbGlow,0,0);
@@ -1799,13 +1799,13 @@ function relayout(){
     })(last);
   }
 
-  function attachOrb(src){                     // 麦克风开了：接上分析节点
+  function attachOrb(src){                     // mic opened: connect the analyser node
     if(!micCtx) return;
     orbAnalyser=micCtx.createAnalyser(); orbAnalyser.fftSize=256;
-    src.connect(orbAnalyser);                  // 只分析，不接 destination，不会出声
+    src.connect(orbAnalyser);                  // analyse only, not connected to destination, makes no sound
     $('orb').classList.add('on');
   }
-  function stopOrb(){                          // 麦克风关了：断开，图形自己衰减回静态
+  function stopOrb(){                          // mic closed: disconnect; the shape decays back to static on its own
     if(orbAnalyser){ try{orbAnalyser.disconnect();}catch(e){} orbAnalyser=null; }
     $('orb').classList.remove('on');
   }
@@ -1822,41 +1822,41 @@ function relayout(){
   }
   function stopMic(){ stopOrb(); if(micProc){micProc.disconnect();micProc=null;} if(micStream){micStream.getTracks().forEach(t=>t.stop());micStream=null;} }
 
-  // 打开 WS（文字轮和语音轮共用一条），返回 Promise，open 后 resolve
+  // Open the WS (shared by typed and voice turns); returns a Promise that resolves on open
   function openWS(){
     return new Promise((resolve, reject)=>{
       if(ws && ws.readyState<=1){ ws.readyState===1 ? resolve() : ws.addEventListener('open',()=>resolve(),{once:true}); return; }
-      $('voiceLab').textContent = '连接中… ' + WS_HOST;
+      $('voiceLab').textContent = 'Connecting… ' + WS_HOST;
       console.log('[voice] connecting', WS_URL);
       let opened=false;
-      try{ ws=new WebSocket(WS_URL); }catch(e){ $('voiceLab').textContent='WS 地址无效'; return reject(e); }
+      try{ ws=new WebSocket(WS_URL); }catch(e){ $('voiceLab').textContent='Invalid WS address'; return reject(e); }
       ws.binaryType='arraybuffer';
-      ws.onopen =()=>{ opened=true; $('voiceLab').textContent='已连接'; console.log('[voice] ws open'); resolve(); };
+      ws.onopen =()=>{ opened=true; $('voiceLab').textContent='Connected'; console.log('[voice] ws open'); resolve(); };
       ws.onclose=ev=>{
         console.log('[voice] ws closed  code=', ev.code, 'reason=', JSON.stringify(ev.reason), 'wasClean=', ev.wasClean);
-        recording=false; talkBtn.textContent='开始对话'; talkBtn.classList.remove('live'); setVoiceState('idle'); ws=null;
-        if(!opened) $('voiceLab').textContent = (ev.code===1006? '连不上 '+WS_HOST+'（:8787 没在跑/端口不对）' : '连接被关 code='+ev.code);
-        else $('voiceLab').textContent = '连接已关闭 code='+ev.code+(ev.reason?(' · '+ev.reason):'');
+        recording=false; talkBtn.textContent='Start talking'; talkBtn.classList.remove('live'); setVoiceState('idle'); ws=null;
+        if(!opened) $('voiceLab').textContent = (ev.code===1006? 'Cannot reach '+WS_HOST+' (:8787 not running / wrong port)' : 'Connection closed code='+ev.code);
+        else $('voiceLab').textContent = 'Connection closed code='+ev.code+(ev.reason?(' · '+ev.reason):'');
         reject(new Error('ws closed '+ev.code));
       };
       ws.onerror=()=>{ console.warn('[voice] ws error'); };
-      ws.onmessage=ev=>{ if(ev.data instanceof ArrayBuffer){ try{playPcm(ev.data);}catch(e){console.warn('[audio] 丢帧',e);} return; } handle(JSON.parse(ev.data)); };
+      ws.onmessage=ev=>{ if(ev.data instanceof ArrayBuffer){ try{playPcm(ev.data);}catch(e){console.warn('[audio] dropped frame',e);} return; } handle(JSON.parse(ev.data)); };
     });
   }
 
-  async function start(){                       // 语音：麦克风 + WS
+  async function start(){                       // voice: microphone + WS
     if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
-      $('voiceLab').textContent = '请用 http://localhost:8000 打开（不能直接双击 html）'; return;
+      $('voiceLab').textContent = 'Open via http://localhost:8000 (the html cannot be opened by double-clicking)'; return;
     }
-    ensurePlayback();          // 必须在这个点击里建 AudioContext，见函数注释
-    try{ await startMic(); }catch(e){ $('voiceLab').textContent='麦克风被拒绝/不可用'; console.warn(e); return; }
+    ensurePlayback();          // the AudioContext must be created inside this click, see the function comment
+    try{ await startMic(); }catch(e){ $('voiceLab').textContent='Microphone denied/unavailable'; console.warn(e); return; }
     try{ await openWS(); }catch(e){ stopMic(); return; }
-    recording=true; talkBtn.textContent='结束对话'; talkBtn.classList.add('live'); setVoiceState('user');
+    recording=true; talkBtn.textContent='End session'; talkBtn.classList.add('live'); setVoiceState('user');
   }
-  function stop(){ recording=false; stopMic(); stopPlayback(); if(ws){ws.close();ws=null;} talkBtn.textContent='开始对话'; talkBtn.classList.remove('live'); setVoiceState('idle'); }
-  talkBtn.addEventListener('click', ()=>{ try{ recording? stop() : start(); }catch(e){ console.error(e); $('voiceLab').textContent='出错: '+e.message; } });
+  function stop(){ recording=false; stopMic(); stopPlayback(); if(ws){ws.close();ws=null;} talkBtn.textContent='Start talking'; talkBtn.classList.remove('live'); setVoiceState('idle'); }
+  talkBtn.addEventListener('click', ()=>{ try{ recording? stop() : start(); }catch(e){ console.error(e); $('voiceLab').textContent='Error: '+e.message; } });
 
-  // 文字轮：打字回车 → 走后端 {type:user_text}，完全绕过 ASR（只需 OpenAI）
+  // Typed turn: type and press Enter → goes to the backend as {type:user_text}, bypassing ASR entirely (only OpenAI needed)
   const textIn = $('textIn');
   textIn.addEventListener('keydown', async e=>{
     if(e.key!=='Enter') return;
@@ -1867,15 +1867,15 @@ function relayout(){
   });
 
 
-  // 服务端判断这一轮问的是"一段声音"时（见 run.py 的 _replay_id），等助手说完
-  // 就把当时那段原声放出来 —— 不用他自己去点卡片上的 ▶。
-  // 必须等：回复是排队播的（nextPlay 是队尾时间），提前放就跟人声叠在一起了。
-  // 走**放回复的那个 AudioContext**，不要用 new Audio()。
-  // 用 <audio> 元素时：play() 是在 setTimeout 里调的，脱离了用户手势，Chrome 的
-  // 自动播放策略直接拒绝——但元素照样会去 fetch，服务端日志上是一条漂亮的
-  // 206，听感却是一点声音都没有，报错只躺在浏览器 console 里。
-  // playCtx 是在"开始对话"那个点击手势里建的，往它上面排 buffer 不受任何限制，
-  // 而且能直接接在回复的队尾（nextPlay）后面，不用再猜要等多久。
+  // When the server decides this turn asks about "a sound" (see run.py's _replay_id), once the assistant finishes
+  // play back the original audio from that moment — no need for them to click the ▶ on the card themselves.
+  // Must wait: replies are played from a queue (nextPlay is the queue tail time); playing early overlaps the voice.
+  // Use **the AudioContext that plays replies**, not new Audio().
+  // With an <audio> element: play() is called inside a setTimeout, detached from the user gesture, and Chrome's
+  // autoplay policy rejects it outright — yet the element still fetches, so the server log shows a nice
+  // 206 while you hear nothing at all, and the error lies only in the browser console.
+  // playCtx was created in the "Start talking" click gesture, so scheduling buffers on it is unrestricted,
+  // and it can follow the reply's queue tail (nextPlay) directly, no guessing how long to wait.
   async function playClipWhenQuiet(){
     const mid = pendingClip; pendingClip = null;
     if(!mid) return;
@@ -1885,25 +1885,25 @@ function relayout(){
       const buf = await ctx.decodeAudioData(raw);
       const src = ctx.createBufferSource();
       src.buffer = buf; src.connect(ctx.destination);
-      const at = Math.max(ctx.currentTime + 0.05, nextPlay);   // 接在回复播完之后
+      const at = Math.max(ctx.currentTime + 0.05, nextPlay);   // after the reply finishes playing
       src.start(at); nextPlay = at + buf.duration;
-      scheduled.push(src);                                     // 被打断时一起停掉
+      scheduled.push(src);                                     // stopped together on interruption
       clipSrc = src;
       src.onended = function(){
         if(clipSrc === src) clipSrc = null;
         const i = scheduled.indexOf(src); if(i>=0) scheduled.splice(i,1);
       };
-      console.log('[audio] 原声回放', mid, buf.duration.toFixed(1)+'s @', at.toFixed(2));
-    }catch(err){ console.warn('[audio] 原声回放失败', err); }
+      console.log('[audio] original clip replay', mid, buf.duration.toFixed(1)+'s @', at.toFixed(2));
+    }catch(err){ console.warn('[audio] original clip replay failed', err); }
   }
 
-  // 掐掉正在放的那段原声。
+  // Cut the original clip that is playing.
   //
-  // 服务端这时候帮不上忙：原声是接在回复**播完之后**才开始放的，那会儿
-  // response.done 早就到了、hearing() 为假，你插话根本不会触发 answer_interrupt。
-  // 但前端自己知道你开口了（partial_transcript 一直在来），直接掐就行。
-  // 还要把 nextPlay 收回来——排那 15 秒时它被推到了 15 秒之后，不收回来的话
-  // 下一轮回复的音频只能排在原声后面，听感就是"等它放完才肯回话"。
+  // The server cannot help here: the clip starts only **after the reply has finished playing**, by which time
+  // response.done has long arrived and hearing() is false, so barging in will never trigger answer_interrupt.
+  // But the front end knows you started speaking (partial_transcript keeps arriving), so just cut it.
+  // Also pull nextPlay back — queuing those 15 seconds pushed it 15 seconds out; without pulling it back
+  // the next reply's audio can only queue after the clip, which sounds like "it waits for that to finish before answering".
   function stopClip(){
     if(!clipSrc) return;
     try{ clipSrc.stop(); }catch(e){}
@@ -1912,32 +1912,32 @@ function relayout(){
     if(playCtx) nextPlay = playCtx.currentTime;
   }
 
-  // 记忆卡片上的 ▶：把这条记忆当时那段原声放回来（GET /api/audio/{memory_id}）。
-  // 事件委托绑在容器上——卡片每轮都重绘，绑在按钮上会随着重绘失效。
+  // The ▶ on a memory card: play back the original audio of this memory from that moment (GET /api/audio/{memory_id}).
+  // Event delegation on the container — cards redraw every turn, so a listener on the button would be lost on redraw.
   let memAudio = null;
   document.addEventListener('click', e=>{
     const b = e.target.closest('.play[data-mid]'); if(!b) return;
     if(memAudio){ memAudio.pause(); memAudio = null; }
-    stopPlayback();                       // 先把助手正在说的掐掉，别叠在一起
+    stopPlayback();                       // first cut what the assistant is saying so they don't overlap
     memAudio = new Audio('/api/audio/' + b.dataset.mid);
     b.textContent = '⏸';
     memAudio.onended = memAudio.onerror = ()=>{ b.textContent = '▶'; memAudio = null; };
-    memAudio.play().catch(err=>{ console.warn('[audio] 播放失败', err); b.textContent='▶'; });
+    memAudio.play().catch(err=>{ console.warn('[audio] playback failed', err); b.textContent='▶'; });
   });
 
 
-  /* ================= session：一次对话一条，像 Claude 的 sidebar =================
-     全部放在浏览器内存里，不动后端。每条 session 记一来一回的原文；
-     标题就取这一轮用户说的第一句话——不额外调模型去总结。 */
+  /* ================= session: one per conversation, like Claude's sidebar =================
+     Everything lives in browser memory; the backend is untouched. Each session records the verbatim back-and-forth;
+     the title is the first thing the user said this turn — no extra model call to summarise. */
 
   var sessions = [];          // [{id, title, turns:[{role:'user'|'ai', text}]}]
   var currentId = 0;
   var nextId = 1;
 
   function newSession() {
-    var s = { id: nextId, title: '新对话', turns: [], named: false };
+    var s = { id: nextId, title: 'New chat', turns: [], named: false };
     nextId = nextId + 1;
-    sessions.unshift(s);      // 新的排最前
+    sessions.unshift(s);      // newest first
     currentId = s.id;
     renderSessions();
     renderChat();
@@ -1961,7 +1961,7 @@ function relayout(){
     if (!text) return;
     var s = currentSession();
     s.turns.push({ role: role, text: text });
-    // 先用用户说的第一句顶着，助手答完再换成概括出来的标题
+    // Use the user's first line as a stand-in; replace it with the summarised title once the assistant answers
     if (!s.namedAt && role === 'user') {
       s.title = text.length > 20 ? text.slice(0, 20) + '…' : text;
     }
@@ -1970,10 +1970,10 @@ function relayout(){
     renderChat();
   }
 
-  //: 攒到这些轮数时（重新）起一次标题。
-  //  只在第一轮问答之后命名一次是 ChatGPT 的做法，但它假设开场就切入正题；
-  //  实际开场常是"喂喂喂测试一下"，标题就永远卡在那儿。所以对话长起来之后
-  //  再重命名——第 8 轮的时候，这段聊的是什么已经清楚了。
+  //: At these turn counts, (re)generate a title.
+  //  Naming only once after the first Q&A is ChatGPT's approach, but it assumes the opening gets straight to the point;
+  //  in practice the opening is often "hello hello testing", and the title gets stuck there forever. So once the chat grows,
+  //  rename it — by turn 8 it is clear what this conversation is about.
   var RENAME_AT = [2, 8, 20];
 
   function shouldRename(s) {
@@ -1981,7 +1981,7 @@ function relayout(){
     var last = s.namedAt || 0;
     for (var i = 0; i < RENAME_AT.length; i++) {
       if (n >= RENAME_AT[i] && last < RENAME_AT[i]) {
-        // 开场全是"喂""测试"这种时先别浪费一次调用，等下一个档位
+        // If the opening is all "hello" / "testing", don't waste a call yet; wait for the next threshold
         var chars = 0;
         for (var j = 0; j < s.turns.length; j++) {
           if (s.turns[j].role === 'user') chars += s.turns[j].text.length;
@@ -1992,14 +1992,14 @@ function relayout(){
     return false;
   }
 
-  // 让模型用一句话概括这段对话，当 sidebar 的标题。
-  // 异步的——标题晚一秒出来无所谓，不能挡着对话。
+  // Have the model summarise this conversation in one sentence, as the sidebar title.
+  // Async — a title a second late doesn't matter; it must not block the conversation.
   async function nameSession(s) {
-    s.namedAt = s.turns.length;           // 记下在第几轮命名的，别同一档位重复叫
+    s.namedAt = s.turns.length;           // record the turn count at naming, so the same threshold is not called twice
     var lines = [];
     for (var i = 0; i < s.turns.length; i++) {
-      var who = s.turns[i].role === 'user' ? '用户' : '助手';
-      lines.push(who + '：' + s.turns[i].text);
+      var who = s.turns[i].role === 'user' ? 'user' : 'assistant';
+      lines.push(who + ': ' + s.turns[i].text);
     }
     try {
       var res = await fetch('/api/title', {
@@ -2013,7 +2013,7 @@ function relayout(){
         renderSessions();
       }
     } catch (err) {
-      console.warn('[title] 生成失败，沿用第一句', err);
+      console.warn('[title] generation failed, keeping the first line', err);
     }
   }
 
@@ -2035,7 +2035,7 @@ function relayout(){
       t.textContent = s.title;
       var n = document.createElement('span');
       n.className = 'n';
-      n.textContent = s.turns.length + ' 轮';
+      n.textContent = s.turns.length + ' turns';
       li.appendChild(t);
       li.appendChild(n);
       li.dataset.id = s.id;
@@ -2050,7 +2050,7 @@ function relayout(){
     if (s === null || s.turns.length === 0) {
       var e = document.createElement('div');
       e.className = 'empty';
-      e.textContent = '还没有对话。说点什么，或在左边打字。';
+      e.textContent = 'No conversation yet. Say something, or type on the left.';
       box.appendChild(e);
       return;
     }
@@ -2060,7 +2060,7 @@ function relayout(){
       wrap.className = turn.role === 'user' ? 'turn user' : 'turn ai';
       var who = document.createElement('div');
       who.className = 'who';
-      who.textContent = turn.role === 'user' ? '你' : 'VoiceMem';
+      who.textContent = turn.role === 'user' ? 'You' : 'SuperMem';
       var said = document.createElement('div');
       said.className = 'said';
       said.textContent = turn.text;
@@ -2081,14 +2081,14 @@ function relayout(){
   document.getElementById('newSess').addEventListener('click', newSession);
 
 
-  /* ---- 一键下载记忆 ----
-     直接拿 /api/memories 那份快照（打开页面铺脑图用的就是它），存成 json。
-     文件名用输入框里的，留空就用默认的。 */
+  /* ---- One-click memory download ----
+     Takes the /api/memories snapshot directly (the same one used to lay out the brain map on page open) and saves it as json.
+     The file name comes from the input box; empty means the default. */
 
   function safeFileName(name) {
     var n = name.trim();
-    if (n === '') n = 'voicemem-memories';
-    n = n.replace(/[\\/:*?"<>|]/g, '-');      // 这些字符在文件名里不合法
+    if (n === '') n = 'supermem-memories';
+    n = n.replace(/[\\/:*?"<>|]/g, '-');      // these characters are invalid in file names
     if (n.slice(-5) !== '.json') n = n + '.json';
     return n;
   }
@@ -2108,7 +2108,7 @@ function relayout(){
   async function downloadMemories() {
     var btn = document.getElementById('dlBtn');
     var old = btn.textContent;
-    btn.textContent = '导出中…';
+    btn.textContent = 'Exporting…';
     try {
       var res = await fetch('/api/memories');
       if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -2120,17 +2120,17 @@ function relayout(){
       };
       var name = safeFileName(document.getElementById('dlName').value);
       saveTextAsFile(JSON.stringify(out, null, 2), name);
-      btn.textContent = '已下载';
+      btn.textContent = 'Downloaded';
     } catch (err) {
-      console.warn('[download] 失败', err);
-      btn.textContent = '下载失败';
+      console.warn('[download] failed', err);
+      btn.textContent = 'Download failed';
     }
     setTimeout(function () { btn.textContent = old; }, 1600);
   }
 
   document.getElementById('dlBtn').addEventListener('click', downloadMemories);
 
-  /* ---- 右板块：Chat / Memory Space 切换 ---- */
+  /* ---- Right block: Chat / Memory Space toggle ---- */
   function showChat() {
     document.getElementById('viewChat').classList.remove('hide');
     document.getElementById('viewMem').classList.add('hide');
@@ -2143,7 +2143,7 @@ function relayout(){
     document.getElementById('viewMem').classList.remove('hide');
     document.getElementById('tabChat').classList.remove('on');
     document.getElementById('tabMem').classList.add('on');
-    // 脑图是按容器尺寸画的，隐藏时算出来的是 0；显示后重算一次。
+    // The brain map is drawn from the container size, which computes to 0 while hidden; recompute once after showing.
     if (window.brainResize) window.brainResize();
   }
 
@@ -2152,24 +2152,24 @@ function relayout(){
 
   newSession();
 
-  startOrb();          // 流线常驻：没接麦克风时按 idleAmp 缓慢呼吸
+  startOrb();          // the streamline is always on: breathes slowly at idleAmp when no mic is connected
 
-  // 打开页面先把库里已有的记忆铺成节点——不然一进来是张空图，看不出"它记得我"。
-  // 之后说话新增的节点走 onMemoryHits 那条路，两边共用 seen 去重，不会重复长。
+  // On page open, first lay out the existing memories in the store as nodes — otherwise you land on an empty map and cannot see "it remembers me".
+  // Nodes added later while talking go through onMemoryHits; both share seen for dedup, so nothing grows twice.
   //
-  // ?fresh=1 —— 新访客模式：跳过这一步，脑图从**空的**开始，节点随着他自己说话
-  // 一个个长出来。给别人试用时用这个链接：他看到的是"记忆从零建立"的过程，而不是
-  // 一屏别人的记忆。其余一切（左栏、连线、关系、检索射线、配色动效）完全一样。
+  // ?fresh=1 — new-visitor mode: skip this step, the brain map starts **empty**, and nodes grow one by one
+  // as they speak. Use this link when letting others try it: they see "memory built from zero", rather than
+  // a screen of someone else's memories. Everything else (left rail, links, relations, retrieval beams, colours and animation) is exactly the same.
   const FRESH = params.get('fresh') === '1';
   (async ()=>{
-    if(FRESH){ console.log('[graph] 新访客模式：脑图从空开始'); return; }
+    if(FRESH){ console.log('[graph] new-visitor mode: brain map starts empty'); return; }
     try{
       const r = await fetch('/api/memories');
       if(!r.ok) return;
       const m = await r.json();
       linkByEntity(m.left || []);
-      // 右脑铺的是 slot→entity 那一层的 entity（"委屈""讨厌坚果和过敏"），
-      // 挂在下面的 heartnote 存起来，点开节点时显示"感受 + 为什么"。
+      // The right brain lays out the entity layer of slot→entity ("wronged", "dislikes nuts and allergies"),
+      // and stores the heartnotes hanging below, shown as "feeling + why" when a node is opened.
       for (var k = 0; k < (m.right || []).length; k++) {
         var item = m.right[k];
         var nid = growRightIn(item.cluster || 'experiences', item.text);
@@ -2177,8 +2177,8 @@ function relayout(){
           rbDetail[nid] = { slot: item.slot, notes: item.notes || [] };
         }
       }
-      console.log('[seed] 已有记忆 left=',(m.left||[]).length,'right=',(m.right||[]).length);
-    }catch(e){ console.warn('[seed] 读取已有记忆失败', e); }
+      console.log('[seed] existing memories left=',(m.left||[]).length,'right=',(m.right||[]).length);
+    }catch(e){ console.warn('[seed] failed to read existing memories', e); }
   })();
 })();
 </script>

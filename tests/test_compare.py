@@ -12,8 +12,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from web.compare import (Arm, CompareState, fan_out, parse_arms,  # noqa: E402
-                         register_routes, sanitize)
+from web.compare import (Arm, CompareState, default_provider, fan_out,  # noqa: E402
+                         parse_arms, register_routes, sanitize)
 
 
 def _provider(chunks, fail_after=None):
@@ -387,6 +387,51 @@ class ApiTest(unittest.TestCase):
 
         self.assertTrue(self.state.enabled)
         self.assertEqual(self.state.arms[0].model, "gpt-4o")
+
+
+class CartridgeArmTest(unittest.TestCase):
+    """A panel can carry its memory as a KV cartridge instead of a system block."""
+
+    def test_flag_round_trips_through_the_api_shape(self):
+        arms = parse_arms([{"label": "a", "cartridge": True}], (Arm("a"), Arm("b", memory=False)))
+        self.assertTrue(arms[0].cartridge)
+        self.assertFalse(arms[1].cartridge)
+        self.assertTrue(sanitize(CompareState(arms=arms))["arms"][0]["cartridge"])
+
+    def test_cartridge_hook_serves_only_cartridge_arms_with_memory(self):
+        used = []
+
+        def cartridge(arm):
+            async def fn(text, memory_context=""):
+                used.append(arm.label)
+                yield "from cartridge"
+            fn.last_usage = {"prompt_tokens": 100, "cached_tokens": 90}
+            return fn
+
+        plain = default_provider("sys", cartridge)
+        cart_arm = plain(Arm("a", memory=True, cartridge=True))
+        self.assertIs(getattr(cart_arm, "last_usage", None) is not None, True)
+        # memory off: nothing to carry, so the hook must not be used
+        no_mem = Arm("b", memory=False, cartridge=True)
+        self.assertIsNone(getattr(plain(no_mem), "last_usage", None))
+
+    def test_engine_usage_reaches_cmp_done(self):
+        def provider(arm):
+            async def fn(text, memory_context=""):
+                yield "hi"
+            fn.last_usage = {"prompt_tokens": 1000, "cached_tokens": 950} if arm.cartridge else None
+            return fn
+
+        send, sent = _collect()
+        result = asyncio.run(fan_out("q", "ctx", (Arm("a", cartridge=True), Arm("b", memory=False)),
+                                     send, provider=provider))
+        done = {m["panel"]: m for m in sent if m["type"] == "cmp_done"}
+        self.assertEqual(done["a"]["usage"]["cached_tokens"], 950)
+        self.assertNotIn("usage", done["b"])
+        self.assertEqual(result["usage"], {"a": {"prompt_tokens": 1000, "cached_tokens": 950}})
+        start = {m["panel"]: m for m in sent if m["type"] == "cmp_start"}
+        self.assertTrue(start["a"]["cartridge"])
+        self.assertFalse(start["b"]["cartridge"])
 
 
 if __name__ == "__main__":

@@ -3,13 +3,13 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "voicemem"
+name = "supermem"
 version = "0.2.3"
 description = "Left-brain/right-brain memory framework with an audio-native perception layer (scene/speaker/emotion)."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "Apache-2.0" }
-authors = [{ name = "Lang Jiaqi" }]
+authors = [{ name = "Unpod" }]
 keywords = ["memory", "voice", "agent", "llm", "speech", "rag"]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -19,7 +19,7 @@ classifiers = [
     "Topic :: Multimedia :: Sound/Audio :: Speech",
 ]
 
-# `pip install voicemem` installs every built-in component in one command: ASR, VAD,
+# `pip install supermem` installs every built-in component in one command: ASR, VAD,
 # speaker ID, scene, emotion, local embedding, plus the runtime deps for the web demo
 # and examples/.
 #
@@ -98,13 +98,9 @@ slm = [
 #   local TTS (TTS_BACKEND=local)      pip install piper-tts   or   pip install voxcpm
 #   the training scripts in finetune/  pip install ms-swift==4.5.2 bitsandbytes
 
-[project.urls]
-Homepage = "https://github.com/lang-jiaqi/Voicemem_open"
-Repository = "https://github.com/lang-jiaqi/Voicemem_open"
-Issues = "https://github.com/lang-jiaqi/Voicemem_open/issues"
 
 [tool.setuptools.packages.find]
-include = ["voicemem*"]
+include = ["supermem*"]
 
 [tool.setuptools.package-data]
 # The prompt text under data/ is read at runtime (see
@@ -114,5 +110,5 @@ include = ["voicemem*"]
 # assets/*.wav are the sample clips used by the README and examples (1MB total). Leave
 # them out of the package and a pip install followed by the README's first example is a
 # LibsndfileError -- which is someone's first impression of this project.
-# voicemem.sample_audio() looks in the repo's assets/ first and falls back to this copy.
+# supermem.sample_audio() looks in the repo's assets/ first and falls back to this copy.
 "*" = ["data/*.txt", "*.txt", "assets/*.wav"]

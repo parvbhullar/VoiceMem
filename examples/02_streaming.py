@@ -1,4 +1,4 @@
-"""流式接口：喂音频块，说完一轮就拿到这一轮的全部感知结果。
+"""Streaming API: feed audio chunks and get all perception results for the turn as soon as it ends.
 
     python examples/02_streaming.py speech.wav
 """
@@ -11,22 +11,22 @@ from pprint import pprint
 import numpy as np
 import soundfile as sf
 
-from voicemem import VoiceMem
+from supermem import SuperMem
 
-# 本地 E5：检索 0 网络，投机预取才来得及（跟 web demo 同一套配置）
-vm = VoiceMem.from_config({
+# Local E5: retrieval uses no network, so speculative prefetch fits in time (same config as the web demo)
+vm = SuperMem.from_config({
     "mode": "normal",
     "embedding": {"provider": "local"},
     "slots": {"provider": "local"},
-    "api_key": os.environ["OPENAI_API_KEY"],   # 只用于写入侧抽事实
-    # 单独一个库：本地 E5 是 384 维，跟默认库（OpenAI 1536 维）混用会直接报
+    "api_key": os.environ["OPENAI_API_KEY"],   # only used for fact extraction on the write side
+    # A separate store: local E5 is 384-dim, and mixing with the default store (OpenAI, 1536-dim) fails with
     # shapes (n,384) and (1536,) not aligned
     "memory_root": str(Path(__file__).resolve().parent / "example_memory"),
 })
 WAV = sys.argv[1] if len(sys.argv) > 1 else str(
     Path(__file__).resolve().parent.parent / "assets/speech.wav")
 
-# 本地模型懒加载：不预热的话第一块音频要等二十几秒的模型加载
+# Local models load lazily: without warmup the first audio chunk waits twenty-odd seconds for model loading
 vm.warmup(verbose=True)
 
 

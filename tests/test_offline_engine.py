@@ -1,7 +1,7 @@
 import unittest
 
-from voicemem.lang import set_memory_language
-from voicemem.rightbrain.brain import RightBrain
+from supermem.lang import set_memory_language
+from supermem.rightbrain.brain import RightBrain
 
 
 class _RecordingTraitStore:
@@ -27,8 +27,8 @@ class ReactionTraitLanguageTest(unittest.TestCase):
             "significant": True,
             "assistant_helped": False,
             "user_trait": {
-                "slot": "表达风格",
-                "label": "不满时直说不绕弯",
+                "slot": "expression_style",
+                "label": "\u4e0d\u6ee1\u65f6\u76f4\u8bf4\u4e0d\u7ed5\u5f2f",  # Chinese: "speaks plainly when dissatisfied"
             },
         }
 
@@ -51,7 +51,7 @@ class ReactionTraitLanguageTest(unittest.TestCase):
             "significant": True,
             "assistant_helped": False,
             "user_trait": {
-                "slot": "表达风格",
+                "slot": "expression_style",
                 "label": "speaks plainly when dissatisfied",
             },
         }
@@ -80,7 +80,7 @@ class ReactionTraitLanguageTest(unittest.TestCase):
 
         self.assertIn("The assistant's reply:", prompts[0])
         self.assertIn("shuts down when given solutions", prompts[0])
-        self.assertNotIn("被直接给方案会关闭", prompts[0])
+        self.assertNotIn("\u88ab\u76f4\u63a5\u7ed9\u65b9\u6848\u4f1a\u5173\u95ed", prompts[0])
 
 
 if __name__ == "__main__":

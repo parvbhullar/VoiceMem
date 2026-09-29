@@ -1,19 +1,19 @@
-"""一个双工音频设备 + 回声消除，04 / 05 共用。
+"""One full-duplex audio device + echo cancellation, shared by 04 / 05.
 
-外放时麦克风录到的是「你的声音 + 喇叭里助手的声音」。AEC 拿喇叭正在放的那份信号
-（far-end）作参考，从麦克风信号里把它减掉，剩下的才是真正的人声。不做这一步：
-转写会把助手的话当成你说的存进记忆，VAD 会一直以为有人在说话——助手一开口就把
-自己掐了。
+With speakers on, the mic records "your voice + the assistant's voice from the speaker". AEC takes the signal the
+speaker is playing (far-end) as reference and subtracts it from the mic signal; what remains is the real human voice.
+Without this step, transcription stores the assistant's words in memory as if you said them, and VAD keeps thinking
+someone is talking -- the assistant cuts itself off as soon as it starts speaking.
 
-所以播放必须和录音走**同一个** `sd.Stream`：只有在同一个回调里，才拿得到跟这一帧
-麦克风严格对齐的 far-end。
+So playback must go through the **same** `sd.Stream` as recording: only within the same callback can you get a
+far-end that is exactly aligned with this mic frame.
 
     audio = AudioIO(loop, on_barge_in=stop.set)
     audio.start()
-    pcm = await audio.mic.get()      # 已经消过回声的 16k PCM16
-    audio.play(pcm24k)               # 24k 的 TTS/realtime 音频，内部降到 16k
+    pcm = await audio.mic.get()      # echo-cancelled 16k PCM16
+    audio.play(pcm24k)               # 24k TTS/realtime audio, downsampled to 16k internally
 
-（examples/03 里内联了一份同样的东西，那个例子刻意保持单文件自足。）
+(examples/03 inlines a copy of the same thing; that example deliberately stays a self-contained single file.)
 """
 import asyncio
 import threading
@@ -22,19 +22,20 @@ import numpy as np
 import sounddevice as sd
 from pywebrtc_audio import AudioProcessor
 
-from voicemem.utils.audio.stream_io import resample
+from supermem.utils.audio.stream_io import resample
 
-SR = 16000        # WebRTC APM 只吃 8/16/32/48k；voicemem 内部也是 16k，正好
-BLOCK = 160       # 10ms，APM 的原生帧长
-PLAY_SR = 24000   # TTS 和 realtime 吐出来的都是 24k
+SR = 16000        # WebRTC APM only takes 8/16/32/48k; supermem is 16k internally too, a perfect fit
+BLOCK = 160       # 10ms, APM's native frame length
+PLAY_SR = 24000   # both TTS and realtime output 24k
 
 
 class AudioIO:
-    """录音（消过回声）+ 播放 + 打断判定，一个设备全包。
+    """Recording (echo-cancelled) + playback + barge-in detection, all on one device.
 
-    ``on_barge_in``：助手说话时听到人声持续 ``barge_s``，就在事件循环里回调一次
-    （已经先把播放缓冲清了）。``grace_s`` 是刚开口那段宽限期——那时候麦克风里几乎
-    只有助手自己的声音，AEC 还没收敛，很容易一出声就把自己掐了。
+    ``on_barge_in``: when human voice is heard for ``barge_s`` while the assistant is speaking, it is called once on
+    the event loop (after the playback buffer has already been cleared). ``grace_s`` is a grace period right after
+    the assistant starts -- then the mic holds almost only the assistant's own voice and AEC has not converged yet,
+    so it would easily cut itself off at the first sound.
     """
 
     def __init__(self, loop, on_barge_in=None, *, threshold=0.3,
@@ -44,11 +45,11 @@ class AudioIO:
         self.on_barge_in = on_barge_in
         self.threshold, self.barge_s, self.grace_s = threshold, barge_s, grace_s
 
-        self._buf = bytearray()                 # 播放缓冲，16k int16
+        self._buf = bytearray()                 # playback buffer, 16k int16
         self._lock = threading.Lock()
-        self._active = threading.Event()        # 助手正在说
-        self._spoke_s = 0.0                     # 连续听到人声多久
-        self._said_s = 0.0                      # 助手这一轮说了多久（宽限期用）
+        self._active = threading.Event()        # assistant is speaking
+        self._spoke_s = 0.0                     # how long human voice has been heard continuously
+        self._said_s = 0.0                      # how long the assistant has spoken this turn (for the grace period)
 
         self.aec = AudioProcessor(sample_rate=SR, echo_cancellation=True,
                                   noise_suppression=True, auto_gain_control=False,
@@ -56,7 +57,7 @@ class AudioIO:
         self.stream = sd.Stream(samplerate=SR, blocksize=BLOCK, channels=1,
                                 dtype="float32", callback=self._cb)
 
-    # ── 音频回调（在音频线程上，不许有阻塞和网络）────────────────────────────
+    # ── Audio callback (on the audio thread: no blocking and no network) ────────
     def _pull(self, n) -> np.ndarray:
         with self._lock:
             take = bytes(self._buf[:n * 2])
@@ -67,9 +68,9 @@ class AudioIO:
         return out
 
     def _cb(self, indata, outdata, frames, _time, _status):
-        far = self._pull(frames)                       # 这一帧喇叭要放的
+        far = self._pull(frames)                       # what the speaker plays for this frame
         outdata[:, 0] = far
-        clean = self.aec.process(indata[:, 0].copy(), far)   # 从麦克风里减掉它
+        clean = self.aec.process(indata[:, 0].copy(), far)   # subtract it from the mic
 
         if self._active.is_set():
             self._said_s += frames / SR
@@ -78,20 +79,20 @@ class AudioIO:
             if self._spoke_s >= self.barge_s and self._said_s >= self.grace_s:
                 self._active.clear()
                 self._spoke_s = 0.0
-                self.stop_playing()                    # 先停播：本地操作，立刻生效
+                self.stop_playing()                    # stop playback first: a local operation, takes effect immediately
                 if self.on_barge_in:
                     self.loop.call_soon_threadsafe(self.on_barge_in)
         else:
             self._spoke_s = 0.0
 
         pcm = (np.clip(clean, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
-        # 满了就丢：助手说话那几秒没人取，攒着也没用，反而让下一轮的 ASR 落后一大截
+        # drop when full: nobody consumes during the seconds the assistant talks; keeping it only makes the next turn's ASR lag far behind
         self.loop.call_soon_threadsafe(
             lambda: None if self.mic.full() else self.mic.put_nowait(pcm))
 
-    # ── 播放侧 ────────────────────────────────────────────────────────────
+    # ── Playback side ─────────────────────────────────────────────────────
     def play(self, pcm24: bytes):
-        """24k PCM16 进播放缓冲（内部降到 16k）。这份也正是 AEC 的参考信号。"""
+        """Put 24k PCM16 into the playback buffer (downsampled to 16k internally). This is also exactly the AEC reference signal."""
         f = np.frombuffer(pcm24, np.int16).astype(np.float32) / 32768.0
         f16 = resample(f, src=PLAY_SR, dst=SR)
         with self._lock:
@@ -105,7 +106,7 @@ class AudioIO:
         with self._lock:
             return bool(self._buf)
 
-    # ── 助手这一轮的起止（打断判定要知道它在不在说话）────────────────────────
+    # ── Start/end of the assistant's turn (barge-in detection needs to know if it is speaking) ──
     def assistant_started(self):
         self._spoke_s = self._said_s = 0.0
         self._active.set()

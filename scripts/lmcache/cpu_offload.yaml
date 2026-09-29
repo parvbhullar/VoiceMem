@@ -1,0 +1,6 @@
+# LMCache for the KV-cartridge engine: cartridges' KV is kept in GPU (vLLM
+# prefix cache) and offloaded to CPU RAM instead of being evicted, so a caller
+# whose KV fell out of GPU memory is recalled from DRAM, not recomputed.
+chunk_size: 256
+local_cpu: true
+max_local_cpu_size: 20        # GB of host RAM for cartridges

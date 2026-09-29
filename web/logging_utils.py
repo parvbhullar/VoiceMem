@@ -60,9 +60,9 @@ def setup_file_logging(root: Path, requested: str = "") -> Path:
         if not path.is_absolute():
             path = root / path
     else:
-        log_dir = Path(os.environ.get("VOICEMEM_LOG_DIR", root / "results" / "logs"))
+        log_dir = Path(os.environ.get("SUPERMEM_LOG_DIR", root / "results" / "logs"))
         stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-        path = log_dir / f"voicemem-{stamp}-{os.getpid()}.log"
+        path = log_dir / f"supermem-{stamp}-{os.getpid()}.log"
     path.parent.mkdir(parents=True, exist_ok=True)
     logfile = path.open("a", encoding="utf-8", buffering=1)
     lock = threading.RLock()

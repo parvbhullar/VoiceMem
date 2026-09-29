@@ -1,6 +1,6 @@
 /* Brain signal cascade: the animation must trace the real pipeline, staged.
  *
- * Loads the actual VMBrain module out of web/voicemem.html against a stub
+ * Loads the actual VMBrain module out of web/supermem.html against a stub
  * canvas/DOM, then inspects the scheduled beams. Run: node tests/test_brain_signal.mjs
  */
 import { readFileSync } from 'fs';
@@ -9,7 +9,7 @@ import { dirname, join } from 'path';
 import assert from 'assert';
 
 const html = readFileSync(join(dirname(fileURLToPath(import.meta.url)),
-                               '..', 'web', 'voicemem.html'), 'utf8');
+                               '..', 'web', 'supermem.html'), 'utf8');
 const a = html.indexOf('window.VMBrain = (function(){');
 assert.ok(a > -1, 'VMBrain module not found');
 const b = html.indexOf('\n})();', a);

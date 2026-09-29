@@ -9,9 +9,9 @@ injected.
 
 Two things here are deliberate and easy to get wrong:
 
-* Arms call the plain reply provider (``voicemem.reply.openai_reply``), **not**
+* Arms call the plain reply provider (``supermem.reply.openai_reply``), **not**
   ``vm.reply_stream()``. The latter wraps the provider in ``capture(...)`` and
-  registers the reply into memory (``voicemem/core.py``), so one call per arm
+  registers the reply into memory (``supermem/core.py``), so one call per arm
   would store two agent replies for a single user turn and corrupt the space.
   The turn is ingested exactly once, by the caller's existing ``remember_turn``.
 * Both arms get the same ``system`` persona. Different personas would make the
@@ -41,13 +41,18 @@ class Arm:
     memory: bool = True
     base_url: str = ""
     api_key: str = field(default="", repr=False)
+    #: Carry the memory as a KV cartridge instead of a per-turn system block:
+    #: the caller's memory becomes a stable prompt prefix the engine can reuse
+    #: (see supermem/cartridge). Only meaningful together with ``memory``.
+    cartridge: bool = False
 
     def __repr__(self) -> str:
         # api_key is repr=False above, but spell the whole repr out anyway: a
         # traceback or a debug print of an Arm must never be able to leak a
         # user-supplied key, and `repr=False` is one refactor away from gone.
         return (f"Arm(label={self.label!r}, model={self.model!r}, "
-                f"memory={self.memory!r}, base_url={self.base_url!r}, "
+                f"memory={self.memory!r}, cartridge={self.cartridge!r}, "
+                f"base_url={self.base_url!r}, "
                 f"api_key={'***' if self.api_key else ''!r})")
 
 
@@ -73,6 +78,7 @@ def sanitize(state: CompareState) -> dict:
     return {
         "enabled": state.enabled,
         "arms": [{"label": a.label, "model": a.model, "memory": a.memory,
+                  "cartridge": a.cartridge,
                   "base_url": a.base_url, "has_key": bool(a.api_key)}
                  for a in state.arms],
     }
@@ -102,6 +108,8 @@ def parse_arms(payload: Any, current: tuple[Arm, Arm]) -> tuple[Arm, Arm]:
                 arm = replace(arm, **{name: value.strip()})
         if "memory" in item:
             arm = replace(arm, memory=bool(item["memory"]))
+        if "cartridge" in item:
+            arm = replace(arm, cartridge=bool(item["cartridge"]))
         by_label[label] = arm
     return (by_label["a"], by_label["b"])
 
@@ -142,14 +150,21 @@ def register_routes(app, get_state: Callable[[], CompareState],
         return sanitize(updated)
 
 
-def default_provider(system: str = "") -> Callable[[Arm], Callable]:
+def default_provider(system: str = "", cartridge: Callable | None = None) -> Callable[[Arm], Callable]:
     """Build the real reply provider for an arm.
+
+    ``cartridge(arm)``, when given, builds the provider for arms that carry
+    their memory as a KV cartridge (``arm.cartridge and arm.memory``). It is
+    passed in by run.py, which owns the pieces the cartridge layout needs
+    (stable persona, session history, the active space's compiled memory).
 
     Imported lazily: ``import web.compare`` must not drag in openai, and the
     unit tests inject fakes instead of ever reaching this.
     """
     def build(arm: Arm) -> Callable:
-        from voicemem.reply import openai_reply
+        if cartridge is not None and arm.cartridge and arm.memory:
+            return cartridge(arm)
+        from supermem.reply import openai_reply
         return openai_reply(model=arm.model or None,
                             api_key=arm.api_key or None,
                             base_url=arm.base_url or None,
@@ -188,13 +203,15 @@ def client_gone(exc: BaseException) -> bool:
 
 async def _run_arm(arm: Arm, text: str, memory_context: str, send, provider) -> dict:
     """Stream one arm. Never raises — a dead arm must not take down the turn."""
-    await send({"type": "cmp_start", "panel": arm.label,
-                "model": arm.model, "memory": arm.memory})
+    await send({"type": "cmp_start", "panel": arm.label, "model": arm.model,
+                "memory": arm.memory, "cartridge": arm.cartridge and arm.memory})
     ctx = context_for(arm, memory_context)
     started = time.monotonic()
     reply, error, ttfb = "", "", None
+    fn = None
     try:
-        async for delta in provider(arm)(text, ctx):
+        fn = provider(arm)
+        async for delta in fn(text, ctx):
             msg = {"type": "cmp_delta", "panel": arm.label, "text": delta}
             if ttfb is None:
                 # Time to first token. Total time is a misleading number: it
@@ -218,14 +235,21 @@ async def _run_arm(arm: Arm, text: str, memory_context: str, send, provider) -> 
     # number for it: 0 reads as "instant" when the truth is it never spoke.
     done = {"type": "cmp_done", "panel": arm.label, "text": reply,
             "ms": ms, "ttfb": ttfb}
+    # A provider that can see the engine's accounting (the cartridge provider)
+    # leaves it on ``last_usage``: prompt tokens and how many of them the
+    # engine served from KV cache. Only what the engine reported is passed on.
+    usage = getattr(fn, "last_usage", None)
+    if usage:
+        done["usage"] = usage
     if error:
         done["error"] = error
     await send(done)
-    return {"label": arm.label, "text": reply, "ms": ms, "ttfb": ttfb, "error": error}
+    return {"label": arm.label, "text": reply, "ms": ms, "ttfb": ttfb, "error": error,
+            "usage": usage}
 
 
 async def fan_out(text: str, memory_context: str, arms: tuple[Arm, Arm], send,
-                  system: str = "", provider=None) -> dict:
+                  system: str = "", provider=None, cartridge: Callable | None = None) -> dict:
     """Run both arms concurrently, streaming ``cmp_*`` messages as tokens land.
 
     Returns ``{"a": reply, "b": reply, "latency_ms": {...}, "ttfb_ms": {...},
@@ -234,7 +258,7 @@ async def fan_out(text: str, memory_context: str, arms: tuple[Arm, Arm], send,
     ``errors`` holds only the panels that failed, so ``not result["errors"]``
     means a clean turn and ``len(...) == 2`` means nothing was generated.
     """
-    provider = provider or default_provider(system)
+    provider = provider or default_provider(system, cartridge)
     await send({"type": "cmp_ctx", "context": memory_context,
                 "chars": len(memory_context)})
     # return_exceptions so one arm's disconnect does not cancel the other
@@ -248,9 +272,11 @@ async def fan_out(text: str, memory_context: str, arms: tuple[Arm, Arm], send,
             raise o
     outcomes = settled
 
-    result: dict = {"latency_ms": {}, "ttfb_ms": {}, "errors": {}}
+    result: dict = {"latency_ms": {}, "ttfb_ms": {}, "errors": {}, "usage": {}}
     for o in outcomes:
         result[o["label"]] = o["text"]
+        if o["usage"]:
+            result["usage"][o["label"]] = o["usage"]
         result["latency_ms"][o["label"]] = o["ms"]
         result["ttfb_ms"][o["label"]] = o["ttfb"]
         if o["error"]:

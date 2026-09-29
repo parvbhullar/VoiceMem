@@ -3,8 +3,8 @@ from pathlib import Path
 
 DATA = Path(__file__).parent / "data" / "sample.jsonl"
 
-# 已发布 adapter（Qwen3.6-35B-A3B QLoRA v2）那次训练用的超参，照默认跑 = 复现同一次训练。
-# 之前从 models/ 下的清单文件读，那份清单已随模型目录一起删掉，值直接写在这里。
+# Hyperparameters used to train the released adapter (Qwen3.6-35B-A3B QLoRA v2); running with defaults reproduces that run.
+# They used to be read from a manifest under models/; that manifest was removed with the model directory, so the values live here.
 BASE = "Qwen/Qwen3.6-35B-A3B"
 ADAPTER = {
     "format": "PEFT LoRA",
@@ -13,7 +13,7 @@ ADAPTER = {
     "dropout": 0.05,
     "bias": "none",
     "task_type": "CAUSAL_LM",
-    # 按 Qwen3.6-35B-A3B 的模块命名写死；换基座必须改（不确定就用 "all-linear"）。
+    # Hard-coded to Qwen3.6-35B-A3B module names; must change when switching base models (use "all-linear" if unsure).
     "target_modules": (
         r"^(model\.language_model(?=\.).*\.(shared_expert_gate|down_proj|out_proj|"
         r"in_proj_a|in_proj_b|q_proj|in_proj_z|gate_proj|up_proj|in_proj_qkv|"
@@ -39,13 +39,10 @@ TRAIN = {
 MEMORY_CATEGORIES = ("knowledge", "emotion", "persona")
 
 SYSTEM = {
-    ("memory", "zh"): "你是VoiceMem，一个有记忆的个人AI伴侣。用下面检索到的记忆和用户画像自然地"
-                      "回应，不要把记忆原样念给用户。",
-    ("memory", "en"): "You are VoiceMem, a personal AI companion with memory. Reply naturally "
+    ("memory", "en"): "You are SuperMem, a personal AI companion with memory. Reply naturally "
                       "using the retrieved memories and user profile below; do not recite them "
                       "verbatim to the user.",
-    ("casual", "zh"): "你是VoiceMem，一个聪明有温度的AI伴侣。基于当下对话自然地回应。",
-    ("casual", "en"): "You are VoiceMem, a warm and thoughtful AI companion. Reply naturally "
+    ("casual", "en"): "You are SuperMem, a warm and thoughtful AI companion. Reply naturally "
                       "based on the current conversation.",
 }
 
@@ -67,7 +64,7 @@ def write_jsonl(rows, path):
 
 
 def warmup_steps(n_rows, epochs):
-    # transformers 5.x 删了 warmup_ratio，只剩 warmup_steps，这里自己换算。
-    # 按单进程算，多卡要再除以卡数。
+    # transformers 5.x removed warmup_ratio and only keeps warmup_steps, so convert it here.
+    # Computed for a single process; divide by the number of GPUs for multi-GPU.
     per_step = TRAIN["per_device_train_batch_size"] * TRAIN["gradient_accumulation_steps"]
     return max(1, round(n_rows * epochs / per_step * TRAIN["warmup_ratio"]))

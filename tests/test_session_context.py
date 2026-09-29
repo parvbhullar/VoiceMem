@@ -18,14 +18,14 @@ def test_committed_turn_is_removed_from_session_context():
 
 def test_uncommitted_turn_remains_and_spaces_are_isolated():
     buffer = SessionBuffer(text_limit=20)
-    turn_id = buffer.add("s1", "zh", "只是临时讨论", "好的，继续说")
+    turn_id = buffer.add("s1", "zh", "a quick side topic", "okay, go on")
     buffer.add("s1", "en", "temporary topic", "go on")
-    buffer.add("s2", "zh", "另一场会话", "不会串进来")
+    buffer.add("s2", "zh", "another session", "should not leak in")
 
     buffer.mark_complete(turn_id, committed=False)
 
-    assert "只是临时讨论" in buffer.render("s1", "zh")
-    assert "另一场会话" not in buffer.render("s1", "zh")
+    assert "a quick side topic" in buffer.render("s1", "zh")
+    assert "another session" not in buffer.render("s1", "zh")
     assert "temporary topic" in buffer.render("s1", "en")
     assert "not yet stored" in buffer.render("s1", "en", language="en")
 

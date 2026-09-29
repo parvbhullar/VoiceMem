@@ -1,4 +1,4 @@
-class VoiceMemPCMPlayer extends AudioWorkletProcessor {
+class SuperMemPCMPlayer extends AudioWorkletProcessor {
   constructor() {
     super();
     this.queue = [];
@@ -97,7 +97,7 @@ class VoiceMemPCMPlayer extends AudioWorkletProcessor {
     if (!output) return true;
     output.fill(0);
 
-    // 候选插话期间输出静音并保留队列，resume 后从暂停位置继续。
+    // While a barge-in is a candidate, output silence and keep the queue; after resume, continue from where it paused.
     if (this.paused) return true;
 
     if (!this.started) {
@@ -157,4 +157,4 @@ class VoiceMemPCMPlayer extends AudioWorkletProcessor {
   }
 }
 
-registerProcessor("voicemem-pcm-player", VoiceMemPCMPlayer);
+registerProcessor("supermem-pcm-player", SuperMemPCMPlayer);

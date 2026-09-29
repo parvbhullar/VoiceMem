@@ -16,7 +16,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from voicemem.utils.audio.asr import OpenAIStreamingASR, _wav_bytes  # noqa: E402
+from supermem.utils.audio.asr import OpenAIStreamingASR, _wav_bytes  # noqa: E402
 
 RATE = 16000
 

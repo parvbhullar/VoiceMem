@@ -1,7 +1,7 @@
-"""LoCoMo：超长多轮对话上的问答。
+"""LoCoMo: question answering over very long multi-turn conversations.
 
-数据是一个 json 数组，每条 = 一段横跨多个 session 的对话 + 针对它的问答。
-公开版大致长这样（字段名各版本有出入，下面的解析对常见变体都做了兼容）::
+The data is a json array; each entry = one conversation spanning several sessions + QA about it.
+The public version looks roughly like this (field names vary between versions; the parsing below handles the common variants)::
 
     [{"sample_id": "conv-26",
       "conversation": {
@@ -11,20 +11,20 @@
         "session_2_date_time": ..., "session_2": [...]},
       "qa": [{"question": "...", "answer": "...", "category": 1}, ...]}]
 
-**跑之前先用 --inspect 确认解析对了**（几段对话、几轮、时间戳有没有读到），
-字段对不上就改 load() 里那几行——比在评测跑了两小时之后才发现全错强。
+**Before running, use --inspect to confirm parsing is right** (how many conversations, turns, whether timestamps were read);
+if fields don't match, fix those few lines in load() -- better than finding out it was all wrong after a two-hour run.
 """
 from __future__ import annotations
 
 import json
 import re
 
-#: 打印用的名字（CLI 上的键是小写的 "locomo"）
+#: Display name (the CLI key is lowercase "locomo")
 NAME = "LoCoMo"
 
 from evaluation.datasets import Conversation, Question, Score, Turn
 
-#: LoCoMo 的题型编号 → 人话，出分类得分用
+#: LoCoMo question-type ids -> readable names, for per-category scores
 CATEGORIES = {
     1: "multi_hop", 2: "temporal", 3: "open_domain",
     4: "single_hop", 5: "adversarial",
@@ -33,7 +33,7 @@ CATEGORIES = {
 
 def load(path: str) -> list[Conversation]:
     raw = json.loads(open(path, encoding="utf-8").read())
-    if isinstance(raw, dict):                     # 有的版本是 {"conv-26": {...}}
+    if isinstance(raw, dict):                     # some versions are {"conv-26": {...}}
         raw = [{**v, "sample_id": k} for k, v in raw.items()]
 
     out: list[Conversation] = []
@@ -46,10 +46,10 @@ def load(path: str) -> list[Conversation]:
 
 
 def _turns(conv: dict) -> list[Turn]:
-    """把 session_1 / session_2 … 按编号顺序摊平成一串对话。
+    """Flatten session_1 / session_2 ... in numeric order into one sequence of turns.
 
-    每个 session 有自己的日期（session_N_date_time），要带上——LoCoMo 有一整类
-    时序题（"这件事发生在哪次之前"），日期丢了这类题直接归零。
+    Each session has its own date (session_N_date_time) and it must be kept -- LoCoMo has a whole class of
+    temporal questions ("did this happen before which event"), which score zero if the dates are lost.
     """
     sessions: list[tuple[int, list, str]] = []
     for key, val in conv.items():
@@ -65,16 +65,16 @@ def _turns(conv: dict) -> list[Turn]:
             text = (m.get("text") or m.get("clean_text") or m.get("utterance") or "").strip()
             if not text:
                 continue
-            # 有的样本把图片描述单独放一个字段，一并喂进去，否则"照片里那只猫"这类题没依据
+            # some samples keep image captions in a separate field; feed them in too, or questions like "the cat in the photo" have no basis
             if m.get("blip_caption"):
-                text = f"{text}（图：{m['blip_caption']}）"
+                text = f"{text} (image: {m['blip_caption']})"
             turns.append(Turn(speaker=str(m.get("speaker") or "user"),
                               text=text, observed_at=_date(when)))
     return turns
 
 
 def _date(when: str) -> str:
-    """"2023-05-08 10:00" / "8 May, 2023" → ISO 日期；认不出就留空。"""
+    """"2023-05-08 10:00" / "8 May, 2023" -> ISO date; empty if unrecognised."""
     if not when:
         return ""
     if m := re.search(r"(\d{4})-(\d{2})-(\d{2})", when):
@@ -105,28 +105,29 @@ def _questions(qa: list) -> list[Question]:
     return out
 
 
-JUDGE = """判断「模型答案」和「标准答案」说的是不是同一件事。
+JUDGE = """Decide whether the "model answer" and the "gold answer" say the same thing.
 
-标准答案：{gold}
-模型答案：{pred}
+Gold answer: {gold}
+Model answer: {pred}
 
-宽松一点：意思对就算对，措辞、详略、格式不同都不扣分；标准答案是日期/数字时，
-值对就算对。模型答案明显是别的信息、或者答不知道，才算错。
+Be lenient: if the meaning is right it counts as correct; differences in wording, detail or format are not penalised; when the
+gold answer is a date/number, the right value counts as correct. Only mark it wrong if the model answer is clearly different
+information, or says it doesn't know.
 
-只回一个词：对 / 错"""
+Reply with one word only: Yes / No"""
 
 
 def score(q: Question, answer: str, judge) -> Score:
-    """比对标准答案。LoCoMo 的答案多是短语，字面比对漏判太多，交给裁判模型。"""
+    """Compare with the gold answer. LoCoMo answers are mostly short phrases; literal matching misses too many, so a judge model decides."""
     gold = (q.answer or "").strip()
-    if not gold:                       # 没有标准答案的题不计入总分，免得拉低/抬高
-        return Score(correct=0.0, total=0.0, note="无标准答案，跳过")
+    if not gold:                       # questions without a gold answer are excluded from the total so they neither lower nor inflate it
+        return Score(correct=0.0, total=0.0, note="no gold answer, skipped")
 
     pred = (answer or "").strip()
-    if pred and gold.lower() in pred.lower():      # 明显包含就不必花裁判的钱了
-        return Score(correct=1.0, note="字面命中")
+    if pred and gold.lower() in pred.lower():      # an obvious substring match needs no paid judge call
+        return Score(correct=1.0, note="literal match")
 
-    verdict = judge("你是评测裁判，只回「对」或「错」。",
-                    JUDGE.format(gold=gold, pred=pred or "（空）"))
-    ok = verdict.strip().startswith(("对", "Y", "y", "T", "t"))
+    verdict = judge("You are an evaluation judge. Reply only \"Yes\" or \"No\".",
+                    JUDGE.format(gold=gold, pred=pred or "(empty)"))
+    ok = verdict.strip().startswith(("Y", "y", "T", "t"))
     return Score(correct=1.0 if ok else 0.0, note=verdict.strip()[:40])

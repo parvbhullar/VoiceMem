@@ -1,27 +1,27 @@
-"""voicemem web demo —— 对话核心（EOU 0–300ms 投机预取）。管道在 utils.py，渲染在 index.html。
+"""supermem web demo -- conversation core (EOU 0-300ms speculative prefetch). Pipeline lives in utils.py, rendering in index.html.
 
-看点：本地 ASR+VAD 边听边算，partial 一到就后台起投机 Search（本地 E5 向量 + 本地 slot
-分类，注入的 LocalQueryClassifier，0 LLM 0 网络），VAD 在 300ms 确认说完时记忆早已算好，
-交给两条 ~10 行控制流的只剩「发 LLM / 发 Realtime」。说到一半停顿又续上（barge-in）→ 取消投机。
+Highlights: local ASR+VAD computes while listening; as soon as a partial arrives, a speculative Search starts in the background (local E5 vectors + local slot
+classification via the injected LocalQueryClassifier, 0 LLM, 0 network). By the time VAD confirms end-of-speech at 300ms the memory is already computed,
+leaving the two ~10-line control flows only "send to LLM / send to Realtime". Pausing mid-sentence and then continuing (barge-in) -> cancel the speculation.
 
-跑（参数见 ``--help``；每个都能用同名环境变量给默认值）::
+Run (see ``--help`` for options; each one can also take its default from the env var of the same name)::
 
     export OPENAI_API_KEY=sk-...
-    python web/run.py                     # 默认 realtime
+    python web/run.py                     # default: realtime
     python web/run.py \\
-      --mode llm_tts \\                    # 没有 Realtime 权限时走这条
+      --mode llm_tts \\                    # use this when you lack Realtime access
       --port 8787 \\
       --spec_min_chars 6 \\
       --gamble_ms 200 \\
       --confirm_ms 300
 
-默认走 ``realtime``（OpenAI 原生语音）：一次往返直接出声，不像 llm_tts 那样要
-"LLM 出文本(~1.0s) → 攒够一句 → TTS 合成(~1.2s)" 两段串行，体验差一截。
-key 没有 Realtime 权限就用 ``--mode llm_tts``，那条路只要普通 chat + TTS，
-TTS 还能换成本地离线模型（``TTS_BACKEND=local``）。
+The default is ``realtime`` (OpenAI native speech): one round trip straight to audio, unlike llm_tts which needs
+"LLM emits text (~1.0s) -> accumulate a sentence -> TTS synthesis (~1.2s)", two serial stages, a noticeably worse experience.
+If your key has no Realtime access use ``--mode llm_tts``; that path only needs regular chat + TTS,
+and TTS can even be swapped for a local offline model (``TTS_BACKEND=local``).
 
-注意：记忆向量用本地 384 维 E5（投机预算内不能走网络）。换过旧 demo（OpenAI 1536 维）留了
-记忆库的，维度不兼容——先清掉记忆目录再跑。
+Note: memory vectors use local 384-dim E5 (the speculation budget cannot afford the network). If you kept a memory store from the old demo
+(OpenAI 1536-dim), the dimensions are incompatible -- clear the memory directory before running.
 """
 import argparse
 import asyncio
@@ -40,58 +40,58 @@ import uvicorn
 
 HERE = Path(__file__).resolve().parent
 _ROOT = HERE.parent
-sys.path.insert(0, str(HERE))                       # 让 `import utils` 找到同目录管道层
+sys.path.insert(0, str(HERE))                       # so `import utils` finds the pipeline layer in this directory
 sys.path.insert(0, str(_ROOT))
-os.environ.setdefault("VOICEMEM_MODELS_DIR", str(_ROOT / "models"))
-# 记忆空间锚在**仓库根**，不跟当前目录走。否则 `cd web && python run.py` 会在
-# web/ 底下另建一个空的 voicemem_memoryspace/demo，用户对着空库说半天话，
-# 还以为记忆没生效（实测就这么踩过）。
-os.environ.setdefault("VOICEMEM_MEMORYSPACE_ROOT", str(_ROOT / "voicemem_memoryspace"))
+os.environ.setdefault("SUPERMEM_MODELS_DIR", str(_ROOT / "models"))
+# The memory space is anchored at the **repo root**, not the current directory. Otherwise `cd web && python run.py` would
+# create a separate empty supermem_memoryspace/demo under web/, the user talks to an empty store for ages,
+# and concludes memory isn't working (this actually happened).
+os.environ.setdefault("SUPERMEM_MEMORYSPACE_ROOT", str(_ROOT / "supermem_memoryspace"))
 
 
-# ══════════════════ 命令行参数（同名环境变量给默认值，两种都行）══════════════════
-# 放在下面那两个重 import 之前：utils / voicemem 会拉起 torch + sentence-transformers，
-# 排在它们后面的话 `--help` 得先等模型库加载完。被 import 时不吃 sys.argv（传 []）。
+# ══════════════════ CLI arguments (env vars of the same name give defaults; either works) ══════════════════
+# Placed before the two heavy imports below: utils / supermem pull in torch + sentence-transformers,
+# so if this came after them `--help` would have to wait for the model libs to load. When imported, don't consume sys.argv (pass []).
 
 def _parse(argv):
-    p = argparse.ArgumentParser(description="voicemem web demo（脑图 + 0–300ms 投机预取）")
+    p = argparse.ArgumentParser(description="supermem web demo (brain map + 0-300ms speculative prefetch)")
     p.add_argument("--mode", choices=["llm_tts", "realtime"],
                    default=os.environ.get("DEMO_MODE", "realtime"),
-                   help="回复控制流：realtime=OpenAI 原生语音（默认，体验最好）；"
-                        "llm_tts=LLM 流→TTS 流（不需要 Realtime 权限，可换本地 TTS）")
+                   help="reply control flow: realtime=OpenAI native speech (default, best experience); "
+                        "llm_tts=LLM stream -> TTS stream (no Realtime access needed, TTS can be local)")
     p.add_argument("--host", default="0.0.0.0")
-    p.add_argument("--port", type=int, default=int(os.environ.get("VOICEMEM_PORT", 8787)))
+    p.add_argument("--port", type=int, default=int(os.environ.get("SUPERMEM_PORT", 8787)))
     p.add_argument("--spec_min_chars", type=int, default=6,
-                   help="partial 转写到几个字起投机预取")
+                   help="start speculative prefetch once the partial transcript reaches this many chars")
     p.add_argument("--gamble_ms", type=int, default=200,
-                   help="静音多久就赌你说完了，补投机一次")
+                   help="after this much silence, gamble that you're done and speculate once more")
     p.add_argument("--confirm_ms", type=int, default=300,
-                   help="静音多久由 VAD 确认一轮结束，交出 Turn")
-    p.add_argument("--config", default=os.environ.get("VOICEMEM_CONFIG"),
-                   help="一个 .json，整体覆盖下面的 CONFIG")
-    p.add_argument("--space", default=os.environ.get("VOICEMEM_SPACE", "demo"),
-                   help="用哪个 memory space（voicemem_memoryspace/<space>/）")
-    p.add_argument("--memory_root", default=os.environ.get("VOICEMEM_MEMORY_ROOT", ""),
-                   help="直接指定记忆库目录，给了就盖过 --space")
-    p.add_argument("--lang", choices=["en", "zh"],
-                   default=os.environ.get("VOICEMEM_MEMORY_LANGUAGE", "en"),
-                   help="新建 Memory Space 时用的语言：en（默认）/ zh。"
-                        "已有空间用它自己建的时候定的那个")
-    p.add_argument("--log-file", default=os.environ.get("VOICEMEM_LOG_FILE", ""),
-                   help="日志文件路径；不传则自动写到 results/logs/")
+                   help="after this much silence VAD confirms the turn ended and hands off the Turn")
+    p.add_argument("--config", default=os.environ.get("SUPERMEM_CONFIG"),
+                   help="a .json file that overrides the CONFIG below wholesale")
+    p.add_argument("--space", default=os.environ.get("SUPERMEM_SPACE", "demo"),
+                   help="which memory space to use (supermem_memoryspace/<space>/)")
+    p.add_argument("--memory_root", default=os.environ.get("SUPERMEM_MEMORY_ROOT", ""),
+                   help="memory store directory to use directly; overrides --space when given")
+    p.add_argument("--lang", choices=["en"],
+                   default="en",
+                   help="language for newly created Memory Spaces: en (the only option). "
+                        "Existing spaces keep the language they were created with")
+    p.add_argument("--log-file", default=os.environ.get("SUPERMEM_LOG_FILE", ""),
+                   help="log file path; if omitted, logs go to results/logs/ automatically")
     p.add_argument("--no-file-log", action="store_true",
-                   default=os.environ.get("VOICEMEM_FILE_LOG", "1") == "0",
-                   help="只输出到终端，不保存日志文件")
+                   default=os.environ.get("SUPERMEM_FILE_LOG", "1") == "0",
+                   help="terminal output only, don't save a log file")
     return p.parse_args(argv)
 
 
 ARGS = _parse(None if __name__ == "__main__" else [])
 
-# 必须放在重依赖 import 之前：模型加载、依赖库 warning、Uvicorn 日志和后面所有
-# print 才能从进程启动第一刻起完整落盘。被别的模块 import 时不擅自创建日志文件。
-# 语言：核心默认英文，demo 用 --lang zh 切中文。放在建 VoiceMem 之前，
-# 因为抽取 prompt 是按它选中英两套示例的。
-from voicemem.lang import set_memory_language as _set_lang   # noqa: E402
+# Must come before the heavy-dependency imports: only then do model loading, library warnings, Uvicorn logs and all later
+# prints get fully persisted from the very first moment of the process. Don't create a log file when imported by another module.
+# Language: the core defaults to English (the only supported language). Set before SuperMem is built,
+# because the extraction prompt picks its example set from it.
+from supermem.lang import set_memory_language as _set_lang   # noqa: E402
 _set_lang(ARGS.lang)
 
 LOG_FILE = None
@@ -99,149 +99,148 @@ if __name__ == "__main__" and not ARGS.no_file_log:
     from logging_utils import setup_file_logging
     LOG_FILE = setup_file_logging(_ROOT, ARGS.log_file)
 
-import compare                                       # noqa: E402  A/B 对照
-import utils                                         # noqa: E402  同目录管道层
+import compare                                       # noqa: E402  A/B comparison
+import utils                                         # noqa: E402  pipeline layer in this directory
 from audio_timeline import AudioTimeline, SpeechRateEstimator  # noqa: E402
 from session_context import SessionBuffer            # noqa: E402
-from voicemem import VoiceMem                        # noqa: E402
-from voicemem.audio_timing import TimedAudioChunk    # noqa: E402
+from supermem import SuperMem                        # noqa: E402
+from supermem.audio_timing import TimedAudioChunk    # noqa: E402
 
 BARGE_DEBUG = os.environ.get("BARGE_DEBUG", "1") != "0"
-BARGE_THRESHOLD = float(os.environ.get("BARGE_THRESHOLD", "0.45"))  # 越小越容易被打断
-#: 转写要比上次多出这么多个字，才算"他真的插话了"。
-#: 之前这里是「连续人声 ≥280ms」，纯 VAD 判定太松——咳嗽、关门、AEC 没压干净的
-#: 助手回声都算人声，日志里一串"连续人声 → 请求打断 / 助手没在说，忽略"在空转。
-#: 换成等 ASR 真的吐出字，代价是多等一次出字（~200-300ms），换来不会自己掐自己。
+BARGE_THRESHOLD = float(os.environ.get("BARGE_THRESHOLD", "0.45"))  # lower = easier to interrupt
+#: The transcript must grow by this many chars since last time before it counts as "he really cut in".
+#: This used to be "continuous voice >= 280ms", but pure VAD is too loose -- coughs, doors closing, assistant echo
+#: that AEC didn't fully cancel all count as voice; the log was full of "continuous voice -> request barge-in / assistant not speaking, ignore" spinning idle.
+#: Switched to waiting for ASR to actually emit characters; costs one more emission (~200-300ms) but it never cuts itself off.
 #:
-#: 这个数字直接决定"插话多久才被听见"：说满 N 个字要时间，实测 3 个字要 ~2 秒。
-#: 曾经因为 2 个字会被回声骗到（漏出过 "an" —— 助手说的 Annie 回到麦克风里）
-#: 才提到 3。现在回声改由 _is_echo() 按**助手正在说的原文**挡，不再靠字数硬扛，
-#: 所以降回 2：插话少说一个字，大约快 300-500ms。
+#: This number directly decides "how long before a barge-in is heard": saying N chars takes time; measured, 3 chars take ~2 s.
+#: It was once raised to 3 because 2 chars could be fooled by echo (an "an" leaked through -- the assistant's "Annie"
+#: coming back into the mic). Echo is now blocked by _is_echo() using **the text the assistant is currently saying**, not brute-forced by char count,
+#: so it's back to 2: one char less to say, roughly 300-500ms faster.
 BARGE_MIN_CHARS = int(os.environ.get("BARGE_MIN_CHARS", "2"))
 BARGE_STABLE_UPDATES = int(os.environ.get("BARGE_STABLE_UPDATES", "2"))
 BARGE_REJECT_SILENCE_MS = int(os.environ.get("BARGE_REJECT_SILENCE_MS", "220"))
 BARGE_CANDIDATE_TIMEOUT_MS = int(os.environ.get("BARGE_CANDIDATE_TIMEOUT_MS", "1200"))
-#: 助手刚开口那一小段不允许被打断——那时候麦克风里几乎只有它自己的声音。
+#: The first moments after the assistant starts speaking can't be interrupted -- the mic hears almost only its own voice then.
 BARGE_GRACE_MS = int(os.environ.get("BARGE_GRACE_MS", "500"))
-#: OpenAI 那侧用哪种回合/打断判定。semantic_vad 由模型判"这是不是真的在打断"，
-#: 对 backchannel（"嗯""对""哦"）不敏感；server_vad 只看有没有声音，所以助手自己
-#: 的回声、环境噪声都能把它掐了。模型或 SDK 不支持时会以 error 事件回来（不抛），
-#: 日志里看到就改回 TURN_DETECTION=server_vad。
+#: Which turn/interruption detection the OpenAI side uses. With semantic_vad the model judges "is this a real interruption",
+#: so it's insensitive to backchannels ("mm", "right", "oh"); server_vad only checks for sound, so the assistant's own
+#: echo and ambient noise can cut it off. If the model or SDK doesn't support it, it comes back as an error event (not raised);
+#: if you see that in the log, switch back to TURN_DETECTION=server_vad.
 TURN_DETECTION = os.environ.get("TURN_DETECTION", "semantic_vad")
-#: semantic_vad 的抢答倾向：low 更愿意等你说完，high 更爱抢。
+#: semantic_vad's eagerness to jump in: low waits more for you to finish, high jumps in more.
 VAD_EAGERNESS = os.environ.get("VAD_EAGERNESS", "low")
-MIC_RATE = 24000                       # 前端上行的采样率（index.html 的 SAMPLE_RATE）
-#: 按声纹拦陌生人。默认开——启动时预热过、又在后台线程算，实测对延迟零影响
-#: （memory_hits 仍在 EOU 前 0.63s 到达，跟关掉时一样）。
-SPEAKER_GATE = os.environ.get("VOICEMEM_SPEAKER_GATE", "1") != "0"   # 打断为什么没触发：看这几行日志
-#: 连续几轮认成别人才判"陌生人"。1 = 一轮就翻脸（demo 里演"换个人说话"要的就是
-#: 这个）；声纹库脏、老是把主人认成新人时，调到 2 能挡掉大部分误判。
+MIC_RATE = 24000                       # upstream sample rate from the frontend (SAMPLE_RATE in index.html)
+#: Block strangers by voiceprint. On by default -- warmed up at startup and computed on a background thread; measured zero latency impact
+#: (memory_hits still arrive 0.63s before EOU, same as with it off).
+SPEAKER_GATE = os.environ.get("SUPERMEM_SPEAKER_GATE", "1") != "0"   # why a barge-in didn't fire: check these log lines
+#: How many consecutive turns recognized as someone else before judging "stranger". 1 = flip after one turn (that's what the
+#: "switch speakers" demo needs); if the voiceprint store is dirty and keeps taking the owner for a new person, 2 blocks most false positives.
 STRANGER_MIN_TURNS = int(os.environ.get("STRANGER_MIN_TURNS", "1"))
-#: 每轮都打一行说话人判定（默认只在判成陌生人时打）。
+#: Log a speaker verdict line every turn (by default only when judged a stranger).
 SPEAKER_DEBUG = os.environ.get("SPEAKER_DEBUG", "0") != "0"
 MODE = ARGS.mode                                     # llm_tts | realtime
-SPEC_MIN_CHARS = ARGS.spec_min_chars                 # partial 起投机
-GAMBLE_S  = ARGS.gamble_ms / 1000                    # 赌说完
-CONFIRM_S = ARGS.confirm_ms / 1000                   # VAD 确认结束
+SPEC_MIN_CHARS = ARGS.spec_min_chars                 # partial starts speculation
+GAMBLE_S  = ARGS.gamble_ms / 1000                    # gamble that you're done
+CONFIRM_S = ARGS.confirm_ms / 1000                   # VAD confirms the end
 
 _RT_PERSONA = (
-    # 开宗明义地把"你凭什么存在"讲清楚。模型默认的助理人格非常强势，不明确
-    # 给它一个不同的立身之本，它就会退回"您好，有什么可以帮您"。
-    "你是这个用户长期在用的语音助手，你们认识很久了。你的价值在于**你记得他**——"
-    "你说的每句话，都应该是一个没有记忆的助手说不出来的。\n"
+    # State up front "why you exist". The model's default assistant persona is very strong; without clearly
+    # giving it a different footing, it falls back to "Hello, how can I help you?".
+    "You are the voice assistant this user has been using for a long time; you've known each other a long while. Your value is that **you remember him** -- "
+    "everything you say should be something an assistant without memory couldn't say.\n"
     "\n"
-    "【两种记忆，用法完全不同】\n"
-    "factual memory 是事实，可以直接提，就像你本来就记得"
-    "（「Annie 那事你还好吗」，不是「根据记录，Annie 要转学」）。\n"
-    "emotion & characteristics 是他这个人的性格和情绪归因，**只**影响你的语气、"
-    "先说什么、什么别碰——一个字都不许说出来。\n"
+    "[Two kinds of memory, used completely differently]\n"
+    "factual memory is facts; you can mention them directly, as if you simply remember "
+    "(\"How are you doing with the Annie thing?\", not \"According to the records, Annie is transferring schools\").\n"
+    "emotion & characteristics are his personality and emotional attributions; they **only** shape your tone, "
+    "what you say first, and what to steer clear of -- never say a word of them out loud.\n"
     "\n"
-    # 检索按相关度排，但排在前面不等于跟这句话有关。不说清楚模型会硬凑，
-    # 听起来就是答非所问或者莫名其妙翻旧账。
-    "【检索到 ≠ 相关】\n"
-    "这些记忆是检索出来的，不一定都跟他这句话有关。挑真正有关的用，其余的知道就好。"
-    "一条都不相关时，就顺着他这句话往下说，不用勉强提起任何记忆。\n"
+    # Retrieval is ranked by relevance, but ranking high doesn't mean it relates to this sentence. Without saying so the model forces it in,
+    # and it sounds like an off-topic answer or an inexplicable dredging up of old history.
+    "[Retrieved != relevant]\n"
+    "These memories were retrieved and aren't necessarily all related to what he just said. Use the ones that really are; just be aware of the rest. "
+    "When none of them are relevant, simply follow what he said; don't force any memory into it.\n"
     "\n"
-    # 最贵的一条。没有它模型会编：记忆里只有「下周要考 GRE」，它张口就是
-    # 「数学一直是你的强项吧」——听着像真记得，其实是幻觉，比不记得更糟。
-    "【只说记忆里真有的事】\n"
-    "没写的细节——分数、科目、他做过什么、谁说过什么、哪一天——一个字都不许补；"
-    "记忆里没带日期就别提时间。宁可说得少，也不要编。不知道就直说不知道。\n"
+    # The most valuable rule. Without it the model makes things up: memory only says "taking the GRE next week", and it opens with
+    # "Math has always been your strong suit, right?" -- sounds like real memory, but it's a hallucination, worse than not remembering.
+    "[Only say what is really in memory]\n"
+    "Details that aren't written -- scores, subjects, what he did, who said what, which day -- don't add a single word of them; "
+    "if a memory carries no date, don't mention time. Better to say less than to make things up. If you don't know, just say so.\n"
     "\n"
-    # 产品感的核心：主动性。这一段是"作为产品"和"作为 demo"最大的分野。
-    "【主动，别把活儿推给他】\n"
-    "× 「有什么想聊的吗」「有什么可以帮你的吗」「今天过得怎么样」——"
-    "这些话没有记忆也说得出来，等于当面告诉他你什么都不记得。\n"
-    "√ 直接落到具体的事：「明天那个会，准备得怎么样了」。\n"
-    "他说得含糊时（「最近压力好大」「今天好累」），别泛泛安慰、也别只是问「怎么了」。"
-    "从记忆里挑出最可能是原因的那件具体的事，说出来问他是不是。猜错他会纠正你。\n"
-    "一轮最多问一个问题，而且要具体。没什么可问的就别问，说完就停——"
-    "每句都拿问号结尾是在审问，不是聊天。\n"
+    # The core of feeling like a product: initiative. This section is the biggest divide between "a product" and "a demo".
+    "[Be proactive; don't push the work back to him]\n"
+    "x \"Anything you want to talk about?\" \"Anything I can help you with?\" \"How was your day?\" -- "
+    "anyone without memory could say these; it's like telling him to his face you remember nothing.\n"
+    "v Go straight to something specific: \"How's the prep going for that meeting tomorrow?\".\n"
+    "When he's vague (\"so much stress lately\", \"so tired today\"), don't offer generic comfort or just ask \"what's wrong?\". "
+    "Pick from memory the specific thing most likely to be the cause, name it, and ask if that's it. If you guess wrong he'll correct you.\n"
+    "Ask at most one question per turn, and make it specific. If there's nothing to ask, don't; stop when you're done -- "
+    "ending every sentence with a question mark is an interrogation, not a chat.\n"
     "\n"
-    # 没有这一段，"ok ok" 会被当成一轮全新对话，模型重新打招呼。
-    "【顺着对话走】\n"
-    "「ok」「好的」「嗯嗯」「行」这类是收尾或者认可，**不是新话题**。"
-    "简短接一句就行，绝对不要重新打招呼、不要重启话题、不要重新自我介绍。\n"
-    "刚才聊到哪儿了，看下面「刚才的对话」那一段。\n"
+    # Without this section, "ok ok" gets treated as a brand-new conversation and the model greets again.
+    "[Follow the conversation]\n"
+    "\"ok\", \"sure\", \"mm-hmm\", \"alright\" and the like are wrap-ups or acknowledgements, **not a new topic**. "
+    "Just reply briefly; never greet again, restart the topic, or reintroduce yourself.\n"
+    "For where the conversation just was, see the \"recent conversation\" section below.\n"
     "\n"
-    "【说他是什么样的人】\n"
-    "每个判断后面紧跟那件让你这么想的事，别堆形容词——"
-    "「你特别有追求」这种话空模型也说得出来。\n"
+    "[Saying what kind of person he is]\n"
+    "Follow every judgement with the thing that made you think so; don't pile up adjectives -- "
+    "a memoryless model could just as well say \"you're really driven\".\n"
     "\n"
-    "【怎么说话】\n"
-    "你是在**说话**，不是在写字。短句，一次说一两句就停。"
-    "别复述他刚说的话，别用「我记得你说过」开头，别念清单，"
-    "也别用「作为你的助手」这类自我介绍——你们早就认识了。"
+    "[How to talk]\n"
+    "You are **speaking**, not writing. Short sentences; say one or two sentences at a time, then stop. "
+    "Don't repeat back what he just said, don't open with \"I remember you said\", don't recite lists, "
+    "and don't introduce yourself with \"as your assistant\" -- you've known each other for ages."
 )
 
 
 
-# 从 1147 字精简到现在这个长度。删掉的和为什么——想加回来先看这里，原文在 git 里：
+# Trimmed from 1147 chars to the current length. What was removed and why -- read this before adding anything back; the original is in git:
 #
-# · 「说三四句，两三个点」等长度/结构规定
-#     → demo 口味，不是正确性问题。而且句子越多、TTS 分段越多、接缝越明显。
-#       真要控制长度，第一句"一次说一两句就停"已经够了。
-# · 「说话方式：语调有起伏、重要的词咬重、问句尾音扬起来、别播音腔」整段
-#     → 这是**表演指示**，写在文本 prompt 里是让文字模型去理解、再指望 TTS 猜出来，
-#       中间隔了两层。TTS 后端有 instruction 参数（Breeze 有，gpt-4o-mini-tts 也有）
-#       直接收这个，效果实在得多。搬过去了就别在这儿重复。
-# · 「别每句都用同一个口头禅开头」
-#     → 它补的是另一条已经删掉的规则（原来写"用嗯/哎/诶开头"，模型当成每句必须
-#       执行）。病根没了，补丁也就不用留。
-# · 「问'你对我什么印象'时答的重点是他这个人，不是最近发生的事」
-#     → 为某个 demo 问题定制的。上面"每个判断紧跟依据"那条已经覆盖了大半。
+# · Length/structure rules like "say three or four sentences, two or three points"
+#     -> demo taste, not a correctness issue. Also, more sentences means more TTS segments and more audible seams.
+#       If you really want to control length, the "say one or two sentences at a time, then stop" line is enough.
+# · The whole "speaking style: varied intonation, stress important words, rising tone on questions, no announcer voice" block
+#     -> these are **performance directions**; putting them in the text prompt means the text model interprets them and then we hope TTS guesses,
+#       two layers removed. The TTS backend has an instruction parameter (Breeze has one, gpt-4o-mini-tts too)
+#       that takes this directly and works much better. It has moved there, so don't repeat it here.
+# · "Don't start every sentence with the same verbal tic"
+#     -> it patched another rule that's already gone (originally "start with mm/hey/oh", which the model treated as mandatory
+#       for every sentence). The root cause is gone, so the patch needn't stay.
+# · "When asked 'what's your impression of me', focus on him as a person, not recent events"
+#     -> tailored to one specific demo question. The "back every judgement with its basis" rule above covers most of it.
 
 
-_STRANGER = ("说话的不是你认识的那个人——声纹对不上。你对他没有任何记忆。"
-             "别把别人的事讲给他听，也别猜他是谁。就当第一次见面，"
-             "友好但如实地说你还不认识他。")
+_STRANGER = ("The person speaking is not the one you know -- the voiceprint doesn't match. You have no memory of them. "
+             "Don't tell them anything about the other person, and don't guess who they are. Treat it as a first meeting, "
+             "and say, friendly but honestly, that you don't know them yet.")
 
-#: 这一轮一条记忆都没检索到时追加的一句。
+#: A line appended when not a single memory was retrieved this turn.
 #:
-#: 人设里那套"从含糊的一句话里猜出具体那件事"的指示，在有记忆时是这套系统最值钱
-#: 的地方，可**一条都没检索到**时它就成了编造的许可证：新建一个空的 Memory Space、
-#: 第一句问「我不能吃什么」，它张口就是「你的饮食禁忌里，辣椒和海鲜要注意，之前
-#: 你提到过对这些过敏」——两样都是凭空来的。空库的第一句话就撞得上，而那正是别人
-#: 第一次用这个 demo 的时刻。
+#: The persona's "guess the specific thing from a vague sentence" instruction is the most valuable part of this system when there
+#: are memories, but when **nothing at all was retrieved** it becomes a licence to fabricate: create an empty Memory Space,
+#: first ask "what can't I eat", and it opens with "for your dietary restrictions, watch out for chili and seafood, you
+#: mentioned being allergic to them before" -- both invented. An empty store hits this on the very first sentence, which is exactly
+#: the moment someone uses this demo for the first time.
 #:
-#: 跟 _STRANGER 的区别：那句是"你认识的是另一个人"，这句是"这件事你不知道"。
-#: 界面选的语言。助手跟着它走——回复用这个语言，抽出来的记忆也用这个语言写。
+#: Difference from _STRANGER: that one says "the person you know is someone else"; this one says "you don't know this".
+#: The language chosen in the UI. The assistant follows it -- replies in this language, and extracted memories are written in it too.
 #:
-#: 记忆的语言必须跟着一起换，不然库里会中英混着长：同一件事今天记成中文、明天
-#: 记成英文，检索时两边都只能命中一半。
-UI_LANG = ARGS.lang          # 界面语言。右上角随时可切，跟记忆/回复语言无关
+#: The memory language must switch along with it, otherwise the store grows mixed-language: the same thing recorded in one language today
+#: and another tomorrow, and retrieval only hits half of each.
+UI_LANG = ARGS.lang          # UI language. Switchable anytime at the top right; independent of memory/reply language
 
-#: 助手说什么语言。原来是跟着**界面语言开关**走（前端把选择存在 localStorage 里，
-#: 每次开页面自动 POST 给后端），结果是：后端默认值永远不生效，上次录英文 demo 切过
-#: 一次，之后全程中文提问也照样英文回答，换库、重启都没用。
-#: 现在改成跟着**用户这句话的语言**走——问什么语言答什么语言，跟界面无关。
-#: 回复用哪种语言。跟**当前空间**走，不跟界面走，也不跟用户这一句用什么语言走。
+#: What language the assistant speaks. It used to follow the **UI language toggle** (the frontend stored the choice in localStorage
+#: and POSTed it to the backend on every page load), with the result that the backend default never took effect: after switching once
+#: for an English demo recording, every later question in another language still got English answers; changing stores or restarting didn't help.
+#: It was then changed to follow **the language of the user's sentence** -- answer in whatever language was asked, regardless of UI.
+#: Which language to reply in. Follows the **current space**, not the UI, and not the language of the user's current sentence.
 #:
-#: 原来是"用户说什么语言就回什么语言"。那在单语场景下没问题，但空间是有语言的：
-#: 一个英文库里用户偶尔冒一句中文，助手跟着说中文、这轮记忆也就成了中文，
-#: 库就混了。语言在建空间时定死，这里照着执行。
+#: It used to be "reply in whatever language the user speaks". Fine for monolingual use, but a space has a language:
+#: in an English store the user occasionally drops a sentence in another language, the assistant follows, this turn's memory ends up in that language too,
+#: and the store gets mixed. The language is fixed when the space is created; this just enforces it.
 _LANG_NOTE = {
-    "zh": "全程用中文回复，即使用户用别的语言问你。",
     "en": "Always reply in English, even if the user writes in another language.",
     "hi": "Always reply in Hindi (Devanagari script), even if the user writes in "
           "another language. Keep it natural spoken Hindi, not literary Hindi; "
@@ -249,26 +248,19 @@ _LANG_NOTE = {
 }
 
 
-#: 这个空间用什么语言。**建空间时定一次，之后不再变**。
+#: What language this space uses. **Set once when the space is created, never changed afterwards**.
 #:
-#: 记忆和回复都跟着它，界面语言（UI_LANG）是另一回事，可以随便切。
-#: 为什么不做成随时可切：语言是**库的属性**。检索是按向量做的，中文问句和英文
-#: 记忆在向量空间里离得很远，一个库里中英混存的后果是一半记忆检索不到，而且
-#: 不报错。中途切语言要么把库搞混，要么就得每条存两份——两种都不能接受。
+#: Memory and replies both follow it; the UI language (UI_LANG) is a separate matter and can be switched freely.
+#: Why it isn't switchable anytime: language is **a property of the store**. Retrieval is vector-based, and a question in one language
+#: sits far from memories in another language in vector space; mixing languages in one store means half the memories can't be retrieved, and
+#: nothing reports an error. Switching mid-way either mixes up the store or stores everything twice -- neither is acceptable.
 SPACE_LANG = "en"
 
 
 def space_language(name: str) -> str:
-    """读这个空间建的时候定的语言；老空间没有这个字段就按 en。"""
-    import json as _json
-    d, safe = space_dir(name)
-    f = d / f"{safe}.json"
-    try:
-        v = (_json.loads(f.read_text(encoding="utf-8"))
-             .get("space", {}).get("language", ""))
-        return "zh" if str(v).lower().startswith("zh") else "en"
-    except Exception:
-        return "en"
+    """The language this space uses. Only en is supported, so every space (old ones included) is en."""
+    space_dir(name)                  # still validates the name
+    return "en"
 
 
 def _write_space_language(name: str, lang: str) -> None:
@@ -280,15 +272,15 @@ def _write_space_language(name: str, lang: str) -> None:
         doc.setdefault("space", {})["language"] = lang
         f.write_text(_json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
     except Exception as e:
-        print(f"[space] 写语言失败（不影响使用）：{e}", flush=True)
+        print(f"[space] failed to write language (harmless): {e}", flush=True)
 
 
 def set_lang(lang: str) -> None:
-    """右上角那个选择器：**只切界面语言**。
+    """The selector at the top right: **switches the UI language only**.
 
-    记忆语言和回复语言跟着**当前空间**走，不受这里影响——见 SPACE_LANG。
-    界面是中文、正在用的空间是英文库，这是允许的：你可以用中文界面浏览一个
-    英文记忆库。
+    Memory language and reply language follow the **current space** and aren't affected by this -- see SPACE_LANG.
+    A UI in one language while the current space is a store in another is allowed: you can browse
+    a memory store through a UI in a different language.
     """
     global UI_LANG
     v = str(lang).lower()
@@ -304,36 +296,42 @@ def _lang_note() -> str:
     what it speaks is switchable every turn (one click, top right), while what
     gets **stored** is a property of the library, fixed when it was created (see
     SPACE_LANG). That is how Hindi is supported -- replies come out in Hindi
-    while memory is still extracted in the space's language (voicemem/lang.py
+    while memory is still extracted in the space's language (supermem/lang.py
     only SUPPORTS en/zh), so one library never mixes scripts.
     """
     return _LANG_NOTE.get(UI_LANG) or _LANG_NOTE.get(SPACE_LANG) or _LANG_NOTE["en"]
 
 
 _NO_MEMORY_NOTE = (
-    "这一轮你没有检索到任何相关记忆。所以：**不要提任何具体的事**——"
-    "食物、地点、人名、日期、他做过什么、他喜欢什么，一个都不许说，"
-    "更不能说「你之前提到过」「我记得你说过」。"
-    "如实说这件事你还不知道，然后问他，或者就着他这句话本身聊。"
-    "宁可显得记性不好，也不要编——编出来的东西他一眼就看得穿，"
-    "而且会让他不再相信你真记得的那些。"
+    "You retrieved no relevant memory at all this turn. So: **don't mention anything specific** -- "
+    "food, places, names, dates, what he did, what he likes -- not a single one, "
+    "and certainly don't say \"you mentioned before\" or \"I remember you said\". "
+    "Say honestly that you don't know this yet, then ask him, or just talk about what he said itself. "
+    "Better to seem forgetful than to make things up -- he'll see through anything invented at a glance, "
+    "and it will make him stop trusting the things you really do remember."
 )
 
 
-#: 问的是"一段声音"时才回放。故意做得很笨——这是个触发词表，不是意图分类器：
-#: 多放一次听感上只是"它把当时那段放给你听"，判漏了也只是回到手动点 ▶。
-_SOUND_WORDS = ("歌", "曲", "调子", "旋律", "音乐", "哼", "那段声音", "放来听",
-                "放给我听", "播一下", "什么声音")
+#: Only replay when the question is about "a sound". Deliberately dumb -- this is a trigger-word list, not an intent classifier:
+#: an extra replay just sounds like "it played that bit back for you", and a miss just falls back to clicking ▶ by hand.
+_SOUND_WORDS = ("song", "tune", "melody", "music", "hum", "humming", "that sound", "play it back",
+                "play it for me", "play me", "replay", "what sound")
+
+
+def _has_any(text: str, words) -> bool:
+    """Whole-word / whole-phrase match, case-insensitive (so "hum" doesn't hit "human")."""
+    t = (text or "").lower()
+    return any(re.search(r"\b" + re.escape(w) + r"\b", t) for w in words)
 
 
 def _musical_memory_ids() -> set[str]:
-    """音频里**真的有音乐**的那些记忆。
+    """Memories whose audio **really contains music**.
 
-    ingest 时音乐识别命中过的一轮，会被打上 ``tune:<tune_id>`` 标签（跟
-    ``scene:café`` / ``speaker:person_x`` 一样存在 memory_tags 里）。有了它就不用
-    靠用户正好说过"我听到一首歌"——在咖啡馆随便聊，那一轮的背景音乐照样被记下来。
+    A turn where music recognition hit during ingest gets tagged ``tune:<tune_id>`` (stored in
+    memory_tags just like ``scene:café`` / ``speaker:person_x``). With it we don't need
+    the user to have happened to say "I heard a song" -- chat casually in a café and that turn's background music still gets recorded.
 
-    读失败就返回空集：这只是个偏好排序，取不到就退回原来的"第一条有音频的"。
+    Returns an empty set on read failure: this is only a preference ordering; if unavailable it falls back to the old "first one with audio".
     """
     try:
         tunes = vm._o._audio._music_store().list_tunes()
@@ -347,18 +345,18 @@ def _musical_memory_ids() -> set[str]:
         return set()
 
 
-#: 回放正在进行到什么时候（单调时钟）。这段时间里的空文本轮次一律丢掉。
+#: Until when a replay is in progress (monotonic clock). Empty-text turns during this time are all dropped.
 _REPLAY_UNTIL = 0.0
 
 
 def _note_replay(memory_id: str) -> None:
-    """记下这次回放大概会响多久。
+    """Note roughly how long this replay will be audible.
 
-    放出来的录音会从扬声器绕回麦克风，被 VAD 判成新的一轮——转写是空的、左右脑
-    都没命中，模型手上什么都没有，于是回一句"抱歉，我没法直接重播"，日志里那段
-    音乐还被认成"第 2 次听到"。页面那边已经在回放期间停了上行（见 voicemem.html
-    的 holdMic），这里是第二道：万一前端没生效（别的客户端、老页面缓存），
-    后端自己也认得出这一轮是自己放出去的。
+    The played-back recording loops from the speaker into the mic and VAD judges it a new turn -- the transcript is empty, neither the left
+    nor right brain hits, the model has nothing in hand, so it replies "sorry, I can't replay that directly", and in the log that
+    music is even recognized as "heard for the 2nd time". The page already stops upstream audio during replay (see holdMic in
+    supermem.html); this is the second line of defence: in case the frontend didn't take effect (another client, a stale cached page),
+    the backend itself can still tell this turn is its own playback.
     """
     global _REPLAY_UNTIL
     path = audio_of(memory_id)
@@ -368,7 +366,7 @@ def _note_replay(memory_id: str) -> None:
         import soundfile as sf
         dur = float(sf.info(path).duration)
     except Exception:
-        dur = 15.0          # 读不出时长就按上限压一会儿，宁可多挡一轮
+        dur = 15.0          # if duration can't be read, hold for the upper bound; better to block one turn too many
     _REPLAY_UNTIL = time.monotonic() + dur + 1.0
 
 
@@ -376,25 +374,25 @@ def _replaying_now() -> bool:
     return time.monotonic() < _REPLAY_UNTIL
 
 
-#: 刚听过、还没来得及入库的那段音乐。``{"path": wav, "at": 单调时钟}``
+#: The music just heard that hasn't made it into the store yet. ``{"path": wav, "at": monotonic clock}``
 #:
-#: 为什么要单独记一份：入库走后台线程，一轮 15-20 秒才写完，而"刚听完就问"恰恰
-#: 是最自然的用法——实测放完音乐立刻问「重播一下刚才那首歌」，那条记忆的
-#: created_at 跟提问时间只差几秒，查库的时候还没有它。而 tune 识别是同步的
-#: （Ingest 立刻带着 recognized_tune 返回），这份缓存在上一轮结束时就写好了，
-#: 正好补上那十几秒空窗。
+#: Why keep a separate copy: ingestion runs on a background thread and a turn takes 15-20 s to be written, while "ask right after listening"
+#: is exactly the most natural usage -- measured: play music, then immediately ask "replay that song just now"; that memory's
+#: created_at is only seconds from the question time, so it isn't in the store yet when queried. Tune recognition, however, is synchronous
+#: (Ingest returns immediately with recognized_tune), so this cache is written by the end of the previous turn,
+#: exactly covering that gap of a dozen-odd seconds.
 _LAST_TUNE: dict = {"path": "", "at": 0.0}
 
-#: 用这个假 id 请求上面那段录音。真 memory_id 是 uuid，不会撞。
+#: Request the recording above with this fake id. Real memory_ids are uuids, so no collision.
 LAST_TUNE_ID = "last:tune"
 
-#: 缓存多久算"刚才"。超过就不认了——半小时前听的歌不该被「刚才那首」捞出来。
-LAST_TUNE_TTL_S = float(os.environ.get("VOICEMEM_LAST_TUNE_TTL", "1800"))
+#: How long the cache counts as "just now". Beyond that it's ignored -- a song heard half an hour ago shouldn't be picked up by "that song just now".
+LAST_TUNE_TTL_S = float(os.environ.get("SUPERMEM_LAST_TUNE_TTL", "1800"))
 
 
 def _remember_tune(audio_path: str) -> None:
     _LAST_TUNE.update(path=str(audio_path or ""), at=time.monotonic())
-    print(f"  [replay] 记住这段音乐：{audio_path}", flush=True)
+    print(f"  [replay] remembering this music: {audio_path}", flush=True)
 
 
 def _last_tune_path() -> str:
@@ -404,110 +402,112 @@ def _last_tune_path() -> str:
     return p if Path(p).exists() else ""
 
 
-#: 问句里的时间限定。记忆本来就绑了 created_at，「上周三下午在咖啡馆听的那首」
-#: 这种要求靠语义检索是碰运气——"上周三""下午"对向量几乎没有影响，撞上哪条算哪条。
-#: 所以时间和地点单独解析出来，当**硬条件**筛。
+#: Time qualifiers in the question. Memories already carry created_at; a request like "the one I heard at the café last Wednesday afternoon"
+#: is a gamble via semantic retrieval -- "last Wednesday", "afternoon" barely affect the vector, whatever it hits is what you get.
+#: So time and place are parsed out separately and used as **hard filters**.
 _DAY_WORDS = (
-    (("大前天",), -3), (("前天",), -2), (("昨天", "昨晚", "昨儿"), -1),
-    (("今天", "今早", "今晚", "今日"), 0),
+    (("three days ago",), -3), (("day before yesterday",), -2), (("yesterday", "last night"), -1),
+    (("today", "this morning", "tonight", "this evening"), 0),
 )
 _HOUR_WORDS = (
-    (("凌晨", "半夜", "深夜"), (0, 6)),
-    (("早上", "早晨", "今早", "一早", "清晨"), (6, 10)),
-    (("上午",), (8, 12)),
-    (("中午", "晌午"), (11, 14)),
-    (("下午",), (12, 18)),
-    (("傍晚", "黄昏"), (17, 20)),
-    (("晚上", "晚间", "昨晚", "今晚", "夜里"), (18, 24)),
+    (("early morning", "midnight", "late at night", "middle of the night"), (0, 6)),
+    (("morning", "this morning", "first thing"), (6, 10)),
+    (("before noon", "forenoon"), (8, 12)),
+    (("noon", "midday", "lunchtime"), (11, 14)),
+    (("afternoon",), (12, 18)),
+    (("evening", "dusk", "sunset"), (17, 20)),
+    (("night", "last night", "tonight"), (18, 24)),
 )
-#: 星期几。「周三」单说指本周，配合「上周」就是上一周。
-_WEEKDAYS = (("周一", "星期一", "礼拜一"), ("周二", "星期二", "礼拜二"),
-             ("周三", "星期三", "礼拜三"), ("周四", "星期四", "礼拜四"),
-             ("周五", "星期五", "礼拜五"), ("周六", "星期六", "礼拜六"),
-             ("周日", "周天", "星期日", "星期天", "礼拜天"))
+#: Weekdays. "Wednesday" alone means this week; together with "last week" it means the previous week.
+_WEEKDAYS = (("monday",), ("tuesday",),
+             ("wednesday",), ("thursday",),
+             ("friday",), ("saturday",),
+             ("sunday",))
+#: Month-name prefixes, for "<month> <day>" dates.
+_MONTHS = ("jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec")
 
-#: 中文地点说法 → 声学场景标签（scene_classifier.SceneTag）。
-#: 场景是每轮录音自动分类出来的，存在 memory_tags 里（scene:café）。
+#: Place phrases -> acoustic scene tags (scene_classifier.SceneTag).
+#: Scenes are classified automatically for each recorded turn and stored in memory_tags (scene:café).
 _PLACE_WORDS = (
-    (("咖啡馆", "咖啡店", "咖啡厅", "星巴克"), "café"),
-    (("办公室", "公司", "工位", "单位"), "office"),
-    (("家里", "家中", "在家", "屋里", "房间"), "home"),
-    (("外面", "户外", "外边", "路上", "街上", "公园"), "outdoor"),
-    (("车上", "地铁", "公交", "路上", "通勤", "火车"), "transit"),
-    (("会议", "开会", "会上", "会议室"), "meeting"),
+    (("cafe", "café", "coffee shop", "starbucks"), "café"),
+    (("office", "at work", "workplace", "my desk"), "office"),
+    (("at home", "home", "my room", "the house"), "home"),
+    (("outside", "outdoors", "on the street", "park", "on the road"), "outdoor"),
+    (("in the car", "subway", "metro", "bus", "commute", "train"), "transit"),
+    (("meeting", "conference room"), "meeting"),
 )
 
 
-#: 「第几首」。候选按时间正序排，序号就是下标——同一段时间里听了好几首时，
-#: 「第一首」「上一首」是最自然的说法，而这信息记忆里本来就有（created_at）。
+#: "Which one". Candidates are sorted oldest first, so the ordinal is the index -- when several were heard in the same period,
+#: "the first one" / "the previous one" are the most natural phrasing, and memory already has this info (created_at).
 _ORDINALS = (
-    (("第一首", "第一段", "第1首", "头一首", "最早那首", "最先那首"), 1),
-    (("第二首", "第二段", "第2首"), 2),
-    (("第三首", "第三段", "第3首"), 3),
-    (("第四首", "第四段", "第4首"), 4),
-    (("第五首", "第五段", "第5首"), 5),
+    (("first song", "first one", "first track", "first tune", "earliest one", "earliest song"), 1),
+    (("second song", "second one", "2nd song"), 2),
+    (("third song", "third one", "3rd song"), 3),
+    (("fourth song", "fourth one", "4th song"), 4),
+    (("fifth song", "fifth one", "5th song"), 5),
 )
-#: 从后往前数的说法。-1 = 最后一首，-2 = 倒数第二（也就是"上一首"）。
+#: Counting from the end. -1 = the last one, -2 = second to last (i.e. "the previous one").
 _ORDINALS_BACK = (
-    (("最后一首", "最后那首", "最后一段", "最新那首", "最近那首"), -1),
-    (("上一首", "前一首", "上一段", "前一段", "前面那首", "上一个"), -2),
+    (("last song", "last one", "last tune", "latest one", "latest song", "most recent one"), -1),
+    (("previous song", "previous one", "song before", "one before", "earlier one", "previous tune"), -2),
 )
 
 
 def _ordinal_of(text: str):
-    """问句里的「第几首」→ 1-based 序号（负数表示从后往前数）；没说返回 None。"""
+    """"Which one" in the question -> 1-based ordinal (negative counts from the end); None if not said."""
     t = text or ""
     for words, n in _ORDINALS + _ORDINALS_BACK:
-        if any(w in t for w in words):
+        if _has_any(t, words):
             return n
     return None
 
 
 def _place_of(text: str) -> str:
-    """问句里提到的地点 → 场景标签；没提就返回 ""。"""
+    """Place mentioned in the question -> scene tag; "" if none."""
     t = text or ""
-    return next((tag for words, tag in _PLACE_WORDS if any(w in t for w in words)), "")
+    return next((tag for words, tag in _PLACE_WORDS if _has_any(t, words)), "")
 
 
 def _time_window(text: str):
-    """问句 → (起, 止) 两个 datetime；没提时间就返回 None。
+    """Question -> (start, end) as two datetimes; None if no time is mentioned.
 
-    认得出：今天/昨天/前天/大前天、这周/上周/上上周、周一~周日、这个月/上个月、
-    N月N号、N天前，以及凌晨/早上/上午/中午/下午/傍晚/晚上这些时段，可以组合
-    （「上周三下午」）。认不出来就返回 None 交给"取最近的一条"——别自作聪明猜，
-    猜错了放出来的是别的录音，比放不出来更糟。
+    Recognizes: today/yesterday/day before yesterday/three days ago, this week/last week/week before last, Monday-Sunday, this month/last month,
+    "<month> <day>", "N days ago", plus the periods early morning/morning/before noon/noon/afternoon/evening/night; they can be combined
+    ("last week Wednesday afternoon"). If nothing is recognized, return None and let "take the most recent one" handle it -- don't be clever and guess;
+    guessing wrong plays some other recording, which is worse than playing nothing.
 
-    「刚才」「刚刚」故意不算时间限定：它们说的是"最近那次"，走严格分支反而会因为
-    筛不到而什么都不放。
+    "just now" / "a moment ago" deliberately don't count as a time qualifier: they mean "the most recent one", and the strict branch would
+    find nothing to match and play nothing.
     """
     import re
     from datetime import datetime, timedelta
-    t = text or ""
+    t = (text or "").lower()
     now = datetime.now()
     day0 = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    span = None                      # (起日, 止日)，止日不含
+    span = None                      # (start day, end day), end day exclusive
 
-    m = re.search(r"(\d+)\s*天前", t)
+    m = re.search(r"\b(\d+)\s*days?\s+ago\b", t)
     if m:
         d = day0 - timedelta(days=int(m.group(1)))
         span = (d, d + timedelta(days=1))
 
     if span is None:
-        wd = next((i for i, words in enumerate(_WEEKDAYS) if any(w in t for w in words)), None)
+        wd = next((i for i, words in enumerate(_WEEKDAYS) if _has_any(t, words)), None)
         if wd is not None:
-            # 本周一为基准；「上周」再往前推一周
+            # Based on this week's Monday; "last week" moves back one more week
             monday = day0 - timedelta(days=day0.weekday())
-            if "上上周" in t or "上上星期" in t:
+            if "week before last" in t:
                 monday -= timedelta(days=14)
-            elif "上周" in t or "上星期" in t or "上礼拜" in t:
+            elif "last week" in t:
                 monday -= timedelta(days=7)
             d = monday + timedelta(days=wd)
             span = (d, d + timedelta(days=1))
 
     if span is None:
-        m = re.search(r"(\d{1,2})\s*月\s*(\d{1,2})\s*[号日]", t)
+        m = re.search(r"\b(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b", t)
         if m:
-            mth, dom = int(m.group(1)), int(m.group(2))
+            mth, dom = _MONTHS.index(m.group(1)) + 1, int(m.group(2))
             year = now.year - 1 if mth > now.month else now.year
             try:
                 d = datetime(year, mth, dom)
@@ -515,68 +515,68 @@ def _time_window(text: str):
             except ValueError:
                 span = None
     if span is None:
-        m = re.search(r"(?<![0-9])(\d{1,2})\s*[号日](?!\s*[前后])", t)
+        m = re.search(r"\bthe\s+(\d{1,2})(?:st|nd|rd|th)\b", t)
         if m:
             dom = int(m.group(1))
             try:
                 d = day0.replace(day=dom)
-                if d > day0:                       # 这个月还没到，那说的是上个月
+                if d > day0:                       # not yet reached this month, so it means last month
                     d = (day0.replace(day=1) - timedelta(days=1)).replace(day=dom)
                 span = (d, d + timedelta(days=1))
             except ValueError:
                 span = None
 
     if span is None:
-        day = next((d for words, d in _DAY_WORDS if any(w in t for w in words)), None)
+        day = next((d for words, d in _DAY_WORDS if _has_any(t, words)), None)
         if day is not None:
             d = day0 + timedelta(days=day)
             span = (d, d + timedelta(days=1))
 
     if span is None:
-        if "上上周" in t or "上上星期" in t:
+        if "week before last" in t:
             monday = day0 - timedelta(days=day0.weekday() + 14)
             span = (monday, monday + timedelta(days=7))
-        elif "上周" in t or "上星期" in t or "上礼拜" in t:
+        elif "last week" in t:
             monday = day0 - timedelta(days=day0.weekday() + 7)
             span = (monday, monday + timedelta(days=7))
-        elif "这周" in t or "本周" in t or "这星期" in t:
+        elif "this week" in t:
             monday = day0 - timedelta(days=day0.weekday())
             span = (monday, monday + timedelta(days=7))
-        elif "上个月" in t or "上月" in t:
+        elif "last month" in t:
             first = day0.replace(day=1)
             span = ((first - timedelta(days=1)).replace(day=1), first)
-        elif "这个月" in t or "本月" in t:
+        elif "this month" in t:
             first = day0.replace(day=1)
             span = (first, (first + timedelta(days=32)).replace(day=1))
 
-    hours = next((h for words, h in _HOUR_WORDS if any(w in t for w in words)), None)
+    hours = next((h for words, h in _HOUR_WORDS if _has_any(t, words)), None)
     if span is None and hours is None:
         return None
-    if span is None:                                  # 只说了时段，默认今天
+    if span is None:                                  # only a period of day was given; default to today
         span = (day0, day0 + timedelta(days=1))
     if hours is None:
         return span
-    # 时段只在跨度是一天时才细化——「上周下午」没有意义
+    # Only refine by period when the span is a single day -- "afternoon last week" is meaningless
     if (span[1] - span[0]).days > 1:
         return span
     return span[0] + timedelta(hours=hours[0]), span[0] + timedelta(hours=hours[1])
 
 
 def _tune_memories() -> list[dict]:
-    """所有能放出来的候选：带 tune: 标签、或者是纯声音轮，并且原声还在。
+    """All candidates that can be played: tagged tune:, or a sound-only turn, and the original audio still exists.
 
-    为什么 sound_only 也算：直接对着麦克风放音乐、声学又没认出来时（外放、环境
-    吵、片段短都会漏），那一轮既没有 tune 标签也没有话，只知道"有段录音、没人
-    说话"。它恰恰最可能就是用户要找的那段。普通说话轮不会混进来。
+    Why sound_only counts too: when music is played straight into the mic and acoustics didn't recognize it (loudspeaker, noisy
+    surroundings, short clips all cause misses), that turn has neither a tune tag nor speech; all we know is "there's a recording, nobody
+    talking". That is precisely the most likely one the user is looking for. Ordinary speech turns don't get mixed in.
 
-    一条 = {"id", "at": datetime, "scenes": {...}, "text"}，新的在前。
-    回放的候选池就是它——按时间、按地点筛都在这个池子里做，不依赖这一轮检索
-    碰巧命中了什么。
+    One item = {"id", "at": datetime, "scenes": {...}, "text"}, newest first.
+    This is the replay candidate pool -- filtering by time and by place both happen in this pool, independent of whatever this turn's
+    retrieval happened to hit.
     """
     from datetime import datetime
     try:
         import sqlite3
-        from voicemem.utils.common import space as _space
+        from supermem.utils.common import space as _space
         c = sqlite3.connect(_space.db(vm._o._memory_root))
         c.row_factory = sqlite3.Row
         rows = c.execute(
@@ -594,7 +594,7 @@ def _tune_memories() -> list[dict]:
                  ORDER BY m.created_at DESC LIMIT 300""").fetchall()
         c.close()
     except Exception as e:
-        print(f"[replay] 列音乐记忆失败：{type(e).__name__}: {e}", flush=True)
+        print(f"[replay] failed to list music memories: {type(e).__name__}: {e}", flush=True)
         return []
 
     out = []
@@ -613,14 +613,14 @@ def _tune_memories() -> list[dict]:
 
 
 def _archived_memory_ids() -> list[str]:
-    """所有存了原声的记忆 id，新的在前。
+    """All memory ids with archived original audio, newest first.
 
-    按时间找录音时的兜底：音乐识别没命中的那些轮次没有 tune: 标签，但音频照样
-    归档了。只认标签的话，用户明明刚放过一首歌，它却回一句"没存到"。
+    Fallback when looking for a recording by time: turns where music recognition missed have no tune: tag, but their audio
+    was archived all the same. If we only trusted tags, the user just played a song and it would reply "not saved".
     """
     try:
         import sqlite3
-        from voicemem.utils.common import space as _space
+        from supermem.utils.common import space as _space
         c = sqlite3.connect(_space.db(vm._o._memory_root))
         rows = c.execute("SELECT id FROM memories ORDER BY created_at DESC LIMIT 200").fetchall()
         c.close()
@@ -631,18 +631,18 @@ def _archived_memory_ids() -> list[str]:
 
 
 def _created_at(mid: str):
-    """这条记忆是什么时候写下的。查不到返回 None。
+    """When this memory was written. Returns None if not found.
 
-    向量库那边只存了 date（天粒度），要按"下午"筛得用 sqlite 里的 created_at。
+    The vector store only keeps date (day granularity); filtering by "afternoon" needs created_at from sqlite.
 
-    路径要用 vm 解析好的 _memory_root，**不能拿 ARGS.space**——``space.db()`` 收的
-    是目录路径，给它一个裸名字（"musictest"）会当成相对路径，找不到就新建一个空
-    库，于是每条记忆都查不到时间，按时间回放静默失效。
+    The path must be the _memory_root resolved by vm, **not ARGS.space** -- ``space.db()`` takes
+    a directory path; given a bare name ("musictest") it's treated as a relative path, and when not found a new empty
+    store is created, so no memory's time can be found and time-based replay silently fails.
     """
     from datetime import datetime
     try:
         import sqlite3
-        from voicemem.utils.common import space as _space
+        from supermem.utils.common import space as _space
         c = sqlite3.connect(_space.db(vm._o._memory_root))
         row = c.execute("SELECT created_at FROM memories WHERE id=?", (mid,)).fetchone()
         c.close()
@@ -653,24 +653,24 @@ def _created_at(mid: str):
         return None
 
 
-#: 同一首歌的两个片段最多隔多久还算"连着的一首"。VAD 在乐句停顿处断开、
-#: 下一段重新起录，中间的空档就是这么来的。
-TUNE_GAP_S = float(os.environ.get("VOICEMEM_TUNE_GAP_S", "90"))
+#: Max gap between two clips of the same song for them to still count as "one continuous song". VAD cuts at phrase pauses
+#: and the next clip starts recording again; that's where the gap comes from.
+TUNE_GAP_S = float(os.environ.get("SUPERMEM_TUNE_GAP_S", "90"))
 
 
-#: 一组片段用这个前缀的假 id 请求，后面接用逗号分隔的 memory_id。
-#: 走的还是既有的 /api/audio/{memory_id}，前端一个字都不用改。
+#: A group of clips is requested with a fake id carrying this prefix, followed by comma-separated memory_ids.
+#: It still goes through the existing /api/audio/{memory_id}; the frontend needs no change at all.
 GROUP_ID_PREFIX = "group:"
 
-#: 拼好的整首放这儿。同一组只拼一次，之后直接命中。
+#: Stitched full songs live here. Each group is stitched only once, then hit directly.
 _STITCH_CACHE: dict = {}
 
 
 def _stitch(memory_ids: list) -> str:
-    """把几段录音按顺序拼成一个 wav，返回路径；拼不了就返回第一段。
+    """Stitch several recordings into one wav in order and return its path; if stitching fails return the first clip.
 
-    采样率不一致时以第一段为准重采样——归档的都是 16k 单声道，真遇到不一致
-    也不该让回放整个失败。
+    If sample rates differ, resample to the first clip's rate -- archives are all 16k mono, and even if a mismatch occurs
+    it shouldn't make the whole replay fail.
     """
     paths = [q for q in (audio_of(m) for m in memory_ids) if q]
     if not paths:
@@ -683,7 +683,7 @@ def _stitch(memory_ids: list) -> str:
     try:
         import numpy as np
         import soundfile as sf
-        from voicemem.utils.audio.stream_io import resample as _resample
+        from supermem.utils.audio.stream_io import resample as _resample
         chunks, sr0 = [], None
         for q in paths:
             x, sr = sf.read(q, dtype="float32", always_2d=False)
@@ -698,23 +698,23 @@ def _stitch(memory_ids: list) -> str:
         sf.write(out, np.concatenate(chunks), sr0)
         _STITCH_CACHE[key] = str(out)
         total = sum(len(c) for c in chunks) / float(sr0 or 16000)
-        print(f"  [replay] 拼好 {len(paths)} 段 → {total:.1f}s", flush=True)
+        print(f"  [replay] stitched {len(paths)} clips -> {total:.1f}s", flush=True)
         return str(out)
     except Exception as e:
-        print(f"  [replay] 拼接失败，只放第一段：{type(e).__name__}: {e}", flush=True)
+        print(f"  [replay] stitching failed, playing only the first clip: {type(e).__name__}: {e}", flush=True)
         return paths[0]
 
 
 def _same_song_group(pool: list, pick: dict) -> list:
-    """挑中的这一段，连同它前后**同一首、时间相连**的片段，按时间正序。
+    """The picked clip plus the clips before and after it that are **the same song and adjacent in time**, oldest first.
 
-    一轮录音在 VAD 判到静音时就结束了，而音乐里的乐句停顿、弱拍随便就够长——
-    实测一段 16 秒的曲子被切成 7.8s + 5.0s 两轮，回放只放中的一段，听感就是
-    "只放了开头"。这些碎片被音乐识别归成同一个 tune_id，把它们按时间拼回去
-    就是原来那首。
+    A recorded turn ends when VAD detects silence, and phrase pauses and weak beats in music are easily long enough --
+    measured: a 16-second piece was cut into two turns of 7.8s + 5.0s; replay played only the picked one, and it sounded like
+    "it only played the beginning". Music recognition assigns these fragments the same tune_id; stitching them back in time order
+    gives the original piece.
 
-    tune_id 认不出来（tune:unidentified）时只按时间相邻算——那时没有别的凭据，
-    宁可少拼几段，也别把两首不同的歌接在一起。
+    When the tune_id isn't recognized (tune:unidentified), only time adjacency counts -- there's no other evidence then;
+    better to stitch fewer clips than to join two different songs together.
     """
     tune = pick.get("tune") or ""
     same = [x for x in pool
@@ -733,7 +733,7 @@ def _same_song_group(pool: list, pick: dict) -> list:
 
 
 def _group_id(group: list) -> str:
-    """一组片段 → 一个 id。只有一段时就用它本身的 id，别绕。"""
+    """A group of clips -> one id. With a single clip just use its own id, no detour."""
     if not group:
         return ""
     if len(group) == 1:
@@ -742,31 +742,31 @@ def _group_id(group: list) -> str:
 
 
 def _prefer_sound_only(cand: list) -> list:
-    """候选里有"只有声音、没有说话"的那种，就只用它们。
+    """If the candidates include "sound only, no speech" ones, use only those.
 
-    「给你听一首歌啊」和后面那段音乐是**两轮**——一轮录音从检测到人声开始、到 VAD
-    判定说完为止，所以前一轮存的是他自己那句话（说的时候背景里已经有音乐，于是
-    那轮也带 tune 标签），后一轮才是音乐本身。两条都在池子里，挑错了放出来是用户
-    自己的声音，听感就是"音乐被截断了"。
-    一条纯音乐轮都没有时原样返回——总比什么都不放强。
+    "Let me play you a song" and the music that follows are **two turns** -- a recorded turn runs from detecting voice until VAD
+    decides speech is over, so the first turn stores his own sentence (music was already playing in the background, so
+    that turn also carries a tune tag), and only the second turn is the music itself. Both are in the pool; pick wrong and what plays is the
+    user's own voice, which sounds like "the music got cut off".
+    If there is not a single pure-music turn, return as is -- better than playing nothing.
     """
     only = [x for x in cand if x.get("sound_only")]
     return only or cand
 
 
 def _replay_id(text: str, result) -> str:
-    """这一轮该不该把当时那段原声放回来，返回要放的 memory_id（不放就空串）。
+    """Whether this turn should play back the original audio from back then; returns the memory_id to play (empty string if not).
 
-    问的是声音（``_SOUND_WORDS``）才会放。候选池是**所有**带音乐标签、原声还在的
-    记忆（``_tune_memories``），不是这一轮碰巧检索到的东西——「上周三在咖啡馆听的
-    那首」靠语义检索是碰运气，而时间和地点记忆里本来就有。
+    Only plays when the question is about sound (``_SOUND_WORDS``). The candidate pool is **all** memories with a music tag and
+    surviving original audio (``_tune_memories``), not whatever this turn's retrieval happened to hit -- "the one I heard at the café
+    last Wednesday" is a gamble via semantic retrieval, whereas time and place are already in the memories.
 
-      ① 说了时间或地点 → 当硬条件筛，取符合条件里最近的一条。
-         筛空就是**真没有**，回空串让模型如实说，不退回去随便挑：退回去的话，
-         问「昨天晚上那首歌」会把今天下午的录音放出来，用户以为它记错了时间，
-         其实它压根没在按时间找。
-      ② 什么条件都没说（"那首歌""刚才那段旋律"）→ 池子里最近的一条。
-      ③ 池子是空的 → 退回这一轮检索命中的、和刚听过还没入库的那段。
+      1. Time or place given -> use as hard filters, take the most recent match.
+         An empty result means **there really is none**; return an empty string so the model says so honestly, don't fall back to a random pick:
+         falling back, "that song last night" would play this afternoon's recording, and the user would think it got the time wrong,
+         when in fact it never searched by time at all.
+      2. No conditions given ("that song", "that melody just now") -> the most recent one in the pool.
+      3. Pool is empty -> fall back to what this turn's retrieval hit, or the clip just heard that isn't stored yet.
     """
     if not _wants_sound(text):
         return ""
@@ -775,8 +775,8 @@ def _replay_id(text: str, result) -> str:
     window, place = _time_window(text), _place_of(text)
     nth = _ordinal_of(text)
 
-    # 「第一首」没说是哪天的第一首时，默认今天——问"第一首"几乎都是指今天听的
-    # 那批里的第一首，拿全库去数会数到几个月前那条。
+    # When "the first one" doesn't say which day, default to today -- "the first one" almost always means the first of
+    # today's batch; counting over the whole store would land on one from months ago.
     if nth is not None and window is None:
         from datetime import datetime, timedelta
         day0 = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -790,107 +790,106 @@ def _replay_id(text: str, result) -> str:
             cand = [x for x in cand if place in x["scenes"]]
         cand = _prefer_sound_only(cand)
         if cand:
-            cand.sort(key=lambda x: x["at"])          # 正序：第一首在最前
+            cand.sort(key=lambda x: x["at"])          # oldest first: the first song comes first
             if nth is None:
-                pick = cand[-1]                        # 没说第几首就取最近的
+                pick = cand[-1]                        # no ordinal given: take the most recent
             elif -len(cand) <= (nth - 1 if nth > 0 else nth) < len(cand):
                 pick = cand[nth - 1 if nth > 0 else nth]
             else:
-                print(f"  [replay] 那段时间只有 {len(cand)} 首，没有第 {nth} 首", flush=True)
+                print(f"  [replay] only {len(cand)} songs in that period, no song #{nth}", flush=True)
                 return ""
-            print(f"  [replay] 按条件挑中 {pick['id'][:12]}（{pick['at']:%m-%d %H:%M}"
+            print(f"  [replay] picked by conditions {pick['id'][:12]} ({pick['at']:%m-%d %H:%M}"
                   f"{' / ' + place if place else ''}"
-                  f"{' / 第 %d 首' % nth if nth else ''}，共 {len(cand)} 首）", flush=True)
+                  f"{' / #%d' % nth if nth else ''}, {len(cand)} total)", flush=True)
             return _group_id(_same_song_group(pool, pick))
-        print(f"  [replay] 池里 {len(pool)} 段音乐，没有符合条件的"
-              f"（{'时间 %s~%s ' % (window[0], window[1]) if window else ''}"
-              f"{'地点 ' + place if place else ''}）", flush=True)
+        print(f"  [replay] {len(pool)} music clips in pool, none match"
+              f" ({'time %s~%s ' % (window[0], window[1]) if window else ''}"
+              f"{'place ' + place if place else ''})", flush=True)
         return ""
 
     if pool:
         pick = max(_prefer_sound_only(pool), key=lambda x: x["at"])
-        print(f"  [replay] 没说条件，放最近的 {pick['id'][:12]}"
-              f"（{pick['at']:%m-%d %H:%M}）", flush=True)
+        print(f"  [replay] no conditions given, playing the most recent {pick['id'][:12]}"
+              f" ({pick['at']:%m-%d %H:%M})", flush=True)
         return _group_id(_same_song_group(pool, pick))
 
-    # 池子是空的：音乐识别没命中，或者刚听完还没入库。
+    # Pool is empty: music recognition missed, or it was just heard and isn't stored yet.
     playable = [h.memory_id for h in (getattr(result, "hits", None) or [])
                 if audio_of(h.memory_id)]
     if playable:
-        print(f"  [replay] 没有音乐标签，放检索到的 {playable[0][:12]}", flush=True)
+        print(f"  [replay] no music tag, playing retrieved {playable[0][:12]}", flush=True)
         return playable[0]
     if _last_tune_path():
-        print("  [replay] 还没入库，放刚听过的那段", flush=True)
+        print("  [replay] not stored yet, playing the clip just heard", flush=True)
         return LAST_TUNE_ID
-    print(f"  [replay] 放不了：一段音乐记忆都没有，检索 "
-          f"{len(getattr(result, 'hits', None) or [])} 条也都没音频，"
-          f"缓存 path={_LAST_TUNE.get('path') or '(空)'}", flush=True)
+    print(f"  [replay] can't play: no music memories at all, and none of the "
+          f"{len(getattr(result, 'hits', None) or [])} retrieved hits have audio, "
+          f"cache path={_LAST_TUNE.get('path') or '(empty)'}", flush=True)
     return ""
 
 
 def _turn_detection() -> dict:
-    """OpenAI 那侧的回合/打断判定。两种 provider 的参数**不通用**——semantic_vad
-    不吃 threshold / prefix_padding_ms / silence_duration_ms，传了整段会被静默拒绝
-    （只以 error 事件回来）。所以两套各写各的，别合并。
+    """Turn/interruption detection on the OpenAI side. The two providers' parameters are **not interchangeable** -- semantic_vad
+    doesn't accept threshold / prefix_padding_ms / silence_duration_ms; passing them gets the whole thing silently rejected
+    (only coming back as an error event). So each has its own version; don't merge them.
 
-    create_response=False   什么时候回复由我们决定（本地判完一轮、记忆预取好）
-    interrupt_response=True 用户一开口，服务端直接掐掉正在播的回复
+    create_response=False   we decide when to reply (after the local end-of-turn decision and memory prefetch)
+    interrupt_response=True as soon as the user speaks, the server cuts off the reply being played
     """
-    # interrupt_response=False：**不让 OpenAI 那侧打断**。
-    # 它的 VAD 是纯声学的，只要能量像人声就触发，对 AEC 残留毫无抵抗力——实测
-    # 助手说到 1.4-1.6s 时被自己的回声打断，表现是"说半句突然卡住"
-    # （日志：OpenAI VAD 听到人声 live=True 还在播=True 1570ms）。
-    # 本地那条是 ASR 确认制，要真的转出几个字才算插话，回声转不出连贯的字。
-    # 打断改成只走本地：on_speech 里我们自己发 response.cancel，效果一样。
+    # interrupt_response=False: **don't let the OpenAI side interrupt**.
+    # Its VAD is purely acoustic, triggering whenever energy looks like voice, with no resistance to AEC residue -- measured:
+    # the assistant got interrupted by its own echo 1.4-1.6s into speaking, showing up as "suddenly stalls mid-sentence"
+    # (log: OpenAI VAD heard voice live=True still playing=True 1570ms).
+    # The local path is ASR-confirmed: it only counts as a barge-in once a few words are actually transcribed; echo doesn't transcribe into coherent words.
+    # Interruption now goes only through the local path: we send response.cancel ourselves in on_speech, same effect.
     base = {"type": TURN_DETECTION, "create_response": False, "interrupt_response": False}
     if TURN_DETECTION == "semantic_vad":
         return {**base, "eagerness": VAD_EAGERNESS}
-    # server_vad：默认 0.5 对插话太钝——人隔着扬声器说话，回声消除处理过之后
-    # 信号本来就弱，够不到阈值就等于打不断。
+    # server_vad: the default 0.5 is too dull for barge-in -- a person talking over the speaker, after echo cancellation,
+    # already has a weak signal; not reaching the threshold means it can't interrupt.
     return {**base, "threshold": BARGE_THRESHOLD,
             "prefix_padding_ms": 200, "silence_duration_ms": 320}
 
 
-#: 要回放时追加的一句。不加的话模型会去"描述"那段音频（"你说那是一首很轻快的
-#: 钢琴曲…"）——它根本没听过那段音频，描述全是编的；而且用户马上就要亲耳听到。
-_REPLAY_NOTE = ("你手上有他当时那段录音，说完这句就会放给他听。"
-                "所以别去描述那段声音是什么样的——你没听过，别编。"
-                "就短短一句把它引出来，像「我把当时那段找出来了，你听听是不是这个」，"
-                "然后停住，等他听。")
+#: A line appended when replaying. Without it the model "describes" the audio ("you said it was a very lively
+#: piano piece...") -- it never heard the audio, the description is all made up; and the user is about to hear it for himself.
+_REPLAY_NOTE = ("You have his recording from back then, and it will be played to him right after you say this. "
+                "So don't describe what the sound is like -- you haven't heard it, don't make it up. "
+                "Just introduce it in one short sentence, like \"I found that clip from back then, have a listen and see if it's the one\", "
+                "then stop and let him listen.")
 
-#: 他在找一段声音、但那个时间段确实没有存档时追加的一句。
-#: 不加的话模型会顺口答"当然，马上播放"——然后什么都不放。说要播却没播，
-#: 比直接说没找到糟得多。
-_NO_REPLAY_NOTE = ("他在找一段录音，但你手上**没有**他说的那个时间的录音，"
-                   "这一轮不会播任何东西。所以别说「马上播放」「这就放给你听」。"
-                   "直说那个时候没有存到，再问一句是不是别的时候，"
-                   "或者说说你记得的相关的事。")
+#: A line appended when he's looking for a sound but there really is no archive from that time period.
+#: Without it the model casually answers "sure, playing it now" -- and then plays nothing. Saying it'll play and not playing
+#: is far worse than just saying it wasn't found.
+_NO_REPLAY_NOTE = ("He's looking for a recording, but you **don't have** a recording from the time he mentioned, "
+                   "and nothing will be played this turn. So don't say \"playing it now\" or \"here it is\". "
+                   "Say plainly that nothing was saved from that time, ask whether he means another time, "
+                   "or talk about related things you do remember.")
 
 
 def _wants_sound(text: str) -> bool:
-    return any(w in (text or "") for w in _SOUND_WORDS)
+    return _has_any(text, _SOUND_WORDS)
 
 
-#: 感知层判出来的情绪 → 一句**可执行的**表演指示。
+#: Emotion detected by the perception layer -> one **actionable** performance direction.
 #:
-#: 光在人设里写"要有起伏"没用——那是形容词，模型没有对象可对。给它一个具体的
-#: 目标（"他现在是焦虑的，你要放慢、压低、先接住"），语气才真的会变。
-#: 情绪本身是声学感知算出来的（Qwen-Omni 归因 + 韵律 VAD），每轮都不一样。
+#: Just writing "be expressive" in the persona does nothing -- it's an adjective, the model has nothing to aim at. Give it a concrete
+#: target ("he's anxious right now, slow down, lower your voice, acknowledge first") and the tone really changes.
+#: The emotion itself is computed by acoustic perception (Qwen-Omni attribution + prosody VAD) and differs every turn.
 _TONE = {
-    "焦虑": "他现在是紧绷的。语速放慢，句子短，先接住再说事，别一上来就给方案。",
-    "沮丧": "他现在情绪很低。声音压低、放软，允许有停顿，别急着安慰也别讲道理。",
-    "难过": "他现在难过。轻一点、慢一点，先陪着，别转移话题。",
-    "悲伤": "他现在难过。轻一点、慢一点，先陪着，别转移话题。",
-    "烦躁": "他现在有点烦。直接说重点，别绕，别追问，也别用哄的语气。",
-    "愤怒": "他在气头上。先认下来，语速稳住，别辩解。",
-    "开心": "他心情好。跟着热起来，语调扬上去，可以笑出来，别端着。",
-    "愉悦": "他心情好。跟着热起来，语调扬上去，可以笑出来，别端着。",
-    "兴奋": "他很兴奋。你也兴奋起来，语速快一点、音量抬一点，别泼冷水。",
-    "自豪": "他为自己骄傲。替他高兴，说得实在一点，别敷衍地夸。",
-    "期待": "他在期待。语气轻快，跟着往前想一步。",
-    "紧张": "他紧张。稳住，声音放平放缓，给他确定感。",
-    "委屈": "他觉得委屈。先站在他这边，语气软下来，别评理。",
-    "平静": "",
+    "anxious": "He's tense right now. Slow down, keep sentences short, acknowledge him before getting to the point; don't jump straight to solutions.",
+    "frustrated": "He's very low right now. Lower and soften your voice, allow pauses; don't rush to comfort him or lecture.",
+    "sad": "He's sad right now. Be gentle and slow, keep him company first; don't change the subject.",
+    "irritated": "He's a bit irritated right now. Get straight to the point, don't beat around the bush, don't press, and don't use a coaxing tone.",
+    "angry": "He's angry. Acknowledge it first, keep your pace steady, don't argue back.",
+    "happy": "He's in a good mood. Warm up with him, let your intonation rise, laugh if it fits, don't be stiff.",
+    "pleased": "He's in a good mood. Warm up with him, let your intonation rise, laugh if it fits, don't be stiff.",
+    "excited": "He's very excited. Get excited too, speak a bit faster and a bit louder, don't pour cold water on it.",
+    "proud": "He's proud of himself. Be happy for him, be concrete, don't give hollow praise.",
+    "hopeful": "He's looking forward to something. Keep your tone light and think one step ahead with him.",
+    "nervous": "He's nervous. Stay steady, keep your voice level and slow, give him a sense of certainty.",
+    "wronged": "He feels wronged. Take his side first, soften your tone, don't argue who's right.",
+    "calm": "",
 }
 
 
@@ -898,37 +897,36 @@ def _tone_note(emotion: str) -> str:
     return _TONE.get((emotion or "").strip(), "")
 
 
-#: 说话的基调，每一轮都带。跟 _TONE 拼起来就是这一轮给 TTS 的完整指示。
-_SPEAK_BASE = os.environ.get("VOICEMEM_SPEAK_BASE", "像一个老朋友一样讲话。")
+#: The baseline speaking style, included every turn. Combined with _TONE it's this turn's full instruction to TTS.
+_SPEAK_BASE = os.environ.get("SUPERMEM_SPEAK_BASE", "Speak like an old friend.")
 
 
 def _speak_instruction(emotion: str) -> str:
-    """这一轮怎么念，直接给 TTS。
+    """How to voice this turn, passed straight to TTS.
 
-    _TONE 那 13 条本来就全是**发声指示**（"语速放慢""声音压低""语调扬上去"），
-    以前拼在文本 prompt 里，等于让文字模型先理解一段发声描述、再指望 TTS 从
-    字面上猜出来，中间隔了两层，实测基本没效果。TTS 的 instruction 参数就是
-    收这个的（Breeze 有，gpt-4o-mini-tts 也有），直接送过去。
+    The 13 _TONE entries are all **vocal directions** to begin with ("slow down", "lower your voice", "let your intonation rise");
+    they used to be concatenated into the text prompt, which meant the text model first interpreted a vocal description and then we hoped TTS
+    would guess it from the words -- two layers removed, and measured to have basically no effect. TTS's instruction parameter exists
+    for exactly this (Breeze has it, gpt-4o-mini-tts too), so send it there directly.
     """
     tone = _tone_note(emotion)
-    return f"{_SPEAK_BASE}{tone}" if tone else _SPEAK_BASE
+    return f"{_SPEAK_BASE} {tone}" if tone else _SPEAK_BASE
 
 
-# ── 短期对话历史 ──────────────────────────────────────────────────────────────
-#: 回复模型是**无状态**的：reply.py 每轮只发 system + 用户这一句，没有前几轮。
-#: 长期记忆管的是"关于这个人的事实"，管不了"我们刚才在聊什么"——于是聊完一个
-#: 话题你说一句"ok ok"，它看到的就是一个孤零零的"ok ok"，重新打招呼
-#: （"你好呀？有什么事我可以帮你的吗"）。这两种上下文缺一不可。
-#: 每个 WebSocket 会话和 Memory Space 独立维护短期上下文。
-#: ingest 确认已生成持久记忆后移除对应 turn。
-#: 每句最多带这么多字进 prompt。回复有时很长，全塞进去会把记忆挤到后面。
-_HISTORY_CHARS = int(os.environ.get("VOICEMEM_HISTORY_CHARS", "200"))
+# ── Short-term conversation history ──────────────────────────────────────────
+#: The reply model is **stateless**: reply.py only sends system + the user's current sentence each turn, no previous turns.
+#: Long-term memory covers "facts about this person", not "what we were just talking about" -- so after finishing a
+#: topic you say "ok ok", it sees a lone "ok ok" and greets you again
+#: ("Hi there! Is there anything I can help you with?"). Both kinds of context are indispensable.
+#: Short-term context is maintained separately per WebSocket session and Memory Space.
+#: The corresponding turn is removed once ingest confirms a persistent memory was created.
+#: At most this many chars per sentence go into the prompt. Replies are sometimes long; stuffing them all in pushes memories to the back.
+_HISTORY_CHARS = int(os.environ.get("SUPERMEM_HISTORY_CHARS", "200"))
 _SESSION_CONTEXT = SessionBuffer(text_limit=_HISTORY_CHARS)
 
 
 def _history_block(session_id: str, space: str) -> str:
-    from voicemem.lang import is_zh
-    return _SESSION_CONTEXT.render(session_id, space, "zh" if is_zh() else "en")
+    return _SESSION_CONTEXT.render(session_id, space, "en")
 
 
 def _push_history(session_id: str, space: str, user_text: str, reply_text: str,
@@ -950,11 +948,11 @@ def _realtime_instructions(memory_context: str, stranger: bool = False,
                            replay: bool = False, emotion: str = "",
                            text: str = "", context_session: str = "",
                            context_space: str = "") -> str:
-    """人设 + 这一轮检索到的记忆。要说清楚这是「你记得的事」，否则模型会把它当成
-    背景资料念出来，而不是当成自己对这个用户的记忆自然地用。
+    """Persona + the memories retrieved this turn. It must be clear these are "things you remember", otherwise the model treats them as
+    background material to read out, rather than naturally using them as its own memory of this user.
 
-    ``text``：用户这一轮说的话。只用来判断"他是不是在找一段录音而我们没找到"——
-    那种情况要明说没找到，否则模型会顺口答"马上播放"然后什么都不放。"""
+    ``text``: what the user said this turn. Only used to tell "is he looking for a recording that we didn't find" --
+    in that case say plainly it wasn't found, otherwise the model casually answers "playing it now" and then plays nothing."""
     if stranger:
         out = f"{_RT_PERSONA}\n\n{_STRANGER}"
         return f"{out}\n\n{_lang_note()}" if _lang_note() else out
@@ -962,7 +960,7 @@ def _realtime_instructions(memory_context: str, stranger: bool = False,
     if memory_context:
         parts.append(memory_context)
     else:
-        parts.append(_NO_MEMORY_NOTE)      # 一条都没检索到：明说不知道，别编
+        parts.append(_NO_MEMORY_NOTE)      # nothing retrieved at all: say plainly you don't know, don't make things up
     session_context = _history_block(
         context_session, context_space or ACTIVE_SPACE)
     if session_context:
@@ -971,7 +969,7 @@ def _realtime_instructions(memory_context: str, stranger: bool = False,
         parts.append(_lang_note())
     tone = _tone_note(emotion)
     if tone:
-        parts.append("他此刻的状态：" + tone)
+        parts.append("His current state: " + tone)
     if replay:
         parts.append(_REPLAY_NOTE)
     elif _wants_sound(text):
@@ -979,18 +977,18 @@ def _realtime_instructions(memory_context: str, stranger: bool = False,
     return "\n\n".join(parts)
 
 
-# ══════════════════ 统一配置入口：一个 dict 配齐所有本地/api 模型 ══════════════════
-# 打开这个 dict 就知道每个模型走本地还是 api。记忆侧（embedding/slots）走本地 E5
-# → 整条 search 0 LLM、0 网络（实测 Search 本体 ~10ms）；reply 段（回复用的
-# llm/tts/realtime）也在这一处配，省得分散在各处 env。缺省项走内置默认。
-# 想外挂一份自定义 config：--config path.json（或 VOICEMEM_CONFIG）整体覆盖。
+# ══════════════════ Unified config entry: one dict configures all local/api models ══════════════════
+# Open this dict and you know whether each model is local or api. The memory side (embedding/slots) uses local E5
+# -> the whole search is 0 LLM, 0 network (Search itself measured ~10ms); the reply part (llm/tts/realtime
+# used for replies) is configured here too, rather than scattered across env vars. Missing entries use built-in defaults.
+# To plug in a custom config: --config path.json (or SUPERMEM_CONFIG) overrides it wholesale.
 CONFIG = {
     "mode": "multi_modal",
     "memory_root": ARGS.memory_root or None,
     "space": ARGS.space,
-    "embedding": {"provider": "local"},              # 记忆向量走本地 E5（0 网络）
-    "slots":     {"provider": "local"},              # slot 分类走本地 E5（0 LLM）
-    # reply：回复用模型（核心不管，web 读）。默认全走 OpenAI api。
+    "embedding": {"provider": "local"},              # memory vectors via local E5 (0 network)
+    "slots":     {"provider": "local"},              # slot classification via local E5 (0 LLM)
+    # reply: models used for replies (not the core's concern; read by web). Defaults to OpenAI api for all.
     "reply": {
         "llm":      {"provider": "openai", "config": {"model": utils.CHAT_MODEL,
                                                       "system": _RT_PERSONA}},
@@ -999,11 +997,11 @@ CONFIG = {
     },
 }
 
-# --config / VOICEMEM_CONFIG 指向的 json 整体覆盖上面的 CONFIG（一个文件配齐）。
+# The json that --config / SUPERMEM_CONFIG points to overrides the CONFIG above wholesale (one file configures everything).
 if ARGS.config:
     CONFIG = json.loads(Path(ARGS.config).read_text(encoding="utf-8"))
 
-REPLY = CONFIG.get("reply")                           # 传给 utils 的回复函数
+REPLY = CONFIG.get("reply")                           # passed to utils' reply functions
 
 #: The A/B compare switch and the two arms' config (GET/POST /api/compare).
 #: When on, the turn produces no audio and both panels stream text side by
@@ -1017,34 +1015,143 @@ def _set_compare(state) -> None:
     global COMPARE
     COMPARE = state
     arms = " | ".join(f"{a.label}:{a.model or 'default'}{'+memory' if a.memory else ' no-memory'}"
+                      f"{'+cartridge' if a.cartridge and a.memory else ''}"
                       for a in state.arms)
     print(f"[compare] {'on' if state.enabled else 'off'}  {arms}", flush=True)
 
-# 声明式构造：from_config 是现有注入机制之上的糖（VoiceMem(embedding=fn, slots=fn,…)）。
-#: 每个 Memory Space 一个 VoiceMem 实例，按需建、建好留着。
+
+# ── KV cartridge arm ─────────────────────────────────────────────────────────
+#: The active space's memory compiled into one caller cartridge (see
+#: supermem/cartridge). A compare panel with "KV cartridge" on puts it at the top
+#: of the prompt as a stable prefix, so the engine can reuse its KV from turn to
+#: turn instead of re-reading the memory every time.
 #:
-#: 同一进程内建第二个实例几乎不花钱：模型是懒加载 + 进程内复用的，实测建实例
-#: 0.0s、预热 2.5s（第一个是 6.8s + 4.9s）。所以切换空间不用重启服务。
+#: Snapshotted, not recompiled per turn: memory is written after every turn, and
+#: recompiling then would change the prefix every turn and nothing would ever be
+#: reused. The snapshot is taken when the cartridge is first needed, on
+#: POST /api/cartridge, and never mid-turn. What this call adds still reaches the
+#: model through the turn's recall hits, which ride after the prefix.
+_CARTRIDGES: dict = {}
+
+from supermem.llm_config import resolve_api_key, resolve_base_url, resolve_model  # noqa: E402
+
+
+def _cartridge(space: str, refresh: bool = False):
+    from supermem.cartridge import ContextCompiler, TokenCounter, facts_from_space
+    d, safe = space_dir(space)
+    if refresh or safe not in _CARTRIDGES:
+        model = resolve_model(None, "reply")
+        facts, traits = facts_from_space(d)
+        comp = ContextCompiler(model, tenant="supermem-web", counter=TokenCounter(model, load=False))
+        _CARTRIDGES[safe] = comp.compile_user(safe, facts, traits, display_name=safe)
+        c = _CARTRIDGES[safe]
+        print(f"[cartridge] compiled space \"{safe}\": {len(facts)} facts, {len(traits)} traits, "
+              f"~{c.tokens} tokens, id {c.id}", flush=True)
+    return _CARTRIDGES[safe]
+
+
+def _cartridge_system() -> str:
+    """The stable head of a cartridge prompt: persona + language. Session history
+    is deliberately NOT here -- it grows every turn and would break the prefix."""
+    return "\n\n".join(p for p in (_RT_PERSONA, _lang_note()) if p)
+
+
+def _cartridge_runtime(space: str):
+    from supermem.cartridge import ContextRuntime
+    rt = ContextRuntime(persona=_cartridge_system())
+    rt.register(space, [_cartridge(space)])
+    return rt
+
+
+def _cartridge_engine(arm):
+    from supermem.cartridge import Engine
+    base = resolve_base_url(arm.base_url or None) or "https://api.openai.com/v1"
+    local = any(h in base for h in ("localhost", "127.0.0.1", "0.0.0.0", "host.docker.internal"))
+    return Engine(base, resolve_model(arm.model or None, "reply"), arm=arm.label,
+                  api_key=resolve_api_key(arm.api_key or None) or "EMPTY",
+                  scrape_metrics=local)         # /metrics exists on vLLM, not on hosted APIs
+
+
+def _cartridge_provider(history: str, space: str):
+    """compare.fan_out's ``cartridge`` hook: the provider for a cartridge arm.
+
+    Same inputs as the plain arm (persona, language, history, this turn's
+    recall), laid out differently: persona + caller cartridge first and
+    byte-stable, history + recall + utterance after it. The engine's own
+    accounting (prompt tokens, how many came from KV cache) is left on
+    ``fn.last_usage`` for the compare feed."""
+    def build(arm):
+        rt = _cartridge_runtime(space)
+        cart = rt.cartridges(space)[0]
+        engine = _cartridge_engine(arm)
+
+        async def fn(text: str, memory_context: str = ""):
+            turn = "\n\n".join(x for x in (history, memory_context) if x)
+            msgs = rt.messages(space, text, turn_memory=turn)
+            try:
+                async for kind, val in engine.stream(msgs, max_tokens=512):
+                    if kind == "delta":
+                        yield val
+                        continue
+                    if val.error:
+                        raise RuntimeError(val.error)
+                    fn.last_usage = {
+                        "prompt_tokens": val.prompt_tokens, "cached_tokens": val.cached_tokens,
+                        "prefill_gpu_ms": val.prefill_gpu_ms,
+                        "cartridge_id": cart.id, "cartridge_tokens": cart.tokens,
+                    }
+            finally:
+                await engine.close()
+
+        fn.last_usage = None
+        return fn
+    return build
+
+
+async def _prefetch_cartridges(space: str) -> list:
+    """Pre-fill the cartridge prefix on every cartridge arm (max_tokens=1), the
+    way a telephony integration would on ring. Returns what each engine reported."""
+    rt = _cartridge_runtime(space)
+    out = []
+    for arm in COMPARE.arms:
+        if not (arm.cartridge and arm.memory):
+            continue
+        engine = _cartridge_engine(arm)
+        try:
+            res = await engine.warm(rt.prefetch_messages(space))
+        finally:
+            await engine.close()
+        out.append({"panel": arm.label, "ms": res.total_ms, "prompt_tokens": res.prompt_tokens,
+                    "cached_tokens": res.cached_tokens, "error": res.error})
+        print(f"[cartridge] prefetch panel {arm.label}: {res.total_ms:.0f}ms "
+              f"prompt={res.prompt_tokens} cached={res.cached_tokens} {res.error or ''}", flush=True)
+    return out
+
+# Declarative construction: from_config is sugar on top of the existing injection mechanism (SuperMem(embedding=fn, slots=fn, ...)).
+#: One SuperMem instance per Memory Space, built on demand and kept once built.
+#:
+#: Building a second instance in the same process costs almost nothing: models are lazy-loaded + reused in-process; measured instance build
+#: 0.0s, warmup 2.5s (the first one is 6.8s + 4.9s). So switching spaces needs no service restart.
 _SPACES: dict = {}
 
 
 def space_dir(name: str):
-    """这个空间在磁盘上的目录。名字只允许字母数字和 - _，避免路径穿越。"""
+    """This space's directory on disk. Names allow only letters, digits and - _, to prevent path traversal."""
     import re as _re
     safe = _re.sub(r"[^0-9A-Za-z\u4e00-\u9fff_-]", "", (name or "").strip())[:32]
     if not safe:
-        raise ValueError("空间名字不能为空")
-    return _ROOT / "voicemem_memoryspace" / safe, safe
+        raise ValueError("space name cannot be empty")
+    return _ROOT / "supermem_memoryspace" / safe, safe
 
 
 def get_space(name: str):
-    """取（必要时创建）这个空间的 VoiceMem。"""
+    """Get (creating if needed) the SuperMem for this space."""
     _, safe = space_dir(name)
     if safe not in _SPACES:
         cfg = dict(CONFIG)
         cfg["space"] = safe
         t0 = time.monotonic()
-        inst = VoiceMem.from_config(cfg)
+        inst = SuperMem.from_config(cfg)
         inst.warmup(verbose=False)
         _SPACES[safe] = inst
         print(f"[space] opened \"{safe}\" in {time.monotonic()-t0:.1f}s", flush=True)
@@ -1052,29 +1159,29 @@ def get_space(name: str):
 
 
 def use_space(name: str) -> str:
-    """切到这个空间。返回真正用的名字。
+    """Switch to this space. Returns the name actually used.
 
-    ``vm`` 是模块级全局，下游全部按名字在运行时查找，所以这里重新绑定就够了——
-    不用把实例一路传下去。注意 build_app 收的那几个回调必须是 lambda 而不是
-    ``vm.classify`` 这种绑定方法，绑定方法会把切换前那个实例焊死。
+    ``vm`` is a module-level global and everything downstream looks it up by name at runtime, so rebinding it here is enough --
+    no need to pass the instance all the way down. Note the callbacks build_app receives must be lambdas, not
+    bound methods like ``vm.classify``; a bound method would weld in the instance from before the switch.
     """
     global vm, ACTIVE_SPACE, SPACE_LANG
     vm = get_space(name)
     _, ACTIVE_SPACE = space_dir(name)
     SPACE_LANG = space_language(ACTIVE_SPACE)
-    _set_lang(SPACE_LANG)            # 记忆语言跟着空间走
+    _set_lang(SPACE_LANG)            # memory language follows the space
     return ACTIVE_SPACE
 
 
 def list_spaces() -> list:
-    """磁盘上有哪些 Memory Space，各有多少条记忆。"""
+    """Which Memory Spaces exist on disk, and how many memories each has."""
     import sqlite3
-    root = _ROOT / "voicemem_memoryspace"
+    root = _ROOT / "supermem_memoryspace"
     out = []
     for d in sorted(p for p in root.glob("*") if p.is_dir()):
         n = 0
         try:
-            from voicemem.utils.common import space as _sp
+            from supermem.utils.common import space as _sp
             db = _sp.db(d)
             if Path(db).exists():
                 c = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
@@ -1089,19 +1196,19 @@ def list_spaces() -> list:
 
 
 def create_space(name: str, language: str = "") -> dict:
-    """建一个新的空 Memory Space：磁盘上出现这个名字的文件夹，里面是全新的空库。
+    """Create a new empty Memory Space: a folder with this name appears on disk, holding a brand-new empty store.
 
-    实例这里就建出来（顺带预热），这样点完"创建"立刻就能对话，不用等第一句话
-    卡在模型加载上。
+    The instance is built right here (and warmed up), so you can talk immediately after clicking "Create" instead of the first
+    sentence getting stuck on model loading.
     """
     d, safe = space_dir(name)
     if d.exists() and any(d.iterdir()):
-        raise FileExistsError(f"「{safe}」已经存在了")
+        raise FileExistsError(f"\"{safe}\" already exists")
     d.mkdir(parents=True, exist_ok=True)
-    get_space(safe)                      # 建库 + 预热
-    lang = "zh" if str(language or ARGS.lang).lower().startswith("zh") else "en"
-    _write_space_language(safe, lang)    # 建的时候定一次，之后不再变
-    print(f"[space] 新建「{safe}」（语言 {lang}）→ {d}", flush=True)
+    get_space(safe)                      # build store + warm up
+    lang = "en"
+    _write_space_language(safe, lang)    # set once at creation, never changed afterwards
+    print(f"[space] created \"{safe}\" (language {lang}) -> {d}", flush=True)
     return {"id": safe, "name": safe, "count": 0, "language": lang}
 
 
@@ -1110,15 +1217,15 @@ vm = None
 use_space(ARGS.space)
 
 
-#: 语音轮的音频落在这儿。归档表存的是路径，文件本身得真的在。
+#: Audio from voice turns lands here. The archive table stores paths, so the files themselves must really exist.
 TURN_AUDIO_DIR = _ROOT / "results" / "turn_audio"
 
 
 def save_turn_audio(pcm16k) -> str:
-    """把这一轮的 PCM 存成 wav，返回路径；存不下就返回 ""（不影响这一轮对话）。
+    """Save this turn's PCM as a wav and return its path; return "" if it can't be saved (doesn't affect this turn's conversation).
 
-    没有这一步，AudioArchive 里一条记录都不会有——它只在 ingest 收到 audio_path
-    时才写。之前 demo 全程走 WS 流、从不落盘，所以"把当时那段原声放回来"做不到。
+    Without this step AudioArchive would never have a single record -- it only writes when ingest receives an audio_path.
+    The demo used to stream everything over WS and never write to disk, so "play back the original audio from back then" was impossible.
     """
     if pcm16k is None or not len(pcm16k):
         return ""
@@ -1136,77 +1243,77 @@ def save_turn_audio(pcm16k) -> str:
 
 @dataclass
 class Pending:
-    """一轮说完时、投机预取早已算好的「预算记忆」——控制流拿来直接回复，不再搜。"""
+    """The "pre-computed memory" that speculative prefetch has long since computed by the time a turn ends -- control flow replies with it directly, no more searching."""
     text: str
     memory_context: str
     result: object
-    spoken: bool = True          # True=语音轮（音频已进 realtime 缓冲），False=打字轮
-    audio_path: str = ""         # 这一轮落盘的 wav；ingest 拿它做场景/音乐/声纹感知，
-                                 # 并在 audio_archive 里跟记忆绑定，之后能原样放回来
-    stranger: bool = False       # 声纹认出说话的不是这个记忆库的主人
-    replay: str = ""             # 该把哪条记忆当时那段原声放回来（memory_id），空=不放
-    emotion: str = ""            # 上一轮感知到的情绪，用来给这一轮定语气
+    spoken: bool = True          # True=voice turn (audio already in the realtime buffer), False=typed turn
+    audio_path: str = ""         # this turn's wav on disk; ingest uses it for scene/music/voiceprint perception,
+                                 # and binds it to the memory in audio_archive so it can be played back as is later
+    stranger: bool = False       # voiceprint says the speaker isn't the owner of this memory store
+    replay: str = ""             # which memory's original audio to play back (memory_id); empty = don't play
+    emotion: str = ""            # emotion perceived in the previous turn, used to set this turn's tone
 
 
-# ══════════════════ 两条控制流（各 ~10 行，只消费预取好的 Pending）══════════════════
+# ══════════════════ The two control flows (~10 lines each, only consume the prefetched Pending) ══════════════════
 
-# 分句规则（决定多久出第一声）在 voicemem/tts.py 的 cut_point。
+# The sentence-splitting rule (decides how soon the first sound comes out) is cut_point in supermem/tts.py.
 _cut_point = utils.cut_point
 
 
 def _mentioned(name: str, text: str) -> bool:
-    """实体名在这句话里被提到了吗。
+    """Is the entity name mentioned in this sentence?
 
-    不能直接 `name in text`——图里的实体常带限定词（"Jiaqi的老板"），而人说的是
-    "老板"。拆成词块（按"的"和非中文断开）逐个比，任一块出现就算提到。
-    单字块不算：一个"我"、一个"歌"太容易误命中。
+    Can't just do `name in text` -- entities in the graph often carry qualifiers ("Jiaqi's boss"), while people say
+    "boss". Split into chunks (on the possessive particle and non-word characters) and compare each; any chunk appearing counts as mentioned.
+    Single-char chunks don't count: a lone "I" or "a" matches far too easily.
     """
     t = text or ""
     if not name:
         return False
     if name in t:
         return True
-    for chunk in re.split(r"[的\s·、,，]+|[^\u4e00-\u9fffA-Za-z0-9]+", name):
+    for chunk in re.split(r"[\u7684\s·\u3001,\uff0c]+|[^\u4e00-\u9fffA-Za-z0-9]+", name):
         if len(chunk) >= 2 and chunk in t:
             return True
     return False
 
 
-#: 声学模型至少要这么有把握才采纳（emotion2vec+ 的 softmax 分数）。
-ACOUSTIC_MIN_SCORE = float(os.environ.get("VOICEMEM_ACOUSTIC_MIN", "0.92"))
+#: The acoustic model must be at least this confident to be adopted (emotion2vec+ softmax score).
+ACOUSTIC_MIN_SCORE = float(os.environ.get("SUPERMEM_ACOUSTIC_MIN", "0.92"))
 
-#: 只有这几类才听声学的。
+#: Only these categories trust the acoustics.
 #:
-#: 实测 emotion2vec+ 在真实录音上会**自信地判错**：「哎呀，早上好呀」判悲伤
-#: 1.00、「我觉得挺好的」判悲伤 1.00——单靠提高阈值挡不住，它对错的答案给的
-#: 就是满分。但它错的时候几乎全错在"悲伤"（对这个说话人的默认倾向）。
-#: 高唤起的那几类（真笑出声、真发火）声学特征明显，恰恰是文本看不出来的，
-#: 留给它；低唤起的交给语义。
-ACOUSTIC_TRUST = set((os.environ.get("VOICEMEM_ACOUSTIC_TRUST")
-                      or "开心,委屈,惊讶").split(","))
+#: Measured: emotion2vec+ **confidently misjudges** real recordings: "oh hey, good morning" judged sad
+#: 1.00, "I think it's pretty good" judged sad 1.00 -- raising the threshold can't block it, it gives the wrong answer
+#: a perfect score. But when it's wrong it's almost always "sad" (its default bias for this speaker).
+#: The high-arousal categories (really laughing, really angry) have obvious acoustic features, exactly what text can't show,
+#: so leave those to it; the low-arousal ones go to semantics.
+ACOUSTIC_TRUST = set((os.environ.get("SUPERMEM_ACOUSTIC_TRUST")
+                      or "happy,wronged,surprised").split(","))
 
-#: 情绪的语义样例。用本地 E5 把这句话跟这些比相似度——比关键词表宽
-#: （"我觉得挺好的"里一个情绪词都没有），比声学准得多。0 网络、9ms。
+#: Semantic examples for emotions. Local E5 compares this sentence's similarity to these -- broader than a keyword list
+#: ("I think it's pretty good" has no emotion word in it), and far more accurate than acoustics. 0 network, 9ms.
 _EMO_PROTO = {
-    "开心": ["我今天特别开心", "太好了我很高兴", "真不错，我挺满意的", "哈哈太有意思了"],
-    "悲伤": ["我很难过", "我心里特别难受", "我好失落", "这事让我挺沮丧的"],
-    "委屈": ["我好生气", "太气人了", "凭什么这样对我", "我觉得很不公平"],
-    "焦虑": ["我压力好大", "我有点紧张", "我很担心做不完", "这事儿让我睡不着"],
-    "疲惫": ["我好累啊", "累死了，撑不住了", "一天下来人都空了"],
-    # 「平静」要多给几句：日常陈述句和疑问句占了对话的大半，样例太少时它们
-    # 撑不出足够的差距，就一路判成"(空)"——实测「我对花生过敏」「我不能吃什么」
-    # 都因为这个没标上，加了样例之后 gap 从 0.002 涨到 0.08。
-    "平静": ["今天天气不错", "我明天要去开会", "早上好", "我叫小明",
-             "这个东西放在桌上", "我对花生过敏", "我在一家公司上班",
-             "下周三下午三点有个会", "我不能吃什么", "这个怎么用",
-             "帮我看一下", "我住在市中心"],
+    "happy": ["I'm so happy today", "That's great, I'm really glad", "Pretty nice, I'm quite satisfied", "Haha that's so fun"],
+    "sad": ["I'm really sad", "My heart feels so heavy", "I feel so let down", "This has got me pretty down"],
+    "wronged": ["I'm so mad", "This is infuriating", "Why would they treat me like this", "I think it's really unfair"],
+    "anxious": ["I'm under so much pressure", "I'm a bit nervous", "I'm worried I won't finish", "This is keeping me up at night"],
+    "tired": ["I'm so tired", "Exhausted, I can't keep going", "I feel completely drained after today"],
+    # "calm" needs more examples: everyday statements and questions make up most of a conversation, and with too few examples
+    # they can't open enough of a gap and end up judged as "(empty)" all the way -- measured: "I'm allergic to peanuts" and "what can't I eat"
+    # were both left unlabelled because of this; adding examples raised the gap from 0.002 to 0.08.
+    "calm": ["Nice weather today", "I have a meeting tomorrow", "Good morning", "My name is Alex",
+             "Put this on the table", "I'm allergic to peanuts", "I work at a company",
+             "There's a meeting next Wednesday at 3pm", "What can't I eat", "How do I use this",
+             "Take a look at this for me", "I live downtown"],
 }
 _PROTO = {}
 
 
 def _emotion_by_meaning(text: str) -> str:
-    """语义最近邻。够像**而且**跟第二名拉开差距才给标签，否则空——
-    模棱两可时不标，比标错强。"""
+    """Semantic nearest neighbour. Only give a label if it's similar enough **and** clearly ahead of the runner-up, otherwise empty --
+    when ambiguous, no label beats a wrong label."""
     import numpy as np
     if not _PROTO:
         labels, sents = [], []
@@ -1226,17 +1333,17 @@ def _emotion_by_meaning(text: str) -> str:
     return lab if best >= 0.80 and gap >= 0.02 else ""
 
 
-#: emotion2vec+ 的英文标签 → 我们用的中文标签
-_E2V_MAP = {"happy": "开心", "sad": "悲伤", "angry": "委屈", "fearful": "恐惧",
-            "surprised": "惊讶", "disgusted": "厌恶", "neutral": ""}
+#: emotion2vec+ labels -> the emotion labels we use
+_E2V_MAP = {"happy": "happy", "sad": "sad", "angry": "wronged", "fearful": "fear",
+            "surprised": "surprised", "disgusted": "disgust", "neutral": ""}
 _E2V = {}
 
 
 def _acoustic_emotion(audio_path: str):
-    """emotion2vec+（专门做语音情绪识别的模型）。返回 (标签, 分数)。"""
+    """emotion2vec+ (a model built specifically for speech emotion recognition). Returns (label, score)."""
     if "m" not in _E2V:
         from funasr import AutoModel
-        _E2V["m"] = AutoModel(model=os.environ.get("VOICEMEM_E2V_MODEL",
+        _E2V["m"] = AutoModel(model=os.environ.get("SUPERMEM_E2V_MODEL",
                                                    "emotion2vec/emotion2vec_plus_base"),
                               hub="hf", disable_update=True)
     r = _E2V["m"].generate(audio_path, granularity="utterance", extract_embedding=False)
@@ -1251,25 +1358,25 @@ _SV = {}
 
 
 def _sensevoice():
-    """SenseVoiceSmall，一次推理同时出精转写和声学情绪。懒加载、进程内复用。
+    """SenseVoiceSmall: a single inference yields both a refined transcript and acoustic emotion. Lazy-loaded, reused in-process.
 
-    注意别用 vm.utils.get("emotion")——那是韵律象限的启发式
-    （PaperAlignedEmotionDetector），没有 run_with_emotion，而且判得不准。
+    Note: don't use vm.utils.get("emotion") -- that's the prosody-quadrant heuristic
+    (PaperAlignedEmotionDetector); it has no run_with_emotion and it's inaccurate.
     """
     if "t" not in _SV:
-        from voicemem.utils.audio.asr import Transcriber, pick_device
+        from supermem.utils.audio.asr import Transcriber, pick_device
         _SV["t"] = Transcriber(pick_device())
     return _SV["t"]
 
 
 def _kick_acoustic(send, audio_path: str) -> None:
-    """把声学情绪扔到后台算，算出可信结果再补一条 tag_update。
+    """Push acoustic emotion to the background; once a trustworthy result is computed, send a follow-up tag_update.
 
-    emotion2vec 要跑整段音频，实测 2.3 秒。放在发 memory_hits 之前就等于把这
-    2.3 秒加在"用户说完 → 助手开口"中间，而它给的结果十有八九还够不上信任阈值。
-    放后台之后热路径一秒都不欠，真判准了 UI 上的情绪标签照样会更新。
+    emotion2vec runs over the whole audio clip, measured at 2.3 s. Doing it before sending memory_hits would add those
+    2.3 s between "user finishes -> assistant starts speaking", and nine times out of ten its result doesn't reach the trust threshold anyway.
+    In the background the hot path owes nothing, and when it does judge correctly the emotion tag in the UI still updates.
     """
-    if not audio_path or os.environ.get("VOICEMEM_ACOUSTIC_TAG", "1") == "0":
+    if not audio_path or os.environ.get("SUPERMEM_ACOUSTIC_TAG", "1") == "0":
         return
 
     async def run():
@@ -1281,7 +1388,7 @@ def _kick_acoustic(send, audio_path: str) -> None:
                 print(f"  [emotion] acoustic (background) {(time.monotonic()-t0)*1000:.0f}ms "
                       f"-> {emo or '-'} {score:.2f} ({'used' if take else 'rejected'})", flush=True)
             if take:
-                from voicemem.lang import display_emotion
+                from supermem.lang import display_emotion
                 await send({"type": "tag_update", "emotion": display_emotion(emo),
                             "emotion_from": "acoustic"})
         except Exception as e:
@@ -1292,41 +1399,41 @@ def _kick_acoustic(send, audio_path: str) -> None:
 
 def fill_tags(payload: dict, text: str, audio_path: str = "",
               acoustic: bool = True) -> dict:
-    """补上标签栏要的 emotion / entities——两样都是 0 LLM、0 网络。
+    """Fill in the emotion / entities the tag bar needs -- both 0 LLM, 0 network.
 
-    检索走的是本地 slot 分类器（投机预算内不能联网），它只出 slot，不出实体；
-    情绪则要等这一轮 ingest 之后才算得出，而 memory_hits 是在回复之前就发的。
-    结果就是标签栏上这两格一直空着。
+    Retrieval uses the local slot classifier (no network within the speculation budget), which only outputs slots, not entities;
+    emotion can only be computed after this turn's ingest, while memory_hits are sent before the reply.
+    The result was that these two cells in the tag bar stayed empty.
 
-    · 情绪：用 anchor_router 的关键词表现算一次（纯查表）。
-    · 实体：这一轮命中的那几条记忆在认知图里挂了哪些实体，直接读（纯 sqlite）。
+    · Emotion: computed once with anchor_router's keyword table (pure lookup).
+    · Entities: read directly which entities the memories hit this turn are attached to in the cognitive graph (pure sqlite).
     """
-    # ⓪ 右脑那几条换成第一人称的人话（只换显示，raw 原文照旧留着给脑图匹配）。
-    #    还没改写好的这一轮先显示原文，同时排进后台队列——见 rb_human。
+    # (0) Rewrite the right-brain hits into first-person plain language (display only; the raw text stays for brain-map matching).
+    #    For this turn, items not yet rewritten show the original and are queued in the background -- see rb_human.
     for h in payload.get("right_brain_hits") or []:
         claim = h.get("claim") or ""
         if not claim:
             continue
         human = rb_human(claim)
         if human and human != claim:
-            # 证据那半截（"｜他说过：…"）保留，它才是"你凭什么这么说"的支撑。
+            # Keep the evidence half (" | he said: ..."); it's the support for "why would you say that".
             tail = ""
-            for sep in ("｜他说过：", " | he said: "):
+            for sep in (" | he said: ",):
                 if sep in h.get("content", ""):
                     tail = sep + h["content"].split(sep, 1)[1]
                     break
             h["content"] = human + tail
 
-    # ① 人明说了情绪就按他说的（查表，0 网络）——最准
+    # (1) If the person states the emotion explicitly, go with what they said (table lookup, 0 network) -- most accurate
     if not payload.get("emotion") and text.strip():
         try:
-            from voicemem.rightbrain.anchor_router import normalize_emotion_strict
+            from supermem.rightbrain.anchor_router import normalize_emotion_strict
             payload["emotion"] = normalize_emotion_strict(text) or ""
         except Exception:
             pass
 
-    # ② 没明说就看这句话的**意思**：本地 E5 跟每种情绪的样例句比语义相似度。
-    #    9ms、0 网络，而且比关键词表宽（"我觉得挺好的"里一个情绪词都没有）。
+    # (2) If not stated, look at the **meaning** of the sentence: local E5 compares semantic similarity with each emotion's example sentences.
+    #    9ms, 0 network, and broader than a keyword table ("I think it's pretty good" has no emotion word in it).
     if not payload.get("emotion") and text.strip():
         try:
             emo = _emotion_by_meaning(text)
@@ -1336,14 +1443,14 @@ def fill_tags(payload: dict, text: str, audio_path: str = "",
         except Exception as e:
             print(f"[web] semantic emotion skipped: {type(e).__name__}: {e}", flush=True)
 
-    # ③ 声学（emotion2vec+）：只在它**很有把握**时才盖过上面的判断。
+    # (3) Acoustic (emotion2vec+): overrides the judgement above only when it's **very confident**.
     #
-    #    为什么不让它当主力：实测在真实录音上它把「哎呀，早上好呀」判成难过
-    #    （3.2 秒干净音频，不是静音太长的锅——裁剪过照样如此），SenseVoice 和
-    #    韵律启发式也一样。这个麦克风/说话方式下，声学读不准。
-    #    所以留着它，但要求 score ≥ ACOUSTIC_MIN_SCORE 才作数——真正带情绪地
-    #    说话时它会给 0.95+，平淡说话时给的是 0.6、0.7 那种，正好挡掉。
-    if acoustic and audio_path and os.environ.get("VOICEMEM_ACOUSTIC_TAG", "1") != "0":
+    #    Why it's not the main source: measured on real recordings it judged "oh hey, good morning" as sad
+    #    (3.2 s of clean audio, not a too-much-silence problem -- same after trimming); SenseVoice and
+    #    the prosody heuristic did the same. With this mic/speaking style, acoustics can't read it accurately.
+    #    So keep it, but only count it when score >= ACOUSTIC_MIN_SCORE -- when someone really speaks with emotion
+    #    it gives 0.95+, while flat speech gets things like 0.6 or 0.7, which this filters out nicely.
+    if acoustic and audio_path and os.environ.get("SUPERMEM_ACOUSTIC_TAG", "1") != "0":
         try:
             t0 = time.monotonic()
             emo, score = _acoustic_emotion(audio_path)
@@ -1360,21 +1467,21 @@ def fill_tags(payload: dict, text: str, audio_path: str = "",
         except Exception as e:
             print(f"[web] acoustic emotion skipped: {type(e).__name__}: {e}", flush=True)
 
-    # 实体：这里**不猜**。
+    # Entities: **no guessing** here.
     #
-    # memory_hits 是在回复之前发的，而实体是跟抽事实同一次 LLM 调用出来的
-    # （ingest 时，回复之后）。曾经在这儿做过一个"0 成本近似"——从命中的旧记忆
-    # 里挑这句话提到过的实体——结果每句话都只剩说话人自己：
-    #     说「我对花生过敏」→ 标签栏 ['小林']，真正抽出来的是 ['小林','花生']
-    #     说「下周三在国金中心见客户」→ 标签栏空
-    # 显示一个错的比先空着更糟。前端会在 ingest 落库后用真结果补上（见
-    # voicemem.html 的 loadMemories）。
+    # memory_hits are sent before the reply, while entities come out of the same LLM call that extracts facts
+    # (at ingest, after the reply). There was once a "zero-cost approximation" here -- picking from the hit old memories
+    # the entities this sentence mentioned -- and every sentence ended up with only the speaker:
+    #     say "I'm allergic to peanuts" -> tag bar ['Lin'], what was really extracted was ['Lin', 'peanuts']
+    #     say "meeting a client at the IFC next Wednesday" -> tag bar empty
+    # Showing a wrong one is worse than leaving it empty for now. The frontend fills in the real result after ingest is stored (see
+    # loadMemories in supermem.html).
 
-    # anchor_router / emotion2vec 的返回值都是 8 个规范情绪的中文内部值（见
-    # voicemem/lang.py）——UI 标签栏要看的是当前记忆库语言下的写法，否则英文
-    # demo 里会冒出「平静」这种谁都读不懂的字。
+    # anchor_router / emotion2vec both return internal values of the 8 canonical emotions (see
+    # supermem/lang.py) -- the UI tag bar needs the spelling for the current memory store language, otherwise
+    # an internal key nobody can read would show up in the demo.
     if payload.get("emotion"):
-        from voicemem.lang import display_emotion
+        from supermem.lang import display_emotion
         payload["emotion"] = display_emotion(payload["emotion"])
 
     rb = payload.get("right_brain_hits") or []
@@ -1403,7 +1510,7 @@ async def _announce_turn(pending, send) -> None:
     override the emotion in the UI only once it is trustworthy.
     """
     await send({"type": "user_transcript", "text": pending.text})
-    note_hits(pending.result)      # 让脑图快照保证这几条在图上
+    note_hits(pending.result)      # make sure the brain-map snapshot has these items on the graph
     await send({"type": "memory_hits",
                 **fill_tags(utils.hits_payload(pending.result, has_audio=audio_of,
                                               cluster_of=hit_cluster),
@@ -1452,8 +1559,12 @@ async def _compare_turn(pending, send, owner, timeline=None, context_session="",
     # library's owner), so neither arm has any -- nothing to compare, but the
     # owner's memories must not be read out to someone else either.
     mem_ctx = "" if pending.stranger else (pending.memory_context or "")
+    # The cartridge holds the owner's whole memory: a stranger's turn must never
+    # get it, so their cartridge arm falls back to the plain (memory-less) provider.
+    cartridge = None if pending.stranger else _cartridge_provider(
+        _history_block(context_session, context_space), context_space)
     result = await compare.fan_out(pending.text, mem_ctx, COMPARE.arms, send,
-                                   system=system)
+                                   system=system, cartridge=cartridge)
     reply = result.get("a", "")
     history_turn_id = _push_history(context_session, context_space,
                                     pending.text, reply)
@@ -1467,18 +1578,18 @@ async def _compare_turn(pending, send, owner, timeline=None, context_session="",
     return result
 
 
-async def voicemem_llm_tts(pending, send, send_audio, owner, timeline,
+async def supermem_llm_tts(pending, send, send_audio, owner, timeline,
                            said=None, context_session="", context_space="",
                            memory_vm=None):
-    """记忆已在关键路径外预取好：LLM 流式回复 → TTS 流式语音。
+    """Memory was prefetched off the critical path: LLM streaming reply -> TTS streaming speech.
 
-    TTS 跟生成**并行**：LLM 吐满一句就丢进队列，另一条协程取出来合成、发音频。
-    等全文生成完再开始合成的话，文本早打完了、音频还没起头（实测 TTS 首帧就要
-    ~1.2s，加上生成那几秒，用户看着字干等）。
+    TTS runs **in parallel** with generation: every full sentence the LLM emits goes into a queue, and another coroutine takes it out, synthesizes and sends the audio.
+    If synthesis only started after the whole text was generated, the text would be long done while audio hadn't started (measured: the first TTS frame alone takes
+    ~1.2s, plus the few seconds of generation, the user just stares at the text waiting).
 
-    ``said``：可选的 dict，边生成边把已说出的文本写进 said["text"]。打断判定要拿
-    它挡回声（见 _is_echo）——助手说的话经麦克风绕回 ASR，转出来的字跟真人插话
-    在字数上没区别，只能靠内容认。
+    ``said``: an optional dict; the text spoken so far is written into said["text"] as generation proceeds. Barge-in detection uses
+    it to block echo (see _is_echo) -- the assistant's speech loops back through the mic into ASR, and the transcribed words are
+    indistinguishable from a real barge-in by count; only content can tell them apart.
     """
     memory_vm = memory_vm or vm
     context_space = context_space or ACTIVE_SPACE
@@ -1498,30 +1609,30 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, timeline,
 
     queue: asyncio.Queue = asyncio.Queue()
 
-    # 走注入的那个 TTS（第九个可替换位）。--config 里换 provider、或库用户
-    # VoiceMem(tts=lambda: MyTTS()) 传自己的实现，都在这儿生效；没配就是内置默认。
+    # Use the injected TTS (the ninth swappable slot). Swapping the provider in --config, or a library user
+    # passing their own implementation via SuperMem(tts=lambda: MyTTS()), takes effect here; if not configured it's the built-in default.
     tts = memory_vm.utils.get("tts")
-    # 这一轮怎么念。情绪是逐轮变的，所以按轮传，不写在实例上。
+    # How to voice this turn. Emotion changes per turn, so it's passed per turn, not stored on the instance.
     speak_as = _speak_instruction(pending.emotion)
 
     def _synth_one(seg):
-        """注入的 TTS 可能是用户自己写的、只认 stream(text)——那就退回去，
-        少一层语气控制而已，不该因此整条链路报错。"""
+        """The injected TTS may be user-written and only accept stream(text) -- then fall back;
+        it just loses one layer of tone control, and shouldn't make the whole chain error out."""
         try:
             return tts.stream(seg, speak_as)
         except TypeError:
             return tts.stream(seg)
 
-    # 一段回复被切成好几句、逐句合成，段与段之间会空一拍：合成完这段才发下一段的
-    # 请求，中间要等「发请求 → 服务端 prefill → 第一个字节回来」，音频队列在这期间
-    # 是空的，听感就是每句开头卡一下。TTS 在远端时（比如 Breeze 跑在 GPU 机器上，
-    # 还隔着 SSH 隧道）这一拍尤其明显。
-    # 所以拆成两级：拿到一段就**立刻**开合成、各自往自己的小队列里灌；播放那边按
-    # 顺序一段段取。这样当前这段还在播的时候，下一段已经在算了。
-    # 不限制并发：服务端是不是单并发由它自己决定（Breeze 就是），这边多发几个请求
-    # 只是让它排上队，省掉每段一个来回的网络延迟。
+    # A reply is cut into several sentences synthesized one by one, and there's a gap between segments: the next segment's request
+    # was only sent after this one finished synthesizing, waiting for "send request -> server prefill -> first byte back"; the audio queue is
+    # empty meanwhile, which sounds like a stall at the start of each sentence. With TTS remote (e.g. Breeze on a GPU machine,
+    # behind an SSH tunnel too) this gap is especially noticeable.
+    # So it's split into two levels: as soon as a segment arrives, start synthesizing **immediately**, each filling its own small queue; playback takes
+    # them segment by segment in order. That way the next segment is already being computed while the current one plays.
+    # No concurrency limit: whether the server is single-concurrency is its own business (Breeze is); sending a few more requests from here
+    # just queues them there, saving a network round trip per segment.
     synths: list[asyncio.Task] = []
-    streams: asyncio.Queue = asyncio.Queue()      # 每项是一段的 chunk 队列
+    streams: asyncio.Queue = asyncio.Queue()      # each item is one segment's chunk queue
 
     async def synth():
         while (spec := await queue.get()) is not None:
@@ -1539,7 +1650,7 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, timeline,
                 except Exception as e:
                     print(f"[web] TTS failed: {type(e).__name__}: {e}", flush=True)
                 finally:
-                    await chunks.put(None)        # 出错也要让播放那边收工
+                    await chunks.put(None)        # even on error, let playback wrap up
 
             synths.append(asyncio.create_task(run()))
             await streams.put((seg, text_start, text_end, chunks, state))
@@ -1549,8 +1660,8 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, timeline,
         while (item := await streams.get()) is not None:
             seg, text_start, text_end, chunks, state = item
             segment_id = timeline.begin_segment(text_start, text_end)
-            # 回声判定要拿**用户可能听到的**去比，不是已生成的——生成早跑到几段
-            # 之后了。这里是音频真正开始发出去的时刻，最接近"说出口"。
+            # Echo detection must compare against what **the user may have heard**, not what's been generated -- generation is
+            # already several segments ahead. This is the moment audio actually starts going out, closest to "said out loud".
             if said is not None:
                 said["text"] = (said.get("text") or "") + seg
             try:
@@ -1558,8 +1669,8 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, timeline,
                     if isinstance(chunk, TimedAudioChunk):
                         if chunk.sample_rate != timeline.sample_rate:
                             raise ValueError(
-                                f"TTS 输出采样率应为 {timeline.sample_rate}Hz，"
-                                f"实际为 {chunk.sample_rate}Hz")
+                                f"TTS output sample rate should be {timeline.sample_rate}Hz, "
+                                f"got {chunk.sample_rate}Hz")
                         pcm = chunk.pcm
                         timeline.add_segment_timestamps(
                             segment_id, chunk.timestamps)
@@ -1570,7 +1681,7 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, timeline,
             except asyncio.CancelledError:
                 timeline.finish_segment(segment_id, complete=False)
                 raise
-            except Exception as e:                # 多半是听到一半关了页面，不是错误
+            except Exception as e:                # most likely the page was closed mid-listen, not an error
                 timeline.finish_segment(segment_id, complete=False)
                 print(f"[web] audio send interrupted: {type(e).__name__}", flush=True)
                 break
@@ -1583,16 +1694,16 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, timeline,
     reply, buf, sent = "", "", 0
     interrupted = False
     try:
-        # 跟 realtime 用同一份指令：两条路必须表现一致，否则换个 --mode
-        # 人设和「右脑不许念出来」的约束就悄悄没了。
-        # 走核心回复层（人设在 CONFIG.reply.llm.config.system，见 voicemem/reply.py
-        # 的 compose_system：system + memory_context，和 realtime 那条拼出来的一样）。
+        # Same instructions as realtime: the two paths must behave the same, otherwise switching --mode would
+        # silently drop the persona and the "never read the right brain aloud" constraint.
+        # Goes through the core reply layer (persona in CONFIG.reply.llm.config.system; see compose_system in supermem/reply.py:
+        # system + memory_context, the same as what the realtime path assembles).
         ctx = _STRANGER if pending.stranger else pending.memory_context
         if not pending.stranger and not (ctx or "").strip():
-            ctx = _NO_MEMORY_NOTE          # 一条都没检索到：明说不知道，别编
-        # 情绪不再拼进文本 prompt：那是**发声指示**（"压低、放软、留停顿"），
-        # 让文字模型理解一遍再指望 TTS 猜出来，中间隔了两层。TTS 后端的 instruction
-        # 参数就是收这个的，该搬过去。搬之前 pending.emotion 这一路暂时没有出口。
+            ctx = _NO_MEMORY_NOTE          # nothing retrieved at all: say plainly you don't know, don't make things up
+        # Emotion is no longer put into the text prompt: it's a **vocal direction** ("lower, soften, leave pauses");
+        # having the text model interpret it and then hoping TTS guesses it is two layers removed. The TTS backend's instruction
+        # parameter exists for exactly this, so it should move there. Until then pending.emotion has no outlet on this path.
         note = (_REPLAY_NOTE if pending.replay
                 else (_NO_REPLAY_NOTE if _wants_sound(pending.text) else ""))
         if note:
@@ -1619,14 +1730,14 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, timeline,
             start = len(reply) - len(buf) + leading
             await queue.put((segment, start, start + len(segment)))
     except asyncio.CancelledError:
-        interrupted = True                      # 用户插话了，这一轮到此为止
+        interrupted = True                      # the user cut in; this turn ends here
     finally:
-        await queue.put(None)                   # 生成出错也要让 speak() 收工
+        await queue.put(None)                   # even if generation errors, let speak() wrap up
 
     async def _drop_pipeline():
-        # 别把 speak() 留在后台继续往一条已经停播的连接上发音频。
-        # 提前起跑的那几段合成也要一起停，否则它们会继续占着远端 TTS 的队列，
-        # 下一轮的第一句得排在这些没人要的音频后面——听起来就是打断之后更卡。
+        # Don't leave speak() in the background still sending audio on a connection that has stopped playing.
+        # The segments whose synthesis started early must stop too, otherwise they keep occupying the remote TTS queue,
+        # and the next turn's first sentence has to wait behind audio nobody wants -- it sounds laggier after an interruption.
         speaker.cancel()
         synther.cancel()
         for t in synths:
@@ -1637,9 +1748,9 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, timeline,
     if interrupted:
         await _drop_pipeline()
     else:
-        # 生成完了不等于说完了：音频还在一段段往外发，打断多半就落在这儿。
-        # 不接住的话 CancelledError 会直接掀掉这个 Task，下面的存记忆一行都不跑，
-        # 被打断的那一轮就永远进不了记忆。
+        # Done generating doesn't mean done speaking: audio is still going out segment by segment, and interruptions mostly land here.
+        # If not caught, CancelledError tears down this Task outright and not a single line of the memory-saving below runs,
+        # so the interrupted turn would never make it into memory.
         try:
             await synther
             await speaker
@@ -1659,10 +1770,10 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, timeline,
                 interrupted = True
                 await _drop_pipeline()
 
-    # 记录本轮上下文；记忆写入放到后台，避免阻塞下一轮收音。
+    # Record this turn's context; memory writing goes to the background so it doesn't block listening for the next turn.
     context_reply = timeline.heard_text() if interrupted else reply
     if interrupted and BARGE_DEBUG:
-        print(f"[context] 打断于 {timeline.rendered_ms()}ms，保留回复 "
+        print(f"[context] interrupted at {timeline.rendered_ms()}ms, keeping reply "
               f"{context_reply!r}", flush=True)
     history_turn_id = _push_history(
         context_session, context_space, pending.text, context_reply,
@@ -1675,16 +1786,16 @@ async def voicemem_llm_tts(pending, send, send_audio, owner, timeline,
 
 async def start_realtime_turn(pending, conn, send, timeline,
                               context_session="", context_space=""):
-    """把预取好的记忆注入 Realtime session，触发这一轮的原生语音。
+    """Inject the prefetched memory into the Realtime session and trigger this turn's native speech.
 
-    只负责"发起"；收音频/文本和收尾都在常驻的事件泵里（见 realtime_session）——
-    OpenAI 的事件流只能有一个消费者，每轮各读各的会串台：上一轮被打断后残留的
-    response.done 会被下一轮读到，当成自己说完了。
+    Only "kicks it off"; receiving audio/text and wrapping up all happen in the resident event pump (see realtime_session) --
+    OpenAI's event stream can have only one consumer; if each turn read its own they'd cross wires: a leftover response.done
+    from a previous interrupted turn would be read by the next turn and taken as its own completion.
     """
     await _announce_turn(pending, send)
     if pending.replay:
-        # 前端收下先记着，等这一轮回复播完再放——助手的回复是排队播的，
-        # 提前放会跟人声叠在一起。
+        # The frontend holds it and plays it once this turn's reply finishes -- the assistant's reply plays from a queue,
+        # and playing early would overlap with the voice.
         _note_replay(pending.replay)
         await send({"type": "play_memory", "memory_id": pending.replay})
     if pending.spoken:
@@ -1731,10 +1842,10 @@ async def truncate_provider_output(conn, provider_item_id: str,
 
 
 async def _no_realtime(sock, err):
-    """连不上 Realtime 时别让人对着 traceback 猜。
+    """When Realtime can't connect, don't leave people guessing at a traceback.
 
-    要分清是**网络**还是**权限**：DNS/连接失败跟 key 没有关系，之前一律说成
-    「key 可能没权限」，把人往错的方向指了。
+    Distinguish **network** from **permission**: DNS/connection failures have nothing to do with the key; previously everything was called
+    "the key may lack permission", pointing people in the wrong direction.
     """
     name, text = type(err).__name__, str(err)
     network = (isinstance(err, (OSError, TimeoutError, ConnectionError))
@@ -1743,16 +1854,16 @@ async def _no_realtime(sock, err):
                                                   "name or service", "getaddrinfo",
                                                   "connection refused", "timed out")))
     if network:
-        why = ("网络连不上 api.openai.com（DNS/代理/VPN 的问题，跟 key 无关）。"
-               "确认能上网后重开；离线环境用 `--mode llm_tts` 也一样连不上，"
-               "两条路都要访问 OpenAI。")
+        why = ("Can't reach api.openai.com (a DNS/proxy/VPN problem, unrelated to the key). "
+               "Make sure you're online and restart; offline, `--mode llm_tts` can't connect either, "
+               "since both paths need OpenAI.")
     elif any(k in text for k in ("401", "403", "invalid_api_key", "insufficient", "model_not_found")):
-        why = ("这个 key 没有 Realtime 权限或模型不可用——改用 "
-               "`python web/run.py --mode llm_tts`，那条路只要普通 chat + TTS。")
+        why = ("This key has no Realtime access or the model is unavailable -- use "
+               "`python web/run.py --mode llm_tts` instead; that path only needs regular chat + TTS.")
     else:
-        why = ("先看这条报错本身；如果只是 Realtime 用不了，可以改用 "
-               "`python web/run.py --mode llm_tts`（普通 chat + TTS）。")
-    msg = f"连不上 OpenAI Realtime（{name}: {text}）。{why}"
+        why = ("Check the error itself first; if it's just that Realtime is unavailable, you can use "
+               "`python web/run.py --mode llm_tts` instead (regular chat + TTS).")
+    msg = f"Can't connect to OpenAI Realtime ({name}: {text}). {why}"
     print(f"[web] {msg}", flush=True)
     try:
         await sock.send_json({"type": "error", "message": msg})
@@ -1760,32 +1871,32 @@ async def _no_realtime(sock, err):
         pass
 
 
-# ══════════════════ 驱动 voicemem 核心流式会话（vm.stream()）══════════════════
-# ASR + VAD + 投机预取（边说边预取 / 200ms 赌说完 / barge-in / 300ms 确认）
-# 全在核心 VoiceStream 里。这里只做 demo 该做的：搬 socket 帧、发 partial、把说完
-# 的一轮包成 Pending 交给控制流——demo 就是核心的使用示例，不再平行重写一套。
+# ══════════════════ Driving the supermem core streaming session (vm.stream()) ══════════════════
+# ASR + VAD + speculative prefetch (prefetch while speaking / 200ms gamble on done / barge-in / 300ms confirm)
+# all live in the core VoiceStream. Here we only do what the demo should: shuttle socket frames, send partials, and wrap each finished
+# turn into a Pending for the control flow -- the demo is a usage example of the core, not a parallel rewrite.
 
 def remember_turn(pending, reply: str, owner: dict, history_turn_id: str = "",
                   memory_vm=None) -> None:
-    """存这一轮，并顺手记下说话人是谁。
+    """Store this turn, and note who the speaker is along the way.
 
-    说话人不用单独算：ingest 内部本来就要跑一次 preprocess（场景/声纹/情绪），
-    返回值里直接带 speaker_id。之前我在热路径上又单独触发了一次完整感知——
-    那套一次 424ms（AST 占 361ms），纯属重复劳动，而且挡在读 socket 前面。
+    The speaker needn't be computed separately: ingest runs a preprocess internally anyway (scene/voiceprint/emotion),
+    and its return value carries speaker_id directly. I used to trigger a whole separate perception pass on the hot path --
+    424ms each time (AST taking 361ms), pure duplicated work, and it sat in front of reading the socket.
     """
-    # 没有转写文本的一轮 = 对着麦克风放了段声音（见 stream.py 的 MIN_SOUND_ONLY_S）。
-    # 直接 ingest("") 抽不出任何事实，这段音频就白存了——之后问「刚才那首歌帮我
-    # 重播」找不到任何记忆。给它一句话，让它能被检索到；音乐是什么由 ingest 内部
-    # 的音乐识别打 tune: 标签，这里只负责让它有个记忆载体。
-    # 判「有没有真的说话」不能只看空不空：音乐喂进 ASR 会硬转出一两个字母
-    # （实测 cafe_song 转成 'i'），非空但毫无意义。要求至少两个中文字或三个
-    # 英文字母才算说了话。
+    # A turn with no transcript = a sound played into the mic (see MIN_SOUND_ONLY_S in stream.py).
+    # ingest("") directly extracts no facts, and the audio would be stored for nothing -- later asking "replay that song
+    # just now" finds no memory. Give it a sentence so it can be retrieved; what the music is gets tagged tune: by ingest's
+    # internal music recognition; here we just give it a memory carrier.
+    # Judging "was anything really said" can't just check for empty: music fed into ASR gets forced into a letter or two
+    # (measured: cafe_song transcribed as 'i'), non-empty but meaningless. Require at least two CJK characters or three
+    # letters to count as speech.
     text = pending.text
     meaningful = re.sub(r"[^\w\u4e00-\u9fff]", "", text or "")
     cjk = len(re.findall(r"[\u4e00-\u9fff]", meaningful))
     if pending.audio_path and cjk < 2 and len(meaningful) < 3:
-        from voicemem.stream import SOUND_ONLY_TEXT
-        text = SOUND_ONLY_TEXT          # 必须用这个常量，核心靠它认出没说话的那轮
+        from supermem.stream import SOUND_ONLY_TEXT
+        text = SOUND_ONLY_TEXT          # must use this constant; the core relies on it to recognize the no-speech turn
 
     try:
         target_vm = memory_vm or vm
@@ -1797,35 +1908,35 @@ def remember_turn(pending, reply: str, owner: dict, history_turn_id: str = "",
     except Exception as e:
         print(f"[web] storing this turn failed: {type(e).__name__}: {e}", flush=True)
         return
-    # 上一轮的情绪留给下一轮的投机检索用。没有它右脑取不到情感记录，
-    # 每轮只会返回同样那几条静态画像（见 voicemem/stream.py 的 emotion 说明）。
+    # The previous turn's emotion is kept for the next turn's speculative retrieval. Without it the right brain can't fetch emotional records,
+    # and every turn would only return the same few static profile items (see the emotion notes in supermem/stream.py).
     affect = r.get("affect")
     if isinstance(affect, dict):
         affect = affect.get("emotion") or affect.get("label") or ""
     owner["emotion"] = str(affect or "").strip()
 
-    # 这一轮听到音乐了就记住那段录音。tune 识别是同步的，这里拿到的时候后台
-    # 入库才刚开始——"刚听完就问"能不能放出来，全靠这一句。
+    # If this turn heard music, remember that recording. Tune recognition is synchronous; by the time we get it here, the background
+    # storage has only just started -- whether "ask right after listening" can play anything depends entirely on this line.
     if r.get("recognized_tune") and pending.audio_path:
         _remember_tune(pending.audio_path)
     elif BARGE_DEBUG and _wants_sound(pending.text or ""):
-        print(f"  [replay] 这一轮没记住音乐："
+        print(f"  [replay] no music remembered this turn: "
               f"tune={bool(r.get('recognized_tune'))} audio={bool(pending.audio_path)}",
               flush=True)
 
     sid = r.get("speaker_id") or ""
     if not sid:
-        # 这一轮太短，声纹压根没算（见 perceiver 的 VOICEMEM_SPEAKER_MIN_S）。
-        # 不知道是谁 ≠ 换了个人，所以连 miss 计数都不动。
+        # This turn was too short, the voiceprint wasn't computed at all (see SUPERMEM_SPEAKER_MIN_S in perceiver).
+        # Not knowing who it is != a different person, so don't even touch the miss count.
         return
     if not owner["id"]:
-        owner["id"] = sid                  # 第一个开口的算这场对话的主人
+        owner["id"] = sid                  # the first to speak counts as this conversation's owner
     owner["last"] = sid
     owner["miss"] = 0 if sid == owner["id"] else owner.get("miss", 0) + 1
 
 
-# 记忆写入在后台串行执行，避免阻塞实时事件循环和并发写入。
-# 保存任务引用，确保会话结束后已排队的任务仍可完成。
+# Memory writes run serially in the background, to avoid blocking the realtime event loop and concurrent writes.
+# Task references are kept so queued tasks can still complete after the session ends.
 _REMEMBER_LOCK = asyncio.Lock()
 _REMEMBER_TASKS: set[asyncio.Task] = set()
 
@@ -1863,46 +1974,42 @@ def queue_remember_turn(pending, reply: str, owner: dict,
     task.add_done_callback(done)
 
 
-#: 比到多久以前。原来是 40 字——那是按「生成到哪儿就说到哪儿」估的，可生成比
-#: 播放快得多（尤其现在会提前合成下一段），用户此刻听到的往往是好几秒前生成的
-#: 内容，早滑出 40 字窗口了。改成按**已经说出口的**文本比，窗口也放宽。
-ECHO_WINDOW = int(os.environ.get("VOICEMEM_ECHO_WINDOW", "300"))
-#: 模糊匹配门槛：新出的字里，**连续**命中助手原话的那一段最长能占多大比例。
+#: How far back to compare. It used to be 40 chars -- estimated from "speaking wherever generation is at", but generation is
+#: much faster than playback (especially now that the next segment is synthesized ahead of time); what the user hears right now was often generated
+#: seconds earlier and has long slid out of a 40-char window. Now it compares against **text already spoken**, with a wider window.
+ECHO_WINDOW = int(os.environ.get("SUPERMEM_ECHO_WINDOW", "300"))
+#: Fuzzy-match threshold: among the new characters, the largest fraction a **contiguous** run matching the assistant's words may occupy.
 #:
-#: 一开始用的是二元组重合率——那是错的：它不看连续性，用户插话只要词汇跟刚才
-#: 聊的重合（"压力""GRE"这种，非常常见），散落的二元组就能凑过门槛，真插话被
-#: 当回声吞掉，结果就是打断失灵。
-#: 回声的特征是**一整段连续的原话**，真插话哪怕用词重合也接不成长串，所以改用
-#: 最长公共子串。ASR 差一两个字只会把长串截短一点，仍然远高于真插话。
-ECHO_RATIO = float(os.environ.get("VOICEMEM_ECHO_RATIO", "0.6"))
-#: 短于这个长度只做精确匹配。两三个字的二元组太少，重合率动不动就是 1.0——
-#: 用户跟着复述一个词（"GRE？"）就会被当成回声吞掉，那是真插话。
-ECHO_FUZZY_MIN = int(os.environ.get("VOICEMEM_ECHO_FUZZY_MIN", "4"))
+#: It started with bigram overlap rate -- which was wrong: it ignores contiguity, so as long as a user's barge-in overlaps in vocabulary with what
+#: was just discussed ("stress", "GRE", very common), scattered bigrams clear the threshold and a real barge-in gets
+#: swallowed as echo, so interruption stops working.
+#: Echo is characterized by **a whole contiguous run of the original words**; a real barge-in, even with overlapping words, can't form a long run, so it now uses
+#: the longest common substring. ASR being off by a char or two only shortens the run a bit, still far above a real barge-in.
+ECHO_RATIO = float(os.environ.get("SUPERMEM_ECHO_RATIO", "0.6"))
+#: Below this length only exact matching is done. Two or three chars give too few bigrams, and the overlap rate hits 1.0 all the time --
+#: a user repeating a word back ("GRE?") would be swallowed as echo, and that's a real barge-in.
+ECHO_FUZZY_MIN = int(os.environ.get("SUPERMEM_ECHO_FUZZY_MIN", "4"))
 
 
-#: 附和词（backchannel）：听着的人随口应一声，不是要抢话。
+#: Backchannels: a listener's casual acknowledgement, not an attempt to take the floor.
 #:
-#: 打断判据是"转写比上次多出 ≥2 个字"，而中文的附和词正好两三个字——实测里
-#: "对嗯""对的对"都把正在播的回复掐了。人一边听一边"嗯""对"是正常的对话行为，
-#: 掐掉反而不自然。realtime 那条路靠 OpenAI 的 semantic_vad 判"这是不是真的在
-#: 打断"来挡，llm_tts 这条没有，只能按词表挡。
+#: The barge-in criterion is "transcript grew by >= 2 chars", and short backchannels are exactly that long -- in testing
+#: "yeah mm" and "right, right" both cut off the reply being played. Saying "mm" or "right" while listening is normal conversation,
+#: and cutting off is what's unnatural. The realtime path relies on OpenAI's semantic_vad judging "is this really an
+#: interruption"; llm_tts has none, so it can only block by word list.
 #:
-#: 判据是**新增的这一段整个都是附和词**：说"对，不过我想说的是…"时，新增里
-#: 除了"对"还有别的，照样打断。代价只是纯附和的那次不打断，本来也不该打断。
-BACKCHANNEL_ON = os.environ.get("VOICEMEM_BACKCHANNEL", "1") != "0"
+#: The criterion is **the entire new part is backchannel**: when saying "right, but what I mean is...", the new part
+#: has more than "right", so it still interrupts. The only cost is not interrupting on a pure backchannel, which shouldn't interrupt anyway.
+BACKCHANNEL_ON = os.environ.get("SUPERMEM_BACKCHANNEL", "1") != "0"
 def _bc_norm(s: str) -> str:
-    """归一化：去掉空格和标点，只留字母数字。词表和输入走同一个函数，
-    免得"got it"（词表里有空格）永远匹配不上"gotit"（输入已去空格）。"""
+    """Normalize: strip spaces and punctuation, keep only letters and digits. The word list and input go through the same function,
+    so "got it" (with a space in the list) doesn't forever fail to match "gotit" (input with spaces stripped)."""
     return "".join(ch for ch in (s or "") if ch.isalnum()).casefold()
 
 
-#: 按长度倒序贪心切分，所以"对的"要排在"对"前面。
+#: Greedy splitting in descending length order, so longer words like "yeah" are tried before "yes".
 _BACKCHANNEL_RAW = {
-    # 中文
-    "嗯嗯", "嗯哼", "对对", "对啊", "对的", "是的", "是啊", "好的", "好呀", "行吧",
-    "知道了", "明白", "懂了", "原来如此", "这样啊",
-    "嗯", "呃", "哦", "噢", "喔", "欸", "诶", "啊", "唉", "对", "是", "好", "行",
-    # 英文
+    # English
     "uh-huh", "mhm", "mm-hmm", "yeah", "yep", "yes", "okay", "ok", "right",
     "sure", "gotcha", "got it", "i see", "cool", "nice", "wow", "hmm", "huh",
 }
@@ -1910,7 +2017,7 @@ _BACKCHANNEL = sorted({_bc_norm(w) for w in _BACKCHANNEL_RAW}, key=len, reverse=
 
 
 def _is_backchannel(new_chars: str) -> bool:
-    """新增的这几个字是不是纯附和。整段都能被词表切完才算。"""
+    """Are these new characters pure backchannel? Only counts if the whole thing can be consumed by the word list."""
     if not BACKCHANNEL_ON:
         return False
     s = _bc_norm(new_chars)
@@ -1927,13 +2034,13 @@ def _is_backchannel(new_chars: str) -> bool:
 
 
 def _is_echo(new_chars: str, said: str) -> bool:
-    """ASR 新吐出的这几个字，是不是助手自己的声音绕回麦克风了。
+    """Are the characters ASR just emitted the assistant's own voice looping back into the mic?
 
-    AEC 压不干净时，助手说的话会进 ASR，转出来的字跟真人插话在字数上没有区别。
-    但内容上有：回声一定是助手**刚说过的原文**里的片段。
+    When AEC doesn't fully cancel, the assistant's speech enters ASR, and the transcribed characters are indistinguishable from a real barge-in by count.
+    But content differs: echo is always a fragment of **the text the assistant just said**.
 
-    ``said`` 要传**已经说出口的**文本（不是已生成的），两者能差好几秒。
-    大小写要抹平——最早那个漏网的例子就是助手说 "Annie"、ASR 转出小写 "an"。
+    ``said`` must be the **already spoken** text (not the generated text); the two can differ by several seconds.
+    Case must be flattened -- the very first case that slipped through was the assistant saying "Annie" and ASR emitting lowercase "an".
     """
     s = "".join(ch for ch in (new_chars or "") if ch.strip()).casefold()
     hay = "".join(ch for ch in (said or "")[-ECHO_WINDOW:] if ch.strip()).casefold()
@@ -1942,15 +2049,14 @@ def _is_echo(new_chars: str, said: str) -> bool:
     if s in hay:
         return True
     if len(s) < ECHO_FUZZY_MIN:
-        return False                       # 太短，只信精确匹配
+        return False                       # too short, trust only exact matches
     return _lcs_len(s, hay) / len(s) >= ECHO_RATIO
 
 
 _INTERRUPT_PREFIXES = tuple(_bc_norm(x) for x in (
-    "停", "停一下", "先停", "暂停", "等等", "等一下", "先别说", "别说了", "打住",
-    "stop", "wait", "hold on", "pause", "quiet",
+    "stop", "wait", "hold on", "hang on", "pause", "quiet",
 ))
-_FILLER_PREFIX = re.compile(r"^[嗯呃啊哦噢喔欸诶唉哈哼]+")
+_FILLER_PREFIX = re.compile(r"^(?:u+m+|u+h+|h+m+)+")
 
 
 def _barge_text(text: str) -> str:
@@ -1963,7 +2069,7 @@ def _is_explicit_interrupt(text: str) -> bool:
 
 
 def _has_barge_content(text: str) -> bool:
-    """过滤单音节和纯语气词；只用于候选确认，不直接触发取消。"""
+    """Filter out single syllables and pure filler words; only used to confirm candidates, never triggers cancellation directly."""
     clean = _barge_text(text)
     if not clean or len(set(clean)) == 1 or _is_backchannel(text):
         return False
@@ -1980,7 +2086,7 @@ def _has_strong_final_barge(text: str) -> bool:
 
 
 def _lcs_len(a: str, b: str) -> int:
-    """最长公共**子串**（连续）长度。滚动一行的 DP，串都很短，开销可忽略。"""
+    """Length of the longest common **substring** (contiguous). Rolling one-row DP; strings are short, cost is negligible."""
     if not a or not b:
         return 0
     prev = [0] * (len(b) + 1)
@@ -1999,22 +2105,22 @@ def _lcs_len(a: str, b: str) -> int:
 async def anticipate(sock, on_frame=None, on_speech=None, owner=None, is_busy=None,
                      said=None, on_candidate=None, on_candidate_reject=None,
                      on_playback_checkpoint=None):
-    """驱动核心流式会话，逐个 yield 确认回合的 Pending。
-    on_frame(raw24k)：realtime 用它把原始音频平行喂给 OpenAI（方案 A）。
-    on_speech()：本地 VAD 一听到人声就叫一次——realtime 拿它做打断（barge-in）。
-    is_busy()：助手此刻是不是在说话。助手的声音会经麦克风回到 ASR，转出来的字
-    照样会走 partial_transcript——用户就看见自己的输入框里冒出助手刚说的话。
-    所以助手说话期间先不发 partial，等转写真的多出几个字（确认是人在插话，
-    见 BARGE_MIN_CHARS）之后再放行。
-    on_candidate()/on_candidate_reject()：疑似插话时可恢复地暂停/恢复播放；只有
-    on_speech() 才是确认打断。"""
+    """Drive the core streaming session, yielding a Pending for each confirmed turn.
+    on_frame(raw24k): realtime uses it to feed raw audio to OpenAI in parallel (plan A).
+    on_speech(): called once as soon as local VAD hears voice -- realtime uses it for barge-in.
+    is_busy(): whether the assistant is speaking right now. The assistant's voice comes back through the mic into ASR, and the transcribed characters
+    still go out as partial_transcript -- the user sees what the assistant just said popping up in their own input box.
+    So while the assistant is speaking, hold partials back until the transcript really grows by a few characters (confirming a person is cutting in,
+    see BARGE_MIN_CHARS), then let them through.
+    on_candidate()/on_candidate_reject(): recoverably pause/resume playback on a suspected barge-in; only
+    on_speech() is a confirmed interruption."""
     stream = vm.stream(spec_min_chars=SPEC_MIN_CHARS, gamble_s=GAMBLE_S, confirm_s=CONFIRM_S)
     last_partial = ""
     if owner is None:
-        owner = {"id": "", "last": "", "miss": 0}   # 主人的声纹 / 上一轮是谁 / 连续认错几轮
-    barge_base = 0                        # 上次触发打断时的转写长度
-    barged = False                        # 这一轮是否已确认「人在插话」
-    candidate = False                     # 已暂停播放、正在等更多证据
+        owner = {"id": "", "last": "", "miss": 0}   # owner's voiceprint / who spoke last turn / how many consecutive misidentified turns
+    barge_base = 0                        # transcript length when a barge-in last fired
+    barged = False                        # whether this turn has been confirmed as "a person cutting in"
+    candidate = False                     # playback paused, waiting for more evidence
     candidate_updates = 0
     candidate_text = ""
     candidate_silence = 0.0
@@ -2022,9 +2128,9 @@ async def anticipate(sock, on_frame=None, on_speech=None, owner=None, is_busy=No
     discard_candidate_turn = False
     while True:
         msg = await sock.receive()
-        if msg.get("type") == "websocket.disconnect":         # 关页面/刷新：收工
+        if msg.get("type") == "websocket.disconnect":         # page closed/refreshed: wrap up
             return
-        if msg.get("text"):                                   # 打字轮
+        if msg.get("text"):                                   # typed turn
             data = json.loads(msg["text"])
             if data.get("type") == "playback_checkpoint":
                 if on_playback_checkpoint:
@@ -2041,14 +2147,14 @@ async def anticipate(sock, on_frame=None, on_speech=None, owner=None, is_busy=No
             continue
         raw = msg["bytes"]
         if on_frame:
-            await on_frame(raw)                               # 方案 A：音频也进 OpenAI 缓冲
-        stream.emotion = owner.get("emotion") or None         # 上一轮算出来的情绪
-        st = await stream.feed(raw)                           # 核心：ASR + VAD + 投机预取
+            await on_frame(raw)                               # plan A: audio also goes into the OpenAI buffer
+        stream.emotion = owner.get("emotion") or None         # emotion computed in the previous turn
+        st = await stream.feed(raw)                           # core: ASR + VAD + speculative prefetch
         cur = st.text.strip()
         busy = bool(is_busy and is_busy())
         frame_s = len(raw) / 2 / MIC_RATE
 
-        # VAD 先触发可恢复暂停，后续 ASR 文本用于确认是否真正打断。
+        # VAD first triggers a recoverable pause; subsequent ASR text is used to confirm whether it's a real interruption.
         if busy and st.state == "<speak>" and not candidate and not barged:
             candidate = True
             discard_candidate_turn = False
@@ -2079,7 +2185,7 @@ async def anticipate(sock, on_frame=None, on_speech=None, owner=None, is_busy=No
                 barged = True
                 barge_base = len(cur)
                 if BARGE_DEBUG:
-                    why = "明确停止指令" if _is_explicit_interrupt(cur) else "转写连续稳定增长"
+                    why = "explicit stop command" if _is_explicit_interrupt(cur) else "transcript grew steadily"
                     print(f"[barge] {why} -> interruption confirmed: {cur[-16:]!r}", flush=True)
                 if on_speech:
                     await on_speech()
@@ -2092,19 +2198,19 @@ async def anticipate(sock, on_frame=None, on_speech=None, owner=None, is_busy=No
                     print("[barge] that sound produced no text -> resuming playback", flush=True)
                 if on_candidate_reject:
                     await on_candidate_reject()
-        # 助手正在说话时，ASR 里多半混着它自己的回声，那些字不能显示——用户会看见
-        # 自己的输入框冒出助手刚说的话。
+        # While the assistant is speaking, ASR is likely mixed with its own echo; those words must not be shown -- the user would see
+        # what the assistant just said popping up in their own input box.
         #
-        # 但原来的条件是「忙 且 还没确认插话」，等于**助手一忙就全屏蔽**，一直等到
-        # 攒够字数、过完回声判定、`barged` 翻真才放行。用户早说完了屏幕还是空的。
-        # 现在 _is_echo 够准了（连续子串比对），直接拿它判这句话本身像不像回声：
-        # 像就藏，不像就立刻显示，不必再等那个确认。
+        # But the old condition was "busy and barge-in not yet confirmed", i.e. **block everything whenever the assistant is busy**, until
+        # enough chars accumulated, the echo check passed, and `barged` flipped true. The user was long done and the screen was still empty.
+        # Now _is_echo is accurate enough (contiguous substring comparison), so use it directly to judge whether this text looks like echo:
+        # if it does, hide it; if not, show it immediately without waiting for that confirmation.
         echo = (bool(is_busy and is_busy()) and not barged
                 and (said is None or _is_echo(cur, said())))
         if st.text.strip() and st.text != last_partial and not echo:
             last_partial = st.text
             await sock.send_json({"type": "partial_transcript", "text": st.text, "replace": True})
-        if st.turn:                                           # VAD 确认说完 → 记忆早已预取好
+        if st.turn:                                           # VAD confirmed end of speech -> memory already prefetched
             if discard_candidate_turn:
                 discard_candidate_turn = False
                 last_partial = ""
@@ -2134,7 +2240,7 @@ async def anticipate(sock, on_frame=None, on_speech=None, owner=None, is_busy=No
                         await on_speech()
                 else:
                     if BARGE_DEBUG:
-                        print(f"[barge] 完整回合判为附和/回声/噪声 → 恢复：{final_text!r}",
+                        print(f"[barge] full turn judged backchannel/echo/noise -> resuming: {final_text!r}",
                               flush=True)
                     if on_candidate_reject:
                         await on_candidate_reject()
@@ -2146,35 +2252,35 @@ async def anticipate(sock, on_frame=None, on_speech=None, owner=None, is_busy=No
                     candidate_age = 0.0
                     continue
 
-            # 我们正在放录音，而这一轮一个字都没转出来：那是自己的声音绕回来了。
+            # We're playing a recording and this turn transcribed nothing: that's our own sound looping back.
             if _replaying_now() and not (st.turn.text or "").strip():
                 if BARGE_DEBUG:
-                    print("[replay] 回放期间的空白一轮，是自己的回声，丢掉", flush=True)
+                    print("[replay] empty turn during replay, it's our own echo, dropping", flush=True)
                 last_partial = ""
                 barge_base = 0
                 barged = False
                 candidate = False
                 continue
             last_partial = ""
-            barge_base = 0                                    # 新一轮，转写从头开始涨
+            barge_base = 0                                    # new turn, transcript grows from scratch
             barged = False
             candidate = False
             candidate_updates = 0
             candidate_text = ""
             candidate_silence = 0.0
             candidate_age = 0.0
-            # 谁在说话。第一个开口的人算这场对话的主人；之后换了另一个声纹，
-            # 就是陌生人——不能把主人的记忆讲给他听（"我是谁？"→"你是Jiaqi"
-            # 这个 bug 就是因为检索从不看说话人）。
-            # 用上一轮算出来的说话人做判断，这一轮的放后台算。
-            # 直接读 st.speaker_id 会同步跑声纹+情绪+场景一整套模型——实测 2.1 秒，
-            # 而且是在事件循环里，这期间连 socket 都不读，麦克风帧全堆着，
-            # 表现就是"ASR 很卡"。代价是换人之后第一句仍按上一个人算。
+            # Who's speaking. The first person to speak counts as this conversation's owner; if another voiceprint shows up later,
+            # that's a stranger -- the owner's memories must not be told to them ("Who am I?" -> "You're Jiaqi"
+            # was exactly the bug from retrieval never looking at the speaker).
+            # Decide using the speaker computed in the previous turn; this turn's is computed in the background.
+            # Reading st.speaker_id directly would synchronously run the whole voiceprint+emotion+scene model set -- measured 2.1 s,
+            # and inside the event loop, during which the socket isn't even read and mic frames pile up,
+            # showing up as "ASR is laggy". The cost is that after a speaker change, the first sentence still counts as the previous person.
             stranger = bool(SPEAKER_GATE and owner["id"]
                             and owner.get("miss", 0) >= STRANGER_MIN_TURNS)
             if stranger or SPEAKER_DEBUG:
-                # "他怎么突然不认识我了"——看这一行。声纹把同一个人认成两个
-                # person_* 时就会这样：记忆被清空，指令换成"就当第一次见面"。
+                # "Why did it suddenly stop recognizing me?" -- look at this line. It happens when the voiceprint splits one person into two
+                # person_* ids: memory gets cleared and the instruction switches to "treat it as a first meeting".
                 print(f"[speaker] owner={owner['id'] or '-'} last={owner['last'] or '-'}"
                       f" miss={owner.get('miss', 0)} stranger={stranger}", flush=True)
             yield Pending(st.turn.text,
@@ -2188,7 +2294,7 @@ async def anticipate(sock, on_frame=None, on_speech=None, owner=None, is_busy=No
 
 
 
-# ══════════════════ 每种 mode 的会话循环 ══════════════════
+# ══════════════════ Session loop for each mode ══════════════════
 
 async def _session_anticipate(session_id: str, sock, on_close=None, **kwargs):
     try:
@@ -2201,18 +2307,18 @@ async def _session_anticipate(session_id: str, sock, on_close=None, **kwargs):
 
 
 async def llm_tts_session(sock):
-    """llm_tts 这条路的打断。
+    """Barge-in for the llm_tts path.
 
-    原来是 `async for pending in anticipate(sock): await voicemem_llm_tts(...)`——
-    两个问题叠在一起，打断在结构上就不可能：
-      · on_speech 没传进 anticipate，本地 VAD 听到人声也没人管；
-      · voicemem_llm_tts 最后 `await speaker`，要等全部音频发完才返回。async for
-        在这期间不会去拉下一个，anticipate 就停在那儿不读 socket 了，麦克风帧全
-        堆在缓冲区里。听感就是"说什么都没用，他非要说完"。
+    It used to be `async for pending in anticipate(sock): await supermem_llm_tts(...)` --
+    two problems stacked up, making interruption structurally impossible:
+      · on_speech wasn't passed into anticipate, so nobody acted when local VAD heard voice;
+      · supermem_llm_tts ends with `await speaker`, returning only after all audio is sent. Meanwhile async for
+        doesn't pull the next item, so anticipate stalls and stops reading the socket, and mic frames all
+        pile up in the buffer. It felt like "nothing you say matters, it insists on finishing".
 
-    现在回复丢进后台任务，读 socket 的循环一刻不停；听到人声就取消那个任务。
+    Now the reply runs in a background task and the socket-reading loop never stops; hearing voice cancels that task.
     """
-    # until：前端预计几点才把已发出去的音频播完（见 hearing()）。
+    # until: when the frontend is expected to finish playing the audio already sent (see hearing()).
     turn = {"task": None, "t0": 0.0, "until": 0.0,
             "reply": {"text": ""}, "timeline": None}
     owner = {"id": "", "last": "", "miss": 0}
@@ -2238,14 +2344,14 @@ async def llm_tts_session(sock):
             await sock.send_json({"type": "answer_resume"})
 
     def hearing() -> bool:
-        """用户此刻还听不听得见助手。
+        """Can the user still hear the assistant right now?
 
-        不能用 `task.done()` 代替：send_audio 是**不限速**的，TTS 出多快就往
-        socket 里推多快，一段十几秒的回复两三秒就推完了。任务早就 done、前端
-        那边还在播剩下的十几秒——这期间插话，原来的 stop_reply 直接 return，
-        前端从没收到 answer_interrupt，表现正是"打断没反应，它非要念完"。
-        所以按**已发出去的音频时长**算，跟 realtime 那条路一致：24k PCM16，
-        一个样本 2 字节。
+        Can't be replaced by `task.done()`: send_audio is **not rate-limited**; it pushes into the socket as fast as TTS produces,
+        so a reply of a dozen-odd seconds is pushed in two or three. The task is long done while the frontend
+        is still playing the remaining dozen seconds -- a barge-in during that time made the old stop_reply return immediately,
+        the frontend never got answer_interrupt, and that's exactly "interrupting does nothing, it insists on finishing".
+        So compute from **the duration of audio already sent**, consistent with the realtime path: 24k PCM16,
+        2 bytes per sample.
         """
         t = turn["task"]
         timeline = turn["timeline"]
@@ -2265,12 +2371,12 @@ async def llm_tts_session(sock):
             turn["until"] = 0.0
 
     async def send_audio(pcm: bytes):
-        """发音频，顺带记账。前端是排队播的（pcm-player-worklet），这里跟着算
-        同一条时间线：上一块播完之后再接这一块。"""
+        """Send audio and keep the books. The frontend plays from a queue (pcm-player-worklet); here we track
+        the same timeline: this chunk follows once the previous one finishes."""
         turn["until"] = max(turn["until"], time.monotonic()) + len(pcm) / 2 / MIC_RATE
         if not turn["t0"]:
-            # 宽限期从**助手真的出声**那一刻起算，不是从任务创建。TTS 首帧要
-            # ~1.2s，按任务创建算的话宽限期在它开口前就过完了，等于没有。
+            # The grace period starts from the moment **the assistant actually makes sound**, not from task creation. The first TTS frame takes
+            # ~1.2s; counted from task creation, the grace period would be over before it even spoke, i.e. useless.
             turn["t0"] = time.monotonic()
         await sock.send_bytes(pcm)
 
@@ -2282,11 +2388,11 @@ async def llm_tts_session(sock):
         since = (time.monotonic() - turn["t0"]) * 1000 if turn["t0"] else 0.0
         if not force and turn["t0"] and since < BARGE_GRACE_MS:
             if BARGE_DEBUG:
-                print(f"[barge] 才说了 {since:.0f}ms，还在宽限期内，不打断", flush=True)
+                print(f"[barge] only {since:.0f}ms spoken, still within grace period, not interrupting", flush=True)
             return
         if BARGE_DEBUG:
             left = max(0.0, turn["until"] - time.monotonic()) * 1000
-            print(f"[barge] ★ 打断：转写触发（前端还剩 {left:.0f}ms 没播完）", flush=True)
+            print(f"[barge] ★ interrupt: triggered by transcript (frontend still has {left:.0f}ms unplayed)", flush=True)
         task = turn["task"]
         timeline = turn["timeline"]
         heard_text = timeline.heard_text() if timeline else ""
@@ -2320,29 +2426,29 @@ async def llm_tts_session(sock):
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            print(f"[web] 回复收尾失败：{type(e).__name__}: {e}", flush=True)
+            print(f"[web] reply wrap-up failed: {type(e).__name__}: {e}", flush=True)
 
     async for pending in _session_anticipate(
             context_session, sock, on_speech=stop_reply, owner=owner,
             is_busy=hearing, said=lambda: turn["reply"]["text"],
             on_candidate=pause_candidate, on_candidate_reject=resume_candidate,
             on_playback_checkpoint=playback_checkpoint, on_close=close_session):
-        # 整轮都是附和、而助手还在说：当没听见。
+        # The whole turn is backchannel while the assistant is still speaking: treat it as unheard.
         #
-        # _is_backchannel 原来只挡在"说到一半"那条路上（anticipate 里），可 VAD
-        # 判完一整轮走的是**另一条**——下面这句 stop_reply(force=True)。所以只
-        # 应一声"嗯"，VAD 认为你说完了一轮，新回合就以"顶掉旧回合"的名义把正在
-        # 播的回复掐了，附和词表根本没被问到。实测日志里就是这样掐的。
-        # 助手没在说话时的"嗯"照旧当正常一轮走。
+        # _is_backchannel used to guard only the "mid-sentence" path (in anticipate), but when VAD finishes a whole turn it takes
+        # **another** path -- the stop_reply(force=True) below. So just saying "mm", VAD considers a turn finished,
+        # and the new turn cut off the playing reply in the name of "replacing the old turn"; the backchannel list was never
+        # consulted. That's exactly how it cut off in the measured logs.
+        # An "mm" while the assistant isn't speaking still goes through as a normal turn.
         if _is_backchannel(pending.text) and hearing():
             if BARGE_DEBUG:
-                print(f"[barge] 整轮都是附和 {pending.text!r}，不算一轮，继续说", flush=True)
+                print(f"[barge] whole turn is backchannel {pending.text!r}, not a turn, keep talking", flush=True)
             continue
-        # 上一轮还没播完就被新的一轮顶掉。force：这里不能被宽限期挡下来，挡下来
-        # 旧任务会继续往同一条 socket 里灌音频，两轮交织着播。
+        # The previous turn is replaced by a new one before it finished playing. force: this must not be blocked by the grace period; if blocked,
+        # the old task keeps pouring audio into the same socket and the two turns play interleaved.
         await stop_reply(force=True)
         turn["t0"] = turn["until"] = 0.0
-        turn["reply"] = {"text": ""}            # 新一轮，回声比对从空的开始
+        turn["reply"] = {"text": ""}            # new turn, echo comparison starts empty
         reply_state = turn["reply"]
         context_space = ACTIVE_SPACE
         memory_vm = vm
@@ -2354,7 +2460,7 @@ async def llm_tts_session(sock):
                             context_space=context_space, memory_vm=memory_vm,
                             reply_state=reply_state):
             try:
-                await voicemem_llm_tts(
+                await supermem_llm_tts(
                     pending, sock.send_json, send_audio, owner, timeline,
                     said=reply_state, context_session=context_session,
                     context_space=context_space, memory_vm=memory_vm)
@@ -2378,38 +2484,38 @@ async def llm_tts_session(sock):
             except asyncio.CancelledError:
                 pass
             except Exception as e:
-                print(f"[web] 回复任务失败：{type(e).__name__}: {e}", flush=True)
+                print(f"[web] reply task failed: {type(e).__name__}: {e}", flush=True)
 
         task.add_done_callback(reply_done)
 
 
 async def realtime_session(sock):
-    """方案 A：整段麦克风音频平行喂给 OpenAI Realtime；本地 ASR+VAD 只负责投机记忆 +
-    用 500ms 判回合（关掉 OpenAI 自带 server_vad）。"""
+    """Plan A: the whole mic audio is fed to OpenAI Realtime in parallel; local ASR+VAD only handles speculative memory +
+    judging turns at 500ms (OpenAI's built-in server_vad is turned off)."""
     connected = False
     context_session = uuid.uuid4().hex
     try:
         async with utils.realtime_connect(REPLY) as conn:
-            # 握手成功不代表能用：没权限/模型名不对时，OpenAI 是**连上之后**再发
-            # close 4000（invalid_model / 权限错误）。所以要等第一次交互成功才算数。
-            # turn_detection 只借 OpenAI 的 VAD 做**打断**，不让它接管回合：
-            #   create_response=False    → 什么时候回复仍由我们决定（本地 VAD 判完
-            #                              一轮、记忆预取好，才 response.create）
-            #   interrupt_response=True  → 用户一开口，服务端直接掐掉正在播的回复
-            # 打断判定放在 OpenAI 那侧，是因为它直接对着音频流做；本地 VAD 要等
-            # 麦克风帧过完一整条链路（浏览器 AEC → ws → 重采样 → silero），真人
-            # 隔着扬声器插话时信号本来就弱，很容易判不出来。
-            # turn_detection 在 session.audio.input 下，**不是顶层**——写成顶层
-            # 会被静默拒绝（"Unknown parameter: session.turn_detection"，只以 error
-            # 事件回来，没人看就以为设上了）。原来那句 {"turn_detection": None} 一直
-            # 没生效，于是 server_vad 始终开着、自动抢着回复：它生成的 response 不带
-            # 我们注入的记忆，我们自己的 response.create 又撞上"已有 response 在跑"
-            # 而失败——语音轮"没用上记忆"就是这么来的。
-            #   create_response=False    → 什么时候回复由我们决定（本地 VAD 判完一轮、
-            #                              记忆预取好，才 response.create）
-            #   interrupt_response=True  → 用户一开口，服务端直接掐掉正在播的回复；
-            #                              这条判定在 OpenAI 侧直接对着音频流做，比
-            #                              本地 VAD（隔着 AEC + 网络 + 重采样）可靠
+            # A successful handshake doesn't mean it works: without permission/with a wrong model name, OpenAI sends
+            # close 4000 (invalid_model / permission error) **after connecting**. So it only counts once the first interaction succeeds.
+            # turn_detection only borrows OpenAI's VAD for **interruption**, not to take over turns:
+            #   create_response=False    -> we still decide when to reply (only after local VAD finishes
+            #                              a turn and memory is prefetched do we response.create)
+            #   interrupt_response=True  -> as soon as the user speaks, the server cuts off the reply being played
+            # Interruption detection sits on the OpenAI side because it works directly on the audio stream; local VAD has to wait
+            # for mic frames to pass through the whole chain (browser AEC -> ws -> resample -> silero), and a real person
+            # cutting in over the speaker already has a weak signal, easily missed.
+            # turn_detection lives under session.audio.input, **not at the top level** -- written at the top level
+            # it's silently rejected ("Unknown parameter: session.turn_detection", only coming back as an error
+            # event; if nobody looks, you think it's set). The old {"turn_detection": None} never
+            # took effect, so server_vad stayed on and eagerly auto-replied: the response it generated didn't carry
+            # our injected memory, and our own response.create then failed colliding with "a response is already running"
+            # -- that's how voice turns "didn't use memory".
+            #   create_response=False    -> we decide when to reply (only after local VAD finishes a turn
+            #                              and memory is prefetched do we response.create)
+            #   interrupt_response=True  -> as soon as the user speaks, the server cuts off the reply being played;
+            #                              this detection runs on the OpenAI side directly on the audio stream, more
+            #                              reliable than local VAD (behind AEC + network + resampling)
             await conn.session.update(session={
                 "type": "realtime",
                 "audio": {
@@ -2419,8 +2525,8 @@ async def realtime_session(sock):
             })
             connected = True
 
-            # 这一轮的状态：谁在说、说了什么、这轮用户的输入是什么。
-            # until：前端预计几点才把已发出去的音频播完（见 hearing()）。
+            # This turn's state: who's speaking, what was said, what the user's input was this turn.
+            # until: when the frontend is expected to finish playing the audio already sent (see hearing()).
             turn = {"live": False, "reply": "", "pending": None,
                     "t0": 0.0, "until": 0.0, "first": False,
                     "timeline": None, "response_done": False,
@@ -2431,19 +2537,19 @@ async def realtime_session(sock):
             playback_tasks: set[asyncio.Task] = set()
             candidate_paused = False
             candidate_paused_at = 0.0
-            # Realtime 同一时刻只允许一个 response；取消完成后才能创建下一轮。
+            # Realtime allows only one response at a time; the next turn can be created only after cancellation completes.
             response_idle = asyncio.Event()
             response_idle.set()
 
             def hearing() -> bool:
-                """用户此刻还听不听得见助手。
+                """Can the user still hear the assistant right now?
 
-                不能用 turn["live"] 代替：realtime 推音频比实时播放快得多，一段
-                十几秒的回复两三秒就推完了，response.done 一到 live 就变 False，
-                可前端那边还在播剩下的十几秒。这时候用户插话，on_speech 看到
-                live=False 就"忽略"，前端从没收到 answer_interrupt——表现正是
-                "打断没反应，它非要念完"。
-                所以按**已发出去的音频时长**算：24k PCM16，一个样本 2 字节。
+                Can't be replaced by turn["live"]: realtime pushes audio much faster than real-time playback; a reply of
+                a dozen-odd seconds is pushed in two or three, and live turns False as soon as response.done arrives,
+                while the frontend is still playing the remaining dozen seconds. If the user cuts in then, on_speech sees
+                live=False and "ignores" it, and the frontend never gets answer_interrupt -- exactly
+                "interrupting does nothing, it insists on finishing".
+                So compute from **the duration of audio already sent**: 24k PCM16, 2 bytes per sample.
                 """
                 timeline = turn["timeline"]
                 buffered = bool(timeline and not timeline.playback_done
@@ -2480,7 +2586,7 @@ async def realtime_session(sock):
                 if interrupted:
                     reply = timeline.heard_text() if timeline else ""
                     if BARGE_DEBUG and timeline:
-                        print(f"[context] 打断于 {timeline.rendered_ms()}ms，保留回复 "
+                        print(f"[context] interrupted at {timeline.rendered_ms()}ms, keeping reply "
                               f"{reply!r}", flush=True)
                 history_turn_id = _push_history(
                     context_session, space, p.text, reply,
@@ -2517,20 +2623,20 @@ async def realtime_session(sock):
                 task.add_done_callback(playback_tasks.discard)
 
             async def pump():
-                """常驻事件泵：OpenAI 的事件流只有这一个消费者。
+                """Resident event pump: OpenAI's event stream has only this one consumer.
 
-                turn["live"] 为假时一律不往前端转发——被打断后 OpenAI 还会吐一会儿
-                残余音频，转过去的话前端刚 stopPlayback 又排上新的，打断就不干净了。
+                Nothing is forwarded to the frontend while turn["live"] is false -- after an interruption OpenAI keeps emitting
+                leftover audio for a while; forwarding it would queue new audio right after the frontend's stopPlayback, making the interruption unclean.
                 """
                 async for ev in conn:
                     t = getattr(ev, "type", "")
                     if t.endswith("output_audio.delta"):
                         if turn["live"]:
                             if not turn["first"]:
-                                # 首帧音频延迟：response.create 发出去到 OpenAI 吐第一块
-                                # 声音之间的时间。这是"它反应慢"里我们控制不了的那半。
+                                # First-frame audio latency: time from sending response.create to OpenAI emitting the first
+                                # chunk of sound. This is the half of "it reacts slowly" that we can't control.
                                 turn["first"] = True
-                                print(f"[lat] realtime 首帧 "
+                                print(f"[lat] realtime first frame "
                                       f"{(time.monotonic()-turn['t0'])*1000:.0f}ms", flush=True)
                             pcm = base64.b64decode(ev.delta)
                             timeline = turn["timeline"]
@@ -2541,8 +2647,8 @@ async def realtime_session(sock):
                                     timeline.add_timestamps(tuple(timestamps))
                             turn["provider_item_id"] = (
                                 getattr(ev, "item_id", "") or turn["provider_item_id"])
-                            # 前端是排队播的（index.html 的 nextPlay），这里跟着算
-                            # 同一条时间线：上一块播完之后再接这一块。
+                            # The frontend plays from a queue (nextPlay in index.html); here we track
+                            # the same timeline: this chunk follows once the previous one finishes.
                             turn["until"] = (max(turn["until"], time.monotonic())
                                              + len(pcm) / 2 / 24000)
                             await sock.send_bytes(pcm)
@@ -2561,42 +2667,42 @@ async def realtime_session(sock):
                     elif t == "error" or t.endswith(".error"):
                         err = getattr(ev, "error", None)
                         code = getattr(err, "code", "")
-                        # server_vad 判完一句会自己 commit 音频缓冲，我们随后那次
-                        # commit 就撞上空缓冲。两种情况都得留着手动 commit（说得太短
-                        # 时 server_vad 不会自动 commit），所以这条属于预期内，忽略。
-                        # response_cancel_not_active：打断有两条路（本地 VAD 的
-                        # on_speech + server_vad 的 interrupt_response），互为备份，
-                        # 谁先到算谁的，慢的那个扑空是正常的。
+                        # server_vad commits the audio buffer itself after finishing a sentence, so our subsequent
+                        # commit hits an empty buffer. Both cases must keep the manual commit (when speech is too short
+                        # server_vad doesn't auto-commit), so this one is expected; ignore it.
+                        # response_cancel_not_active: interruption has two paths (local VAD's
+                        # on_speech + server_vad's interrupt_response) backing each other up;
+                        # whichever arrives first wins, and the slower one missing is normal.
                         if code not in (
                                 "input_audio_buffer_commit_empty",
                                 "response_cancel_not_active"):
-                            print(f"[web] realtime 事件错误：{err or ev}", flush=True)
+                            print(f"[web] realtime event error: {err or ev}", flush=True)
                     elif t.endswith("input_audio_buffer.speech_stopped"):
-                        # OpenAI 判"你说完了"的时刻。跟本地 silero 判完（我们发
-                        # response.create 那一刻）比，谁早谁晚——早的那个才是
-                        # 真正的 EOU 下限，晚的那部分是白等的。
+                        # The moment OpenAI decides "you're done". Compared with local silero finishing (the moment we send
+                        # response.create), whichever is earlier -- the earlier one is the
+                        # real EOU lower bound, and the later part is wasted waiting.
                         turn["stopped"] = time.monotonic()
                         if BARGE_DEBUG:
                             print("[lat] OpenAI decided the speaker finished", flush=True)
                     elif t.endswith("input_audio_buffer.speech_started"):
-                        # OpenAI 的 VAD 听到人声：它那侧已经掐了回复，我们同步收尾
+                        # OpenAI's VAD heard voice: its side has already cut the reply, we wrap up in sync
                         since = (time.monotonic() - turn["t0"]) * 1000
                         if BARGE_DEBUG:
                             print(f"[barge] OpenAI VAD heard speech (live={turn['live']}, "
                                   f"still_playing={hearing()}, {since:.0f}ms)", flush=True)
-                        # 宽限期，跟本地那条路一样。本地 VAD 判完一轮（静音 500ms）就
-                        # 发 response.create，而 OpenAI 的 server_vad 只要 320ms 静音就
-                        # 认为下一句开始了——用户的话尾、呼吸声、环境噪声都够触发。
-                        # 没有这道门的话，speech_started 会在助手出声之前就到，
-                        # 回复被掐在第一个音频块之前：一个字都听不见，还不报错。
-                        # 只记录，不再据此打断——见 _turn_detection 里的说明。
-                        # 留着这行日志是因为它是判断"回声压没压干净"最直接的证据：
-                        # 助手说话期间频繁出现，就说明 AEC 有残留。
+                        # Grace period, same as the local path. Local VAD sends response.create as soon as a turn ends (500ms silence),
+                        # while OpenAI's server_vad considers the next utterance started after just 320ms of silence --
+                        # the tail of the user's speech, breathing, ambient noise are all enough to trigger it.
+                        # Without this gate, speech_started would arrive before the assistant makes a sound,
+                        # and the reply gets cut before the first audio chunk: not a word is heard, and no error is reported.
+                        # Only logged, no longer used to interrupt -- see the notes in _turn_detection.
+                        # This log line is kept because it's the most direct evidence of "was the echo cancelled cleanly":
+                        # frequent occurrences while the assistant speaks mean AEC has residue.
                     elif t.endswith("response.done") or t.endswith("response.cancelled"):
-                        # done/cancelled 事件释放下一轮 response 的创建屏障。
+                        # done/cancelled events release the barrier for creating the next turn's response.
                         response_idle.set()
                         if BARGE_DEBUG and not turn["live"]:
-                            print("[barge] 旧 Realtime response 已退出", flush=True)
+                            print("[barge] old Realtime response has exited", flush=True)
                         if turn["live"]:
                             timeline = turn["timeline"]
                             if timeline:
@@ -2619,7 +2725,7 @@ async def realtime_session(sock):
                                             conn, provider_item_id, timeline)
                                     except Exception as e:
                                         if BARGE_DEBUG:
-                                            print(f"[barge] Provider 上下文截断失败：{e}",
+                                            print(f"[barge] provider context truncation failed: {e}",
                                                   flush=True)
                                 response_idle.set()
                             else:
@@ -2638,22 +2744,22 @@ async def realtime_session(sock):
                 await conn.input_audio_buffer.append(audio=base64.b64encode(raw).decode())
 
             async def on_speech():
-                """用户在助手说话时开口 → 打断。幂等：hearing() 一变假就不再触发。"""
+                """User speaks while the assistant is talking -> interrupt. Idempotent: stops firing once hearing() turns false."""
                 nonlocal candidate_paused, candidate_paused_at
                 if not hearing():
                     if BARGE_DEBUG:
-                        print("[barge] 有人声但助手没在说，忽略", flush=True)
+                        print("[barge] voice detected but the assistant isn't speaking, ignoring", flush=True)
                     return
-                # 刚开口那一小段不许打断：那时候麦克风里几乎只有助手自己的声音，
-                # 回声消除还没跟上，很容易一出声就把自己掐了。
+                # The first moments after it starts speaking can't be interrupted: the mic hears almost only the assistant's own voice then,
+                # echo cancellation hasn't caught up, and it easily cuts itself off as soon as it speaks.
                 since = (time.monotonic() - turn["t0"]) * 1000
                 if since < BARGE_GRACE_MS:
                     if BARGE_DEBUG:
-                        print(f"[barge] 才说了 {since:.0f}ms，还在宽限期内，不打断", flush=True)
+                        print(f"[barge] only {since:.0f}ms spoken, still within grace period, not interrupting", flush=True)
                     return
                 if BARGE_DEBUG:
                     left = max(0.0, turn["until"] - time.monotonic()) * 1000
-                    print(f"[barge] ★ 打断：转写触发（前端还剩 {left:.0f}ms 没播完）",
+                    print(f"[barge] ★ interrupt: triggered by transcript (frontend still has {left:.0f}ms unplayed)",
                           flush=True)
                 active_response = not response_idle.is_set()
                 timeline = turn["timeline"]
@@ -2665,9 +2771,9 @@ async def realtime_session(sock):
                 turn["live"], turn["until"] = False, 0.0
                 candidate_paused = False
                 candidate_paused_at = 0.0
-                # 先通知前端停播——这是本地操作，立刻生效；而 response.cancel() 要
-                # 等一次 OpenAI 往返。之前顺序反了，人插话后还得听完那一个往返的
-                # 时间，听感就是"打断没用，他非要说完"。
+                # Tell the frontend to stop playback first -- that's a local operation and takes effect immediately; response.cancel() has to
+                # wait for an OpenAI round trip. The order used to be reversed, so after cutting in you still heard that round trip's
+                # worth of audio, which felt like "interrupting is useless, it insists on finishing".
                 await sock.send_json({"type": "answer_interrupt",
                                       "output_id": output_id,
                                       "heard_text": heard_text})
@@ -2680,7 +2786,7 @@ async def realtime_session(sock):
                             conn, provider_item_id, timeline)
                     except Exception as e:
                         if BARGE_DEBUG:
-                            print(f"[barge] Provider 上下文截断失败：{e}", flush=True)
+                            print(f"[barge] provider context truncation failed: {e}", flush=True)
                 if active_response:
                     try:
                         await asyncio.wait_for(response_idle.wait(), timeout=2.0)
@@ -2698,17 +2804,17 @@ async def realtime_session(sock):
                                                 on_candidate=pause_candidate,
                                                 on_candidate_reject=resume_candidate,
                                                 on_playback_checkpoint=playback_checkpoint):
-                    # 跟 llm_tts 那条一致：整轮都是附和、助手还在说，就当没听见。
+                    # Same as llm_tts: if the whole turn is backchannel while the assistant is still speaking, treat it as unheard.
                     if _is_backchannel(pending.text) and hearing():
                         if BARGE_DEBUG:
-                            print(f"[barge] 整轮都是附和 {pending.text!r}，不算一轮，继续说",
+                            print(f"[barge] whole turn is backchannel {pending.text!r}, not a turn, keep talking",
                                   flush=True)
                         continue
-                    if hearing():                        # 上一轮还没播完就被新的一轮顶掉
+                    if hearing():                        # previous turn replaced by a new one before it finished playing
                         await on_speech()
                     if not response_idle.is_set():
                         if BARGE_DEBUG:
-                            print("[barge] 等旧 response 退出后再创建下一轮", flush=True)
+                            print("[barge] waiting for the old response to exit before creating the next turn", flush=True)
                         await response_idle.wait()
                     if COMPARE.enabled:
                         # realtime is **one** audio stream and cannot carry two
@@ -2769,70 +2875,78 @@ async def realtime_session(sock):
         _SESSION_CONTEXT.clear_session(context_session)
 
 
-#: 右脑 slot → 脑图三个簇。
+#: Right-brain slot -> the three brain-map clusters.
 #:
-#: 右脑真正的分类单位是 rb_slots 里那 6 个 slot（情绪 / 喜好与厌恶 / 应对方式 /
-#: 表达风格 / 思维模式 / 人物地点态度），不是 memory_class——那只有 heartnote /
-#: response_experience 两种，分不出东西。脑图上只有三个簇，所以这里把 6 个 slot
-#: 收敛成 3 个。
+#: The right brain's real classification unit is its 5 slots (emotion / likes_dislikes / coping_style /
+#: expression_style / thinking_pattern), not memory_class -- that only has heartnote /
+#: response_experience, which can't tell anything apart. The brain map has only three clusters, so here the slots
+#: are collapsed into 3.
 #:
-#: 检索命中的内容里，slot 名就写在开头（"情绪：…""喜好与厌恶：…"）；
-#: heartnote 是一条条的情绪时刻（"情感记录：…（内心OS：【难过】…）"），归 emotion。
+#: In retrieved hit content, trait hits carry the slot at the end ("<claim> (likes_dislikes) | he said: ...");
+#: heartnotes are individual emotional moments ("Emotional note: ... (inner note: ...)") and go to emotion.
+#: Keys are matched against the lowercased text with spaces turned into underscores.
 SLOT_TO_CLUSTER = {
-    "情绪":         "emotion",
-    "情感记录":     "emotion",
-    "内心OS":       "emotion",
-    "喜好与厌恶":   "preference",
-    "思维模式":     "preference",
-    "应对方式":     "experiences",
-    "表达风格":     "experiences",
-    "人物地点态度": "experiences",
-    "避免重复":     "experiences",
+    "emotion":          "emotion",
+    "emotional_note":   "emotion",
+    "inner_note":       "emotion",
+    "likes_dislikes":   "preference",
+    "thinking_pattern": "preference",
+    "coping_style":     "experiences",
+    "expression_style": "experiences",
+    "avoid_repeating":  "experiences",
 }
-_CALM = ("", "平静", "中性")
+_CALM = ("", "calm", "neutral")
 
 
 def rb_cluster(content: str, memory_class: str = "", emotion: str = "") -> str:
-    """一条右脑记忆归到脑图哪个簇。0 LLM，只看 slot 名。"""
-    # 先剥掉 "[2026-06-20] " 这种日期前缀，否则它占满取来比对的那一小段，
-    # heartnote 的"情感记录"就落到窗口外了。
+    """Which brain-map cluster a right-brain memory belongs to. 0 LLM, only looks at the slot name."""
+    # First strip a date prefix like "[2026-06-20] ", otherwise it fills the small window we compare against,
+    # and a heartnote's "Emotional note" falls outside the window.
     text = re.sub(r"^\s*\[[0-9-]{6,12}\]\s*", "", content or "")
-    head = text[:14]
+    low = text.lower().replace(" ", "_")
+    # Trait hits: "<claim> (<slot>)", possibly followed by " | he said: ...".
     for slot, cluster in SLOT_TO_CLUSTER.items():
-        if slot in head:
+        if f"({slot})" in low:
             return cluster
+    head = low[:40]
+    found = [(head.find(slot), cluster) for slot, cluster in SLOT_TO_CLUSTER.items() if slot in head]
+    if found:
+        return min(found)[1]
     if str(memory_class) == "response_experience":
         return "experiences"
+    if emotion not in _CALM:
+        return "emotion"
+    return "experiences"
     if emotion not in _CALM:
         return "emotion"
     return "experiences"
 
 
 def audio_of(memory_id: str) -> str:
-    """这条记忆当时那段原声在哪；没归档过、或已过保留期被清掉，返回 ""。
+    """Where this memory's original audio from back then is; returns "" if never archived, or cleared after the retention period.
 
-    走核心的 GetOriginalAudio——它已经带了"文件还在不在"的检查，不用在这儿重写。
-    ``LAST_TUNE_ID`` 是个例外：它指的是刚听过、还没来得及入库的那段（见 _LAST_TUNE）。
+    Goes through the core's GetOriginalAudio -- it already checks "does the file still exist", no need to rewrite that here.
+    ``LAST_TUNE_ID`` is the exception: it refers to the clip just heard that hasn't been stored yet (see _LAST_TUNE).
     """
     if memory_id == LAST_TUNE_ID:
         return _last_tune_path()
-    if memory_id.startswith(GROUP_ID_PREFIX):     # 一组片段，现拼一个完整的
+    if memory_id.startswith(GROUP_ID_PREFIX):     # a group of clips, stitch a complete one on the fly
         return _stitch([m for m in memory_id[len(GROUP_ID_PREFIX):].split(",") if m])
     try:
         r = vm._o._audio.GetOriginalAudio(memory_id)
         return r.get("audio_path") or "" if r.get("found") else ""
     except Exception as e:
-        print(f"[web] 查存档音频失败：{e}", flush=True)
+        print(f"[web] archived audio lookup failed: {e}", flush=True)
         return ""
 
 
 def hit_cluster(content: str, source: str) -> str:
-    """给检索命中用：只有 content 和 source，没有 metadata。"""
+    """For retrieval hits: only content and source, no metadata."""
     return rb_cluster(content, source, "")
 
 
 def _rb_cluster(m) -> str:
-    """给快照用：从 RightBrainMemory 对象取字段。"""
+    """For snapshots: take fields from a RightBrainMemory object."""
     meta = getattr(m, "metadata", None) or {}
     return rb_cluster(getattr(m, "content", ""),
                       str(getattr(m, "memory_class", "")),
@@ -2840,10 +2954,10 @@ def _rb_cluster(m) -> str:
 
 
 def fact_index(uid: str) -> dict:
-    """左脑记忆 id → 事实原文。
+    """Left-brain memory id -> original fact text.
 
-    原文在向量库里，认知图的 memories 表只有 id/slot/热度这些，取不到文本——
-    一开始用 get_memory_record 取，结果每条 heartnote 的起因都是空的。
+    The original text lives in the vector store; the cognitive graph's memories table only has id/slot/heat etc., no text --
+    at first get_memory_record was used, and every heartnote's cause came out empty.
     """
     try:
         entries = vm._o._get_repo()._vector_store.list_entries(user_id=uid)
@@ -2853,39 +2967,39 @@ def fact_index(uid: str) -> dict:
         return {}
 
 
-#: 右脑每个 slot 在脑图上最多画几个 entity。
-RB_ENTITIES_PER_SLOT = int(os.environ.get("VOICEMEM_RB_GRAPH_PER_SLOT", "6"))
-#: 左脑每个 slot 在脑图上最多画几条记忆。
-LB_ENTRIES_PER_SLOT = int(os.environ.get("VOICEMEM_LB_GRAPH_PER_SLOT", "7"))
+#: At most this many entities drawn per right-brain slot on the brain map.
+RB_ENTITIES_PER_SLOT = int(os.environ.get("SUPERMEM_RB_GRAPH_PER_SLOT", "6"))
+#: At most this many memories drawn per left-brain slot on the brain map.
+LB_ENTRIES_PER_SLOT = int(os.environ.get("SUPERMEM_LB_GRAPH_PER_SLOT", "7"))
 
 
-# ── 右脑判断的「人话」版本 ────────────────────────────────────────────────────
-# 库里存的 claim 是给**模型**看的：紧凑、第三人称、像标签（"Facing a lot of
-# pressure recently"）。那份不能动——prompt 需要的就是这种密度。
-# 但页面上是给**人**看的，同一句话摆出来就很像在读档案。这里做一份只用于显示的
-# 第一人称改写。
+# ── The "plain language" version of right-brain judgements ───────────────────
+# The claims stored in the library are for the **model**: compact, third person, label-like ("Facing a lot of
+# pressure recently"). Those can't change -- that density is exactly what the prompt needs.
+# But the page is for **people**, and the same sentence shown there reads like a case file. Here we make a display-only
+# first-person rewrite.
 #
-# 异步 + 缓存：memory_snapshot 是同步的，不能在里面等一次 LLM 往返。所以第一次
-# 显示原文，后台改写完落进缓存，前端下一次轮询（watchMemories 本来就在轮）就换成
-# 人话。改写只碰措辞，不新增任何事实。
-#: 这个空间的主人叫什么。右脑那些话是**关于他**的，一律写"他"就少了那份认得他的
-#: 感觉——"Jiaqi 一紧张就闷声不响"和"他一紧张就闷声不响"，前者才像认识他。
-#: 名字来自声纹注册表（自报"我叫X"时绑定的），读不到就回落到"他"。
+# Async + cache: memory_snapshot is synchronous and can't wait for an LLM round trip inside. So the first time
+# shows the original, the background rewrite lands in the cache, and the frontend's next poll (watchMemories polls anyway) swaps in
+# the plain-language version. The rewrite only touches wording, adds no facts.
+#: What this space's owner is called. The right-brain lines are **about him**; always writing "he" loses the feeling of
+#: knowing him -- "Jiaqi goes quiet when he's nervous" vs "he goes quiet when he's nervous", only the former feels like you know him.
+#: The name comes from the voiceprint registry (bound when he said "my name is X"); if unavailable it falls back to a generic reference.
 _OWNER_NAME_CACHE: dict = {}
-#: 疑问词。"我叫什么名字？"被当成自我介绍绑进去过，registry 里真的躺着一条
-#: name="什么名字"（见 voiceprint/speaker_identity.py 顶上那段）。显示前挡一道。
-_BAD_NAME_CHARS = "什谁哪啥吗呢么?？"
+#: Question words. "What's my name?" was once bound as a self-introduction, and the registry really held an entry
+#: name="what name" (see the top of voiceprint/speaker_identity.py). Block it before display.
+_BAD_NAME_CHARS = "?"
 
 
 def owner_name(space: str = "") -> str:
-    """这个空间主人的名字；认不出来就返回 ""（调用方自己回落到"他"）。"""
+    """This space owner's name; returns "" if it can't be recognized (the caller falls back to a generic reference)."""
     space = space or ACTIVE_SPACE
     if space in _OWNER_NAME_CACHE:
         return _OWNER_NAME_CACHE[space]
     name = ""
     try:
         import json
-        from voicemem.utils.common import space as _sp
+        from supermem.utils.common import space as _sp
         d, _ = space_dir(space)
         p = _sp.mm(d, "voiceprint_registry.json")
         if p.is_file():
@@ -2895,118 +3009,106 @@ def owner_name(space: str = "") -> str:
                 if not isinstance(v, dict) or v.get("role") != "user":
                     continue
                 n = (v.get("name") or "").strip()
-                # 挡掉疑问句绑进来的假名字，也挡掉 "user" 这种占位 key
+                # Block fake names bound from questions, and placeholder keys like "user"
                 if not n or n.lower() == "user" or any(c in n for c in _BAD_NAME_CHARS):
                     continue
                 cands.append((bool(v.get("entity_id")), n))
             if cands:
-                # 有 entity_id 的更可信（真的在图里落过地）
+                # Those with an entity_id are more trustworthy (they really landed in the graph)
                 cands.sort(key=lambda t: not t[0])
                 name = cands[0][1]
     except Exception as e:
-        print(f"[rb] 主人姓名读取失败：{type(e).__name__}: {e}", flush=True)
+        print(f"[rb] reading owner name failed: {type(e).__name__}: {e}", flush=True)
     _OWNER_NAME_CACHE[space] = name
     return name
 
 
-_RB_HUMAN: dict = {}          # claim 原文 -> 人话版本
+_RB_HUMAN: dict = {}          # original claim -> plain-language version
 _RB_HUMAN_PENDING: set = set()
-#: 关掉就一直显示原始 claim（不想为显示花钱时）。
-RB_HUMANIZE = os.environ.get("VOICEMEM_RB_HUMANIZE", "1") != "0"
+#: Turn off to always show the raw claim (when you don't want to spend money on display).
+RB_HUMANIZE = os.environ.get("SUPERMEM_RB_HUMANIZE", "1") != "0"
 
 _RB_HUMANIZE_PROMPT = (
-    # 四版教训，别再退回去：
-    # ① 只写"第一人称"不够——不说清是**谁**在说，模型只做同义替换。
-    # ② "不许新增事实"会被读成"不许换说法"，于是退化成往原句前贴个"我注意到"。
-    #    要把两件事拆开：事实不能加，措辞必须重说。
-    # ③ "我发现/我注意到/在我看来"全是**报告动词**——语法上是第一人称，语气上还是
-    #    观察员在汇报。要的是一个懂他的小东西在心疼他，所以这类开头得禁掉。
-    # ④ 名字那条第一版写的是"和「他」换着用"，太软，十条全用了"他"——示例里也全是
-    #    "他"，模型照着示例走。规则要硬，示例也得点名。
-    #    后来改成**一律点名**：页面上每条是独立的一行，不是一段连贯的话，
-    #    重复出现名字读起来是"这是关于谁的"，不是啰嗦。
-    # ⑤ 显示语言跟**界面**走，不跟原文走。库里中英混着（翻译过一半），跟原文走
-    #    页面上就中英混排。显示是给人看的，同一屏里不该夹生。
-    "下面每行是一条关于 {who} 的判断，来自一个一直陪着 {who} 的小助手——"
-    "像只很懂他的小动物，安静地待在旁边，什么都看在眼里。\n"
-    "把每一条改写成这个小助手会说出来的话。\n"
+    # Lessons from four versions, don't regress:
+    # (1) Just saying "first person" isn't enough -- without saying **who** is speaking, the model only does synonym swaps.
+    # (2) "Don't add facts" gets read as "don't change the wording", degrading into sticking "I noticed" in front of the original.
+    #    The two must be separated: no facts added, but the wording must be restated.
+    # (3) "I found / I noticed / it seems to me" are all **reporting verbs** -- grammatically first person, but the tone is still
+    #    an observer reporting. What we want is a little companion who gets him and feels for him, so these openers must be banned.
+    # (4) The first version of the name rule said "alternate with 'he'", too soft; all ten used "he" -- the examples also all used
+    #    "he", and the model follows the examples. The rule must be firm, and the examples must use the name too.
+    #    Later changed to **always use the name**: each item on the page is its own line, not a continuous paragraph,
+    #    so the repeated name reads as "this is about whom", not as wordiness.
+    # (5) Display language follows the **UI**, not the original. The store may be mixed-language (half translated); following the original
+    #    would mix languages on the page. Display is for people; one screen shouldn't be half-baked.
+    "Each line below is a judgement about {who}, from a little assistant who has always been by {who}'s side -- "
+    "like a small animal that really gets him, quietly staying nearby, taking everything in.\n"
+    "Rewrite each one as something this little assistant would say.\n"
     "\n"
-    "语气：\n"
-    "· 短。观察那半句十几个字最好，读起来是一句话，不是一条记录。\n"
-    "· 有温度，带一点点护着他的意思——是心疼，不是分析。\n"
-    "· **不要用「我发现」「我注意到」「在我看来」开头**，那是汇报的口气。"
-    "直接说那件事，或者说你替他觉得怎么样。\n"
-    "· 别肉麻、别撒娇、别堆感叹号、别讲道理也别安慰。\n"
+    "Tone:\n"
+    "· Short. The observation half is best at around ten words; it should read as a sentence, not a record.\n"
+    "· Warm, with a slight protective feeling toward him -- caring, not analysing.\n"
+    "· **Don't start with \"I found\", \"I noticed\", \"it seems to me\"** -- that's a reporting tone. "
+    "Just say the thing itself, or how you feel for him.\n"
+    "· No gushing, no cutesiness, no piles of exclamation marks, no lecturing and no consoling.\n"
     "{name_rule}"
     "\n"
-    "内容：\n"
-    "· **必须换一种说法**。原句是概括性的词（「简短回应」「寻求认同」），"
-    "要还原成人会怎么形容（「话就变少了」「想有人接住他」）。\n"
-    "· 但**不许新增任何事实**：不补细节、不猜原因、不加评价。换措辞，不换内容。\n"
-    # 关键区分：往用户身上加事实=幻觉；说**我自己**打算怎么做=助手的立场，安全。
-    # 而且这一半只在页面上显示，不进模型的 prompt，说错了也影响不到回答。
-    "· 观察之后，可以再跟一句**你自己打算怎么做**，用「 —— 」隔开。"
-    "只说你的做法（「我不追问」「我让他说完」），"
-    "**不许再多说一句关于他的事**。\n"
-    # 不加这条会写出"我帮他找个安静的地方复习"——语音助手做不到，读着就假。
-    "· 你能做的只有**说话**这一件事：怎么开口、先提什么、避开什么、"
-    "什么时候闭嘴。不要承诺现实世界里的行动（找地方、订闹钟、帮他做事），"
-    "你做不到。\n"
-    "· 这后半句是可选的：想不出自然的做法就只留观察，别硬凑。"
-    "十条里有三四条带上就够了，条条都带会像在背守则。\n"
-    "· 全部用{lang}输出，不管原文是什么语言。\n"
+    "Content:\n"
+    "· **You must rephrase it**. The original uses summary terms (\"brief responses\", \"seeks validation\"); "
+    "turn them back into how a person would describe it (\"he stops saying much\", \"he wants someone to catch him\").\n"
+    "· But **never add any facts**: no extra details, no guessing causes, no added judgements. Change the wording, not the content.\n"
+    # Key distinction: adding facts about the user = hallucination; saying what **I myself** plan to do = the assistant's stance, safe.
+    # And this half is only shown on the page, it never enters the model's prompt, so a mistake can't affect replies.
+    "· After the observation, you may add **what you yourself plan to do**, separated by \" —— \". "
+    "Only say your approach (\"I don't press\", \"I let him finish\"); "
+    "**don't say one more thing about him**.\n"
+    # Without this rule it writes "I'll find him a quiet place to study" -- a voice assistant can't do that, and it reads as fake.
+    "· The only thing you can do is **talk**: how to open, what to bring up first, what to avoid, "
+    "when to stay quiet. Don't promise real-world actions (finding places, setting alarms, doing things for him); "
+    "you can't do them.\n"
+    "· This second half is optional: if no natural approach comes to mind, keep only the observation, don't force it. "
+    "Three or four out of ten is enough; having it on every line sounds like reciting rules.\n"
+    "· Write everything in {lang}, whatever language the original is in.\n"
     "\n"
-    "逐行输出，行数和顺序跟输入完全一致；不要编号、引号或多余的话。\n"
-    "例：\n"
+    "Output line by line, with exactly the same number and order of lines as the input; no numbering, quotes or extra words.\n"
+    "Example:\n"
     "{examples}"
 )
 
-#: 示例。两件事都靠它带：**语气**和**输出语言**。
-#: 模型跟示例走的力度远大于跟规则走——名字那条和语言这条都在这儿栽过：
-#: 规则写了"每条点名"但示例用「他」，输出就全是「他」；规则写了"输出英文"
-#: 但示例全中文，输出就全是中文。所以示例必须跟着目标语言换，而且都要点名。
+#: The examples. They carry two things: **tone** and **output language**.
+#: The model follows examples far more strongly than rules -- both the name rule and the language rule tripped on this:
+#: the rule said "use the name every time" but the examples used "he", so the output was all "he"; the rule said "output in English"
+#: but the examples were in another language, so the output was too. So the examples must match the target language, and all use the name.
 _RB_HUMANIZE_EXAMPLES = {
-    "zh": (
-        "  输入  在焦虑时倾向于简短回应\n"
-        "  输出  {who}一紧张就闷声不响 —— 我不追问，等他自己开口\n"
-        "  输入  考试时容易走神\n"
-        "  输出  {who}考试时容易走神 —— 这事我不主动提，怕他更焦虑\n"
-        "  输入  在情绪低落时不喜欢被忽视\n"
-        "  输出  {who}难过的时候，最怕没人理\n"
-        "  输入  Feels accomplished when recognized\n"
-        "  输出  夸{who}一句，他整个人就亮了\n"
-        "  输入  Hates being interrupted\n"
-        "  输出  打断{who}说话，他立刻就不说了 —— 我尽量让他讲完\n"
-    ),
     "en": (
-        "  输入  在焦虑时倾向于简短回应\n"
-        "  输出  {who} goes quiet the moment he tenses up —— I don't push, I wait\n"
-        "  输入  考试时容易走神\n"
-        "  输出  {who}'s mind wanders in exams —— I won't bring it up, it'd only add pressure\n"
-        "  输入  在情绪低落时不喜欢被忽视\n"
-        "  输出  When {who} is down, being ignored is the worst of it\n"
-        "  输入  Feels accomplished when recognized\n"
-        "  输出  A little praise and {who} lights right up\n"
-        "  输入  Hates being interrupted\n"
-        "  输出  Cut {who} off mid-sentence and you'll lose him —— I let him finish\n"
+        "  input   Tends to give brief responses when anxious\n"
+        "  output  {who} goes quiet the moment he tenses up —— I don't push, I wait\n"
+        "  input   Easily distracted during exams\n"
+        "  output  {who}'s mind wanders in exams —— I won't bring it up, it'd only add pressure\n"
+        "  input   Doesn't like being ignored when feeling low\n"
+        "  output  When {who} is down, being ignored is the worst of it\n"
+        "  input   Feels accomplished when recognized\n"
+        "  output  A little praise and {who} lights right up\n"
+        "  input   Hates being interrupted\n"
+        "  output  Cut {who} off mid-sentence and you'll lose him —— I let him finish\n"
     ),
 }
 
 
-def _rb_humanize_now(claims: list, name: str = "", lang: str = "zh") -> None:
-    """后台线程里跑：一次 LLM 往返改写一批，结果落进 _RB_HUMAN。"""
-    lang_name = "英文" if lang == "en" else "中文"
+def _rb_humanize_now(claims: list, name: str = "", lang: str = "en") -> None:
+    """Runs on a background thread: one LLM round trip rewrites a batch, results land in _RB_HUMAN."""
+    lang_name = "English"
     try:
         from openai import OpenAI
-        who = name or "他"
+        who = name or "this person"
         sysmsg = _RB_HUMANIZE_PROMPT.format(
             who=who,
             lang=lang_name,
-            # 规则要硬。写"换着用"的那版，十条全用了"他"。
-            name_rule=(f"· **每条都直接叫他「{name}」**，别用「他」代替——"
-                       "页面上每条是独立一行，点名是在说「这是关于谁的」。\n"
+            # The rule must be firm. The version that said "alternate" used "he" in all ten.
+            name_rule=(f"· **Call him \"{name}\" directly every time**, don't substitute \"he\" -- "
+                       "each item on the page is its own line, and using the name says \"this is about whom\".\n"
                        if name else ""),
-            examples=_RB_HUMANIZE_EXAMPLES.get(lang, _RB_HUMANIZE_EXAMPLES["zh"])
+            examples=_RB_HUMANIZE_EXAMPLES["en"]
                      .replace("{who}", who))
         r = OpenAI().chat.completions.create(
             model=utils.CHAT_MODEL, temperature=0.7,
@@ -3014,19 +3116,19 @@ def _rb_humanize_now(claims: list, name: str = "", lang: str = "zh") -> None:
                       {"role": "user", "content": "\n".join(claims)}],
         )
         lines = [x.strip() for x in (r.choices[0].message.content or "").splitlines() if x.strip()]
-        if len(lines) != len(claims):      # 行数对不上就整批丢弃，别错位配对
-            print(f"[rb] 改写行数不符（{len(lines)}≠{len(claims)}），这批跳过", flush=True)
+        if len(lines) != len(claims):      # if line counts don't match, drop the whole batch; don't pair them misaligned
+            print(f"[rb] rewrite line count mismatch ({len(lines)}!={len(claims)}), skipping this batch", flush=True)
             return
         for c, h in zip(claims, lines):
             _RB_HUMAN[(lang, name, c)] = h
     except Exception as e:
-        print(f"[rb] 判断改写失败：{type(e).__name__}: {e}", flush=True)
+        print(f"[rb] judgement rewrite failed: {type(e).__name__}: {e}", flush=True)
     finally:
         _RB_HUMAN_PENDING.difference_update((lang, name, c) for c in claims)
 
 
 def rb_human(claim: str) -> str:
-    """显示用的那句话。还没改写好就先返回原文，同时排上队。"""
+    """The sentence used for display. Returns the original until the rewrite is ready, and queues it meanwhile."""
     if not RB_HUMANIZE or not claim:
         return claim
     name, lang = owner_name(), SPACE_LANG
@@ -3042,7 +3144,7 @@ def rb_human(claim: str) -> str:
 
 
 def rb_human_batch(claims: list) -> None:
-    """一次把缺的都排上队——脑图一屏几十条，一条一个线程太浪费。"""
+    """Queue everything missing in one go -- the brain map shows dozens of items per screen, one thread each is too wasteful."""
     if not RB_HUMANIZE:
         return
     name, lang = owner_name(), SPACE_LANG
@@ -3057,29 +3159,29 @@ def rb_human_batch(claims: list) -> None:
 
 
 def right_brain_tree(uid, facts):
-    """脑图右半球：slot → 判断 → 证据。
+    """Right hemisphere of the brain map: slot -> judgement -> evidence.
 
-    读右脑的判断表（voicemem/rightbrain/traits_store.py）。旧的
-    slot→entity→heartnote 结构已经不再写入，_right_brain_tree_v1 只用来看老数据。
+    Reads the right brain's judgement table (supermem/rightbrain/traits_store.py). The old
+    slot->entity->heartnote structure is no longer written; _right_brain_tree_v1 is only for viewing old data.
     """
     try:
         store = vm._o._right._traits()
     except Exception as e:
-        print(f"[web] 判断表读取失败：{type(e).__name__}: {e}", flush=True)
+        print(f"[web] reading judgement table failed: {type(e).__name__}: {e}", flush=True)
         return []
 
     traits = list(store.all(uid, per_slot=RB_ENTITIES_PER_SLOT))
-    rb_human_batch([t.claim for t in traits])     # 缺的一次排队，见 rb_human
+    rb_human_batch([t.claim for t in traits])     # queue the missing ones in one go, see rb_human
     out = []
     for t in traits:
         out.append({
             "cluster": t.cluster,
             "slot": t.slot,
-            # 节点标题用人话版；还没改写好就是原文，下一次轮询会换上来。
-            # raw 留着——前端拿它跟每轮命中做匹配，换成人话就对不上了。
+            # Node titles use the plain-language version; until the rewrite is ready it's the original, swapped in on the next poll.
+            # raw is kept -- the frontend matches it against each turn's hits; the plain-language version wouldn't match.
             "raw": t.claim,
             "text": rb_human(t.claim),
-            "desc": "",               # 判断本身就是概括，不再垫一行原始事实
+            "desc": "",               # the judgement is itself a summary; no extra line of raw facts
             "notes": [{"text": e.quote, "emotion": e.emotion, "cause": e.cause}
                       for e in t.evidence],
         })
@@ -3087,21 +3189,21 @@ def right_brain_tree(uid, facts):
 
 
 def _right_brain_tree_v1(uid: str, facts: dict) -> list:
-    """右脑真实的三层结构：slot → entity → 挂在下面的 heartnote。
+    """The right brain's real three-layer structure: slot -> entity -> the heartnotes hanging under it.
 
-    脑图上的节点是 **entity**（"委屈""讨厌坚果和过敏""选择沉默忍耐"），不是
-    一条条 heartnote —— entity 才是右脑归纳出来的那个"点"，heartnote 是支撑它
-    的证据。每条 heartnote 再带上引发它的左脑事实，这样"为什么委屈"点两下就能看到。
+    Nodes on the brain map are **entities** ("wronged", "dislikes nuts and allergies", "chooses silent endurance"), not
+    individual heartnotes -- the entity is the "point" the right brain has generalized, and heartnotes are the evidence
+    supporting it. Each heartnote also carries the left-brain fact that triggered it, so "why wronged" is two clicks away.
 
-    只读，全部走 graph_store 的公开方法。
+    Read-only, entirely through graph_store's public methods.
     """
     graph = vm._o._right._rb_graph_store()
     repo = vm._o._right._rb_repo()
     notes = {}
     for m in repo.list_all(uid):
-        # response_experience 记的是"助手上次怎么答的"，是给回复层看的内部笔记，
-        # 不是对用户其人的认识。脑图上不该有它——它长出来的节点写着助手自己
-        # 说过的话，看着像"系统把自己的回复当成了对你的了解"。
+        # response_experience records "how the assistant answered last time", an internal note for the reply layer,
+        # not an understanding of the user as a person. It doesn't belong on the brain map -- the nodes it grows contain the assistant's own
+        # words, looking like "the system took its own replies as knowledge about you".
         if getattr(m, "memory_class", "") == "response_experience":
             continue
         meta = getattr(m, "metadata", None) or {}
@@ -3113,24 +3215,24 @@ def _right_brain_tree_v1(uid: str, facts: dict) -> list:
 
     out = []
     for slot in graph.list_slots(uid):
-        # 没有 description 的 slot 跳过：右脑还没归纳过它，底下挂的就是原始实体
-        # 倒进来的一堆东西（实测"人物地点态度"下面是 Jiaqi / 计算机本科 /
-        # 新加坡国立大学NUS / 2026年9月 —— 人名、学历、机构、日期，不是态度）。
-        # 画在脑图上只是噪声，还占着右半球的位置。
-        # 这里原来是「slot 没有 description 就整个跳过」。
-        # description 是**长期归因**（session 边界的 _summarize_slot）才生成的，
-        # 新建的空间从没跑过 → 六个 slot 全是空描述 → 每个都被跳过 → 脑图右半球
-        # 一个节点都没有。而节点画的是**实体**，跟这个 slot 有没有一句画像总结
-        # 没关系：实体在、证据在，就该画出来。
+        # Skip slots without a description: the right brain hasn't generalized them yet, and what hangs underneath is a heap of raw entities
+        # dumped in (measured: under the old "people/places/attitudes" slot were Jiaqi / CS undergrad /
+        # NUS / September 2026 -- names, education, institutions, dates, not attitudes).
+        # Drawn on the brain map it's just noise, and it takes up space in the right hemisphere.
+        # This used to be "skip the whole slot if it has no description".
+        # description is only generated by **long-term attribution** (_summarize_slot at session boundaries);
+        # a newly created space has never run it -> all six slots have empty descriptions -> every one is skipped -> the right
+        # hemisphere has no nodes at all. But the nodes draw **entities**, unrelated to whether this slot has a one-line
+        # profile summary: if the entity exists and the evidence exists, it should be drawn.
         cluster = SLOT_TO_CLUSTER.get(slot.name, "experiences")
-        # 每个 slot 只画前几个 entity——库里跑一阵就有 89 个，全画上去右半球糊成
-        # 一片（左脑同期才 26 条）。
+        # Only draw the first few entities per slot -- after running a while the store has 89; drawing them all turns the right hemisphere into
+        # a blur (the left brain had only 26 in the same period).
         #
-        # 排序不能只看证据条数。原来是纯按条数倒序，结果「喜好与厌恶」下 24 个
-        # 实体里新来的那个只有 1 条证据，永远排最后，**永远进不了图**——用户说
-        # 一句全新的话，右脑一个新节点都不长，看着像没记住。
-        # 现在留一半席位给最近新增的：一半按证据多少（稳定的画像），一半按新旧
-        # （刚说的那句能立刻看见）。
+        # Ordering can't look only at evidence count. It used to be purely by count descending, and among 24 entities under
+        # "likes_dislikes" the new one had only 1 piece of evidence, always ranked last, **never making it onto the map** -- the user says
+        # something brand new, and the right brain grows no new node, looking like it didn't remember.
+        # Now half the seats are reserved for the most recently added: half by evidence count (stable profile), half by recency
+        # (what was just said shows up immediately).
         def rows(newest):
             out = []
             for ent in graph.get_entities_for_slot(uid, slot.id, newest_first=newest):
@@ -3139,46 +3241,46 @@ def _right_brain_tree_v1(uid: str, facts: dict) -> list:
             return out
 
         fresh_n = max(1, RB_ENTITIES_PER_SLOT // 2)
-        by_recent = rows(True)[:fresh_n]                    # 真·最近新增（rowid 倒序）
+        by_recent = rows(True)[:fresh_n]                    # truly most recently added (rowid descending)
         taken = {t[1].id for t in by_recent}
         by_evidence = [t for t in sorted(rows(False), key=lambda t: -t[0])
                        if t[1].id not in taken]
         picked = by_recent + by_evidence[:RB_ENTITIES_PER_SLOT - len(by_recent)]
 
         for _, ent, mids in picked:
-            # 没有任何记忆挂在下面的节点不画。情绪 slot 建空间时会预置 8 个情绪词
-            # 实体（悲伤/平静/孤独…），全新的空库打开就摆着六个孤零零的点，看着
-            # 像已经记住了什么，其实背后一条证据都没有。
+            # Nodes with no memory hanging under them aren't drawn. The emotion slot pre-seeds 8 emotion-word
+            # entities when a space is created (sad/calm/lonely...), so a brand-new empty store would open with six lonely dots, looking
+            # like it already remembered something, with not a single piece of evidence behind them.
             if not mids:
                 continue
             ns = [notes[i] for i in mids]
-            # 实体描述只用巩固那一步（_summarize_entity）归纳出来的那句。
+            # The entity description uses only the sentence generalized by the consolidation step (_summarize_entity).
             #
-            # 曾经在这儿加过兜底：没有描述就拿第一条证据的 cause 顶上。那是错的——
-            # cause 是**左脑事实原文**，于是卡片变成
-            #     标题：佳琪
-            #     正文：用户的名字是佳琪，今年20岁，在NUS读书…   ← 原始事实
-            #     note：【委屈】呃我是佳琪啊我今年二十岁了…       ← 原话
-            # 而且同一句话抽出的几个实体（佳琪/计算机专业/NUS）cause 相同，三张卡片
-            # 正文一模一样。宁可空着——标题本身就该是那句概括，中间不该再垫一行。
+            # There was once a fallback here: with no description, use the first evidence's cause. That was wrong --
+            # cause is the **raw left-brain fact**, so the card became
+            #     title: Jiaqi
+            #     body: The user's name is Jiaqi, 20 years old, studying at NUS...   <- raw fact
+            #     note: [wronged] uh I'm Jiaqi, I'm twenty now...                     <- verbatim words
+            # And several entities extracted from the same sentence (Jiaqi/CS major/NUS) share the same cause, so three cards
+            # had identical bodies. Better left empty -- the title itself should be the summary, with no extra line in between.
             desc = (getattr(ent, "description", "") or "").strip()
             out.append({
                 "cluster": cluster,
                 "slot": slot.name,
-                "text": ent.name,                      # 脑图上显示的就是这个
+                "text": ent.name,                      # this is what's shown on the brain map
                 "desc": desc,
                 "notes": ns,
             })
     return out
 
 
-#: 最近一轮检索命中的记忆 id。快照要保证它们在图上——脑图上亮起来的必须是
-#: 后端真正检索到的那几条，命中了却没画出来，"它记得这件事"就没演出来。
+#: Memory ids hit by the most recent retrieval. The snapshot must guarantee they're on the map -- what lights up on the brain map must be
+#: what the backend really retrieved; hit but not drawn, and "it remembers this" isn't shown.
 _LAST_HIT_IDS: set = set()
 
 
 def note_hits(result) -> None:
-    """记下这一轮检索命中了哪些左脑记忆。"""
+    """Record which left-brain memories this turn's retrieval hit."""
     _LAST_HIT_IDS.clear()
     for h in (getattr(result, "hits", None) or []):
         mid = getattr(h, "memory_id", "")
@@ -3187,33 +3289,33 @@ def note_hits(result) -> None:
 
 
 def memory_snapshot(limit: int = 48) -> dict:
-    """库里已有的记忆，供前端在打开页面时把脑图先铺满。
+    """Memories already in the store, so the frontend can fill the brain map when the page opens.
 
-    只读，不碰模型：左脑走 list_entries + 认知图的 slot 标注，右脑走 list_all。
-    库是空的（新用户）就返回空列表，前端照旧从空图开始长。
+    Read-only, no models: left brain via list_entries + the cognitive graph's slot annotations, right brain via list_all.
+    If the store is empty (new user) return empty lists, and the frontend grows from an empty map as before.
     """
-    from voicemem.leftbrain.cognitive_graph.types import SlotV2
+    from supermem.leftbrain.cognitive_graph.types import SlotV2
 
     uid = vm._o._user_id
     left, right = [], []
     try:
         repo = vm._o._get_repo()
         entries = repo._vector_store.list_entries(user_id=uid)
-        # slot 标在认知图里，不在记忆条目上——先建 id -> slot 的反查表
+        # Slots are annotated in the cognitive graph, not on memory entries -- build an id -> slot reverse lookup first
         cog = repo._cognitive_store
         slot_of = {}
         for slot in SlotV2:
             for mid in cog.memory_ids_for_slots(uid, [slot]):
                 slot_of.setdefault(mid, slot.value)
-        # 助手自己说过的话也原样存在库里（见 3ed67f7），但脑图画的是"关于用户的
-        # 记忆"——把助手的回复也长成节点，等于把它自己说的话当成对用户的认识。
+        # The assistant's own words are also stored as is (see 3ed67f7), but the brain map draws "memories about the
+        # user" -- growing the assistant's replies into nodes would treat its own words as knowledge about the user.
         entries = [e for e in entries if e.get("role") != "assistant"]
-        # 每个 slot 也限量。脑图上一个 slot 就是一块扇形，面积固定——daily_life
-        # 攒到二十几条时那块就糊了，而别的 slot 才三四个点。限量之后各簇疏密一致。
+        # Each slot is capped too. A slot on the brain map is a fixed-size sector -- when daily_life
+        # accumulates twenty-odd items that sector blurs, while other slots have three or four dots. With caps all clusters have similar density.
         #
-        # 但**这一轮检索命中的那几条必须留下**，哪怕它排在限量之外：图上亮起来的
-        # 得是后端真检索到的东西，命中了却没画出来，看着就像"检索到 5 条只亮了 3 个"。
-        # 命中的先排进去，剩下的名额再按原来的顺序填。
+        # But **the items hit by this turn's retrieval must stay**, even if they rank beyond the cap: what lights up on the map
+        # must be what the backend really retrieved; hit but not drawn looks like "retrieved 5, only 3 lit up".
+        # Hits go in first, and the remaining slots are filled in the original order.
         per_slot, kept = {}, []
         hit_first = ([e for e in entries if str(e["id"]) in _LAST_HIT_IDS] +
                      [e for e in entries if str(e["id"]) not in _LAST_HIT_IDS])
@@ -3224,17 +3326,17 @@ def memory_snapshot(limit: int = 48) -> dict:
             if hit or per_slot[sl] <= LB_ENTRIES_PER_SLOT:
                 kept.append(e)
         entries = kept
-        # 同理，命中的那几条不能被 limit 截掉
+        # Likewise, the hit items must not be cut off by limit
         head = [e for e in entries if str(e["id"]) in _LAST_HIT_IDS]
         rest = [e for e in entries if str(e["id"]) not in _LAST_HIT_IDS]
         for e in (head + rest)[:max(limit, len(head))]:
-            # list_entries 的 date 直接截了 time_start 前 10 位，遇到纯时间串会切出
-            # "09:20:37" 这种。不像日期就置空，别把垃圾送到前端。
+            # list_entries' date just takes the first 10 chars of time_start; a pure time string gets cut into
+            # something like "09:20:37". If it doesn't look like a date, blank it; don't send garbage to the frontend.
             d = str(e.get("date", ""))
-            # 带上这条记忆挂了哪些实体：前端据此在讲同一个人/同一件事的两条记忆
-            # 之间连线——脑图上的连线才对应真实关系，而不是随便连。
-            # 存的是实体 id（person_jiaqi_5ea413），前端要拿去当标签显示、也拿去
-            # 按同名实体连线，所以在这儿换成名字。
+            # Include which entities this memory is attached to: the frontend uses this to connect two memories about the same person/thing
+            # -- lines on the brain map then reflect real relations, not arbitrary ones.
+            # What's stored are entity ids (person_jiaqi_5ea413); the frontend shows them as labels and also
+            # connects same-named entities, so swap in names here.
             try:
                 ents = []
                 for eid in cog.entity_ids_for_memory(e["id"]) or []:
@@ -3243,10 +3345,10 @@ def memory_snapshot(limit: int = 48) -> dict:
                     ents.append(nm or eid)
             except Exception:
                 ents = []
-            # hit：这条是被这一轮检索命中、因而保底留在图上的。
-            # 前端拿"图上多出了哪条"来判断"刚说的这句抽出了什么实体"，而保底进来
-            # 的是**旧记忆**——不标出来的话，说一句「啦啦啦」也会让上次那些实体
-            # （Jiaqi、室友、打游戏…）冒到标签栏上。
+            # hit: this item was hit by this turn's retrieval and hence kept on the map as a guarantee.
+            # The frontend uses "which item is new on the map" to judge "what entities did the sentence just said extract", and the guaranteed
+            # ones are **old memories** -- without marking them, saying "la la la" would make last time's entities
+            # (Jiaqi, roommate, gaming...) pop up in the tag bar.
             left.append({"text": e["text"], "date": d if d[:4].isdigit() else "",
                          "slot": slot_of.get(e["id"], "daily_life"),
                          "hit": str(e["id"]) in _LAST_HIT_IDS,
@@ -3260,13 +3362,34 @@ def memory_snapshot(limit: int = 48) -> dict:
     return {"left": left, "right": right}
 
 
-# classify 必须包一层：直接传 vm.classify 会把**当前这个**实例焊进去，
-# 切换空间之后脑图还在给旧空间分类。
+# classify must be wrapped: passing vm.classify directly would weld in **the current** instance,
+# so after switching spaces the brain map would still classify for the old space.
 app = utils.build_app(MODE, realtime_session if MODE == "realtime" else llm_tts_session,
                       lambda *a, **k: vm.classify(*a, **k), memory_snapshot, audio_of,
                       spaces=(list_spaces, create_space, use_space, lambda: ACTIVE_SPACE),
                       set_lang=set_lang,
                       compare=(lambda: COMPARE, _set_compare))
+
+
+@app.get("/api/cartridge")
+def api_cartridge() -> dict:
+    """The active space's cartridge (manifest only, never the memory text)."""
+    try:
+        return {"space": ACTIVE_SPACE, **_cartridge(ACTIVE_SPACE).manifest()}
+    except Exception as e:  # noqa: BLE001 -- e.g. a brand-new space with no database yet
+        return {"space": ACTIVE_SPACE, "error": f"{type(e).__name__}: {e}"}
+
+
+@app.post("/api/cartridge")
+async def api_cartridge_refresh() -> dict:
+    """Re-snapshot the active space's memory into its cartridge and pre-fill it
+    on every cartridge panel (what a telephony integration does on ring)."""
+    try:
+        cart = _cartridge(ACTIVE_SPACE, refresh=True)
+    except Exception as e:  # noqa: BLE001
+        return {"space": ACTIVE_SPACE, "error": f"{type(e).__name__}: {e}"}
+    return {"space": ACTIVE_SPACE, **cart.manifest(),
+            "prefetch": await _prefetch_cartridges(ACTIVE_SPACE)}
 
 
 def _warm_network() -> None:
@@ -3286,16 +3409,16 @@ def _warm_network() -> None:
     import asyncio as _aio
 
     async def _reply() -> None:
-        from voicemem.reply import openai_reply
+        from supermem.reply import openai_reply
         fn = openai_reply(model=utils.CHAT_MODEL, system="warmup")
         agen = fn("hi", "")
-        async for _ in agen:            # 第一个 token 就够了，握手已经付掉
+        async for _ in agen:            # the first token is enough, the handshake is already paid for
             await agen.aclose()
             break
 
     def _asr() -> None:
         warm = getattr(vm.utils.get("asr"), "warmup", None)
-        if warm:                        # 本地 ASR 没有这个方法，也不需要
+        if warm:                        # local ASR has no such method, and doesn't need it
             warm()
 
     t0 = time.monotonic()

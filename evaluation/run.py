@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""VoiceMem 评测入口：一条命令跑完一个 benchmark。
+"""SuperMem evaluation entry point: run one benchmark with one command.
 
     python evaluation/run.py --dataset locomo --data data/locomo.json
 """
@@ -16,17 +16,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-# mem0 的遥测会在 ~/.mem0 开一个全局 qdrant 并独占文件锁，多进程/多线程评测会
-# 撞 "already accessed by another instance"。评测用不上它。必须在 import 之前设。
+# mem0 telemetry opens a global qdrant in ~/.mem0 with an exclusive file lock; multi-process/threaded evaluation
+# hits "already accessed by another instance". Evaluation does not need it. Must be set before the import.
 os.environ.setdefault("MEM0_TELEMETRY", "False")
 
 from evaluation import datasets  # noqa: E402
 
 
-# ── ④ 答案模型 / 判分裁判：都走 OpenAI 兼容接口，一处配置 ─────────────────────
+# ── (4) Answer model / judge: both use the OpenAI-compatible API, configured in one place ──
 
 def make_llm(model: str):
-    """返回 ``fn(system, user) -> str``。换成自建端点就设 OPENAI_BASE_URL。"""
+    """Return ``fn(system, user) -> str``. Set OPENAI_BASE_URL to use your own endpoint."""
     from openai import OpenAI
     client = OpenAI(base_url=os.environ.get("OPENAI_BASE_URL") or None)
 
@@ -41,7 +41,7 @@ def make_llm(model: str):
 
 
 def provenance() -> dict:
-    """跑这次评测时的环境。写进结果文件——半年后看到一个数字，能查出它是哪份代码跑的。"""
+    """The environment of this evaluation run. Written into the results file -- so a number seen six months later can be traced to the code that produced it."""
     import platform
     import subprocess
     from datetime import datetime, timezone
@@ -63,35 +63,37 @@ def provenance() -> dict:
     return {
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "git_commit": git("rev-parse", "HEAD"),
-        "git_dirty": bool(git("status", "--porcelain")),   # 改动没提交就跑，数字对不回代码
+        "git_dirty": bool(git("status", "--porcelain")),   # run with uncommitted changes: the number maps to no code version
         "python": platform.python_version(),
         "platform": platform.platform(),
-        "packages": {p: version(p) for p in ("voicemem", "mem0ai", "openai", "qdrant-client")},
+        "packages": {p: version(p) for p in ("supermem", "mem0ai", "openai", "qdrant-client")},
     }
 
 
-ANSWER_SYSTEM = """你要根据「记忆」回答问题。
+ANSWER_SYSTEM = """Answer the question based on the "memories".
 
-记忆里的"用户"和问题里提到的人是同一个人——记忆是从这个人自己的话里抽出来的，
-主语写成"用户"只是抽取时的措辞。不要因为称呼不同就判定记忆里没有。
+"User" in the memories and the person named in the question are the same person -- the memories were extracted
+from that person's own words, and "User" as the subject is just the wording used during extraction. Do not conclude
+the memories lack something just because the name differs.
 
-只能用下面这些记忆作答，不要编造记忆里没有的信息。记忆里确实没有的，才回答"不知道"。
-回答要短——直接给答案，不要复述问题、不要解释推理过程。
+Answer only from the memories below; do not invent information that is not in them. Only answer "I don't know"
+when the memories really do not contain it.
+Keep the answer short -- give the answer directly, do not restate the question or explain your reasoning.
 
-记忆：
+Memories:
 {memory}"""
 
 
-# ── ②③ 一段对话的完整评测 ────────────────────────────────────────────────────
+# ── (2)(3) Full evaluation of one conversation ─────────────────────────────────
 
 def run_conversation(conv, args, answer_llm, judge_llm) -> dict:
-    """建库 → 灌对话 → 逐题检索作答 → 判分。返回这段对话的结果。"""
-    from voicemem import VoiceMem
-    from voicemem.memory_api import build_memory_context
+    """Build a store -> ingest the conversation -> retrieve and answer each question -> score. Returns this conversation's results."""
+    from supermem import SuperMem
+    from supermem.memory_api import build_memory_context
 
-    # 每段对话一个独立记忆库：混在一起等于把别的对话的答案也喂了进去
+    # One independent memory store per conversation: mixing them would feed in answers from other conversations
     root = Path(args.memory_root) / conv.id
-    vm = VoiceMem(memory_root=str(root), user_id=conv.id, mode=args.mode)
+    vm = SuperMem(memory_root=str(root), user_id=conv.id, mode=args.mode)
 
     t0 = time.time()
     for turn in conv.turns:
@@ -109,8 +111,8 @@ def run_conversation(conv, args, answer_llm, judge_llm) -> dict:
         search_ms = (time.time() - t1) * 1000
         memory = build_memory_context(result)
 
-        answer = answer_llm(ANSWER_SYSTEM.format(memory=memory or "（没有相关记忆）"), q.text)
-        s = (datasets.Score(0.0, 1.0, "未判分") if args.no_score
+        answer = answer_llm(ANSWER_SYSTEM.format(memory=memory or "(no relevant memories)"), q.text)
+        s = (datasets.Score(0.0, 1.0, "not scored") if args.no_score
              else ds_score(args, q, answer, judge_llm))
 
         got += s.correct
@@ -120,7 +122,7 @@ def run_conversation(conv, args, answer_llm, judge_llm) -> dict:
             "predicted": answer, "correct": s.correct, "total": s.total,
             "note": s.note, "category": q.category,
             "search_ms": round(search_ms, 1),
-            "memory_tokens": len(memory) // 2,      # 中文按 2 字符≈1 token 粗算
+            "memory_tokens": len(memory) // 2,      # rough estimate: ~2 characters per token (calibrated for Chinese)
             "memory": memory if args.save_memory else "",
         })
 
@@ -132,7 +134,7 @@ def ds_score(args, q, answer, judge_llm):
     return datasets.get(args.dataset).score(q, answer, judge_llm)
 
 
-# ── 汇总 ─────────────────────────────────────────────────────────────────────
+# ── Summary ──────────────────────────────────────────────────────────────────
 
 def summarize(results: list[dict], dataset: str) -> dict:
     got = sum(r["score"] for r in results)
@@ -158,39 +160,39 @@ def summarize(results: list[dict], dataset: str) -> dict:
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="VoiceMem 评测：一条命令跑完一个 benchmark")
+    p = argparse.ArgumentParser(description="SuperMem evaluation: run one benchmark with one command")
     p.add_argument("--dataset", required=True, choices=datasets.names(),
-                   help="跑哪个 benchmark（见 evaluation/datasets/）")
-    p.add_argument("--data", required=True, help="数据集文件路径")
-    p.add_argument("--out", default="", help="结果 json，默认 results/<dataset>.json")
+                   help="which benchmark to run (see evaluation/datasets/)")
+    p.add_argument("--data", required=True, help="dataset file path")
+    p.add_argument("--out", default="", help="results json, default results/<dataset>.json")
     p.add_argument("--answer-model", default=os.environ.get("EVAL_ANSWER_MODEL", "gpt-4o-mini"),
-                   help="拿记忆作答的模型")
+                   help="model that answers using the memories")
     p.add_argument("--judge", default=os.environ.get("EVAL_JUDGE_MODEL", "gpt-4o-mini"),
-                   help="判分的裁判模型")
+                   help="judge model for scoring")
     p.add_argument("--mode", default="left_brain_single",
-                   help="VoiceMem mode；纯文本评测用 left_brain_single 就够，"
-                        "要连右脑一起测用 text_mode")
-    p.add_argument("--top-k", type=int, default=5, help="每题检索几条记忆")
-    p.add_argument("--limit", type=int, default=0, help="只跑前 N 段对话（调试用）")
-    p.add_argument("--workers", type=int, default=4, help="并发跑几段对话")
-    p.add_argument("--memory-root", default="", help="记忆库落盘目录，默认 results/<dataset>_memory")
-    p.add_argument("--resume", action="store_true", help="接着上次跑，跳过已完成的对话")
-    p.add_argument("--save-memory", action="store_true", help="把每题检索到的记忆也存进结果（体积大，便于复核）")
-    p.add_argument("--inspect", action="store_true", help="只解析数据集并打印前几条，不跑评测")
+                   help="SuperMem mode; left_brain_single is enough for text-only evaluation, "
+                        "use text_mode to include the right brain")
+    p.add_argument("--top-k", type=int, default=5, help="memories retrieved per question")
+    p.add_argument("--limit", type=int, default=0, help="only run the first N conversations (for debugging)")
+    p.add_argument("--workers", type=int, default=4, help="conversations to run concurrently")
+    p.add_argument("--memory-root", default="", help="directory for memory stores, default results/<dataset>_memory")
+    p.add_argument("--resume", action="store_true", help="resume the previous run, skipping finished conversations")
+    p.add_argument("--save-memory", action="store_true", help="also save each question's retrieved memories in the results (large, useful for review)")
+    p.add_argument("--inspect", action="store_true", help="only parse the dataset and print the first few entries, no evaluation")
     p.add_argument("--no-score", action="store_true",
-                   help="只生成答案不判分，之后用 evaluation/score.py 判（换裁判不用重跑）")
+                   help="generate answers without scoring; score later with evaluation/score.py (switching judges needs no rerun)")
     args = p.parse_args()
 
     out = Path(args.out or f"results/{args.dataset}.json")
     if not args.memory_root:
         args.memory_root = str(out.parent / f"{args.dataset}_memory")
 
-    # ① 读数据集
+    # (1) Load the dataset
     convs = datasets.get(args.dataset).load(args.data)
     if args.limit:
         convs = convs[:args.limit]
 
-    if args.inspect:                        # 先确认解析对了再花钱跑
+    if args.inspect:                        # confirm parsing is right before spending money
         print(f"Parsed {len(convs)} conversations, "
               f"{sum(len(c.questions) for c in convs)} questions\n")
         for c in convs[:2]:
@@ -233,7 +235,7 @@ def main() -> None:
             acc = r["score"] / r["total"] if r["total"] else 0
             print(f"  [{i}/{len(todo)}] {r['conversation_id']}  "
                   f"{r['score']:.0f}/{r['total']:.0f} ({acc:.0%})", flush=True)
-            # 每段都落盘：跑几小时的评测中途挂了不用从头再来
+            # write after every conversation: a multi-hour run that dies midway need not restart from scratch
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text(json.dumps({"summary": summarize(results, args.dataset),
                                        "config": vars(args), "provenance": prov,

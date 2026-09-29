@@ -1,52 +1,52 @@
-"""存和查：音频进 → 双脑；文本进 → 只有左脑。
+"""Store and search: audio in -> both brains; text in -> left brain only.
 
     export OPENAI_API_KEY=sk-...
     python examples/01_memory.py
 
-embedding 和 slots 都走本地 E5，跟 web demo 一个配置：检索这条路 0 LLM、0 网络，
-本体 ~10ms。用默认的 OpenAI embedding 也能跑，但每次检索要发一次 HTTP，
-说话时那 0–500ms 的投机预取就来不及了（README 里 134ms 说的就是本地这套）。
+Embedding and slots both use local E5, the same config as the web demo: the retrieval path uses 0 LLM calls and
+0 network, ~10ms by itself. The default OpenAI embedding also works, but every search makes an HTTP request, and the
+0-500ms speculative prefetch while the user speaks no longer fits (the 134ms in the README refers to this local setup).
 """
 import os
 from pathlib import Path
 
-from voicemem import VoiceMem
+from supermem import SuperMem
 
-# 相对脚本位置，不是相对 cwd——从哪个目录跑都找得到
+# relative to the script, not the cwd -- found no matter which directory you run from
 AUDIO = str(Path(__file__).resolve().parent.parent / "assets/input.wav")
 
 LOCAL = {
     "embedding": {"provider": "local"},
     "slots": {"provider": "local"},
-    "api_key": os.environ["OPENAI_API_KEY"],   # 只用于写入侧抽事实
-    # 单独一个库。**向量维度不同的库不能混用**——本地 E5 是 384 维、OpenAI 是
-    # 1536 维，指同一个目录会直接报 shapes (n,384) and (1536,) not aligned。
-    # 不写这行就会跟默认库（多半是 OpenAI 维度建的）撞上。
+    "api_key": os.environ["OPENAI_API_KEY"],   # only used for fact extraction on the write side
+    # A separate store. **Stores with different vector dimensions cannot be mixed** -- local E5 is 384-dim, OpenAI is
+    # 1536-dim; pointing both at one directory fails with shapes (n,384) and (1536,) not aligned.
+    # Without this line it would collide with the default store (most likely built with OpenAI dimensions).
     "memory_root": str(Path(__file__).resolve().parent / "example_memory"),
 }
-# top_k 也可以写进 from_config（一个 dict 配齐）；写错的键会直接报错，不再静默丢掉。
-# 取几条在 search() 上传。
+# top_k can also go into from_config (one dict for everything); misspelled keys now raise instead of being silently dropped.
+# How many to fetch is passed to search().
 
-vm = VoiceMem.from_config({**LOCAL, "mode": "normal"})
+vm = SuperMem.from_config({**LOCAL, "mode": "normal"})
 
-# 本地模型是懒加载的：不预热的话第一次 ingest 要多等二十几秒（E5 / FunASR /
-# 感知那套全在那时候加载）。web demo 一直这么做，这里也一样。
+# Local models load lazily: without warmup the first ingest waits an extra twenty-odd seconds (E5 / FunASR /
+# the perception stack all load then). The web demo always does this, and so do we here.
 vm.warmup(verbose=True)
 
-# 存：音频文件
-# 内部跑 ASR / 声纹 / 场景 / 情绪感知 / Embedding 抽取
-vm.ingest(audio=AUDIO)  # 我是素食主义者，对坚果过敏。
+# Store: an audio file
+# Internally runs ASR / speaker ID / scene / emotion perception / embedding extraction
+vm.ingest(audio=AUDIO)  # (Mandarin audio) "I'm vegetarian and allergic to nuts."
 
-result = vm.search("我的饮食禁忌是什么？", top_k=5)
+result = vm.search("What are my dietary restrictions?", top_k=5)
 
 print(result.result_leftbrain, result.result_rightbrain)
 
 
-# 存：左脑信息文本（无情感）
-vm = VoiceMem.from_config({**LOCAL, "mode": "leftbrain_only"})
+# Store: left-brain factual text (no emotion)
+vm = SuperMem.from_config({**LOCAL, "mode": "leftbrain_only"})
 
-vm.ingest("我是素食主义者，对坚果过敏。")
+vm.ingest("I'm vegetarian and allergic to nuts.")
 
-result = vm.search("我的饮食禁忌是什么？", top_k=5)
+result = vm.search("What are my dietary restrictions?", top_k=5)
 
 print(result.result_leftbrain, result.result_rightbrain)

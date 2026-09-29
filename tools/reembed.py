@@ -1,13 +1,13 @@
-"""换 embedder 之后，把库里维度作废的向量重新算一遍。
+"""After switching embedders, recompute the vectors in the store whose dimension is now invalid.
 
-什么时候需要：`_embed_text` 现在跟着注入的 embedder 走，而
-`rb_traits` / `graph_entities` 里可能存着上一个 embedder 算的向量。
-维度不符的会被跳过（有警告），右脑检索和实体去重因此失效，直到重新 embed。
+When you need it: `_embed_text` now follows the injected embedder, while
+`rb_traits` / `graph_entities` may still hold vectors computed by the previous embedder.
+Mismatched dimensions are skipped (with a warning), so right-brain retrieval and entity dedup stop working until re-embedded.
 
-跑：python3 tools/reembed.py <space> [--apply] [--local]
-不加 --apply 只统计；--local 按 web demo 的配置（本地 E5）来算，
-不加就是默认 embedder（OpenAI）。**必须跟你实际运行时的配置一致**，
-否则算出来的维度不对，等于没修。
+Run: python3 tools/reembed.py <space> [--apply] [--local]
+Without --apply it only counts; --local computes with the web demo's config (local E5),
+otherwise the default embedder (OpenAI). **It must match the config you actually run with**,
+or the dimensions will be wrong and nothing is fixed.
 """
 import sqlite3
 import sys
@@ -19,32 +19,32 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 def main() -> None:
     space = sys.argv[1] if len(sys.argv) > 1 else "demo"
     apply = "--apply" in sys.argv
-    db = Path("voicemem_memoryspace") / space / f"{space}.sqlite"
+    db = Path("supermem_memoryspace") / space / f"{space}.sqlite"
     if not db.is_file():
-        print(f"找不到 {db}")
+        print(f"Not found: {db}")
         return
 
-    # 只建 embedder，不建整个 VoiceMem——后者会打开向量库，跟正在跑的服务抢
-    # qdrant 的文件锁（"Storage folder ... already accessed by another instance"）。
-    # 迁移改的是 sqlite 里的向量列，跟向量库无关。
-    if "--local" in sys.argv:                     # 跟 web demo 的配置对齐
-        from voicemem.leftbrain.local_e5_embedder import LocalE5Embedder
+    # Build only the embedder, not a full SuperMem -- the latter opens the vector store and fights the running
+    # service for qdrant's file lock ("Storage folder ... already accessed by another instance").
+    # The migration changes vector columns in sqlite and has nothing to do with the vector store.
+    if "--local" in sys.argv:                     # match the web demo config
+        from supermem.leftbrain.local_e5_embedder import LocalE5Embedder
         e = LocalE5Embedder()
         embed = e.embed_query_text
     else:
-        from voicemem.leftbrain.local_memory_store import (
+        from supermem.leftbrain.local_memory_store import (
             OpenAILocalEmbedder, OpenAILocalEmbedderConfig,
         )
         e = OpenAILocalEmbedder(OpenAILocalEmbedderConfig())
         embed = lambda t: e.embed_texts([t])[0]
-    want = len(embed("维度探针"))
-    print(f"{space}: 当前 embedder 输出 {want} 维")
+    want = len(embed("dimension probe"))
+    print(f"{space}: current embedder outputs {want} dims")
 
     import json
     import numpy as np
 
     def vec_len(b):
-        """两张表的存法不同：rb_traits 是 float32 二进制，graph_entities 是 JSON。"""
+        """The two tables store vectors differently: rb_traits as float32 binary, graph_entities as JSON."""
         if isinstance(b, (bytes, bytearray)):
             return len(np.frombuffer(b, dtype=np.float32))
         try:
@@ -56,7 +56,7 @@ def main() -> None:
         return (np.asarray(vec, dtype=np.float32).tobytes() if table == "rb_traits"
                 else json.dumps([float(x) for x in vec]))
 
-    jobs = []          # (表, id 列, 待重算的行)
+    jobs = []          # (table, id column, rows to recompute)
     con = sqlite3.connect(db)
     for table, idc, txtc in (("rb_traits", "id", "claim"),
                              ("graph_entities", "id", "name")):
@@ -67,15 +67,15 @@ def main() -> None:
         except sqlite3.OperationalError:
             continue
         stale = [(i, t) for i, t, b in rows if vec_len(b) != want]
-        print(f"  {table:16} 共 {len(rows):4} 条，维度作废 {len(stale)}")
+        print(f"  {table:16} {len(rows):4} rows, {len(stale)} with stale dimensions")
         if stale:
             jobs.append((table, idc, stale))
 
     if not jobs:
-        print("没有需要重算的。")
+        print("Nothing to recompute.")
         return
     if not apply:
-        print("（未加 --apply，只统计）")
+        print("(no --apply given, counting only)")
         return
 
     total = 0
@@ -88,7 +88,7 @@ def main() -> None:
                 con.commit()
                 print(f"  {table} …{n}/{len(stale)}")
         con.commit()
-    print(f"\n重算完成：{total} 条")
+    print(f"\nRecompute done: {total} rows")
 
 
 if __name__ == "__main__":

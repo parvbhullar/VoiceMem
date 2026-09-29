@@ -1,6 +1,6 @@
-# 数据集和跑出来的结果都不进仓库（体积大，且各人数据版本不同）
+# Datasets and generated results are not committed (large, and everyone's data versions differ)
 data/
 results/
 
-# 编译产物
+# Build artifacts
 __pycache__/
