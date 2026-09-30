@@ -29,6 +29,7 @@ import base64
 import json
 import os
 import re
+import shutil
 import sys
 import threading
 import time
@@ -102,9 +103,11 @@ if __name__ == "__main__" and not ARGS.no_file_log:
 import compare                                       # noqa: E402  A/B comparison
 import utils                                         # noqa: E402  pipeline layer in this directory
 from audio_timeline import AudioTimeline, SpeechRateEstimator  # noqa: E402
+from ingest import Jobs, plan_chunks                 # noqa: E402  /memories background loads
 from session_context import SessionBuffer            # noqa: E402
 from supermem import SuperMem                        # noqa: E402
 from supermem.audio_timing import TimedAudioChunk    # noqa: E402
+from supermem.leftbrain.mem0_backend_store import evict_client  # noqa: E402
 
 BARGE_DEBUG = os.environ.get("BARGE_DEBUG", "1") != "0"
 BARGE_THRESHOLD = float(os.environ.get("BARGE_THRESHOLD", "0.45"))  # lower = easier to interrupt
@@ -1150,18 +1153,138 @@ def space_dir(name: str):
     return _ROOT / "supermem_memoryspace" / safe, safe
 
 
+# ponytail: one lock serialises opening and wiping spaces; per-space locks if opens contend.
+_SPACES_LOCK = threading.RLock()
+_CLEARING: set = set()           # brains being cleared: new voice sessions on them are refused
+
+
 def get_space(name: str):
     """Get (creating if needed) the SuperMem for this space."""
     _, safe = space_dir(name)
-    if safe not in _SPACES:
-        cfg = dict(CONFIG)
-        cfg["space"] = safe
-        t0 = time.monotonic()
-        inst = SuperMem.from_config(cfg)
-        inst.warmup(verbose=False)
-        _SPACES[safe] = inst
-        print(f"[space] opened \"{safe}\" in {time.monotonic()-t0:.1f}s", flush=True)
-    return _SPACES[safe]
+    inst = _SPACES.get(safe)
+    if inst is not None:          # fast path, no lock: async callers never wait on another brain's wipe
+        return inst
+    with _SPACES_LOCK:
+        if safe not in _SPACES:
+            cfg = dict(CONFIG)
+            cfg["space"] = safe
+            t0 = time.monotonic()
+            inst = SuperMem.from_config(cfg)
+            inst.warmup(verbose=False)
+            _SPACES[safe] = inst
+            print(f"[space] opened \"{safe}\" in {time.monotonic()-t0:.1f}s", flush=True)
+        return _SPACES[safe]
+
+
+def space_exists(name: str) -> bool:
+    """A space directory with exactly this name. The volume may be case-insensitive, so
+    is_dir() alone would let "Demo" match "demo" -- and then delete it."""
+    try:
+        d, safe = space_dir(name)
+    except ValueError:
+        return False
+    return d.is_dir() and safe in os.listdir(d.parent)
+
+
+def resolve_space(name: str):
+    """The instance of an existing space. Never creates one: an unknown name is FileNotFoundError."""
+    _, safe = space_dir(name)
+    inst = _SPACES.get(safe)
+    if inst is not None and space_exists(safe):   # open brain: never queue behind a slow wipe
+        return inst
+    with _SPACES_LOCK:
+        if not space_exists(safe):
+            raise FileNotFoundError(safe)
+        return get_space(safe)
+
+
+def _space_audio(d: Path) -> list:
+    """Turn recordings this space's audio_archive points at; they live in the shared TURN_AUDIO_DIR."""
+    import sqlite3
+    from supermem.utils.common import space as _sp
+    try:
+        c = sqlite3.connect(f"file:{_sp.db(d)}?mode=ro", uri=True)
+        try:
+            rows = c.execute("SELECT DISTINCT audio_path FROM audio_archive").fetchall()
+        finally:
+            c.close()
+    except sqlite3.Error:
+        return []
+    base = TURN_AUDIO_DIR.resolve()
+    return [p for p in (Path(r[0]).resolve() for r in rows if r[0]) if p.parent == base]
+
+
+def _wipe_space(safe: str, d: Path) -> None:
+    """Drop every in-process handle on the space, close what stays open, remove its files.
+
+    Caller holds _SPACES_LOCK. The order matters: the cached mem0 client must be closed before
+    rmtree, or a space re-created under this name reuses it (old vectors, readonly writes).
+    The open instance is retired under its write lock, which is held through the wipe: an
+    in-flight write (edit, job chunk, voice background ingest) finishes first, and every later
+    write on that stale instance -- including ones already queued on the lock -- is refused
+    instead of landing in the wiped or re-created directory.
+    """
+    inst = _SPACES.get(safe)
+    if inst is not None and Path(inst._o._memory_root).resolve() != d.resolve():
+        raise RuntimeError(f"\"{safe}\" is not stored under {d}; refusing to delete it.")
+    if inst is None:
+        return _wipe_files(safe, d)
+    with inst._o._write_lock:
+        inst._o.retire()
+        _wipe_files(safe, d)
+
+
+def _wipe_files(safe: str, d: Path) -> None:
+    import gc
+    _SPACES.pop(safe, None)
+    _CARTRIDGES.pop(safe, None)          # a compiled copy of every fact in this brain
+    _OWNER_NAME_CACHE.pop(safe, None)
+    evict_client(d)
+    gc.collect()                         # the stores never close their per-call sqlite connections
+    audio = _space_audio(d)
+    shutil.rmtree(d)
+    for p in audio:
+        p.unlink(missing_ok=True)
+
+
+def delete_space(name: str) -> None:
+    """Delete a brain and its recordings. The live brain is refused."""
+    d, safe = space_dir(name)
+    with _SPACES_LOCK:
+        if not space_exists(safe):
+            raise FileNotFoundError(safe)
+        if safe == ACTIVE_SPACE:
+            raise PermissionError("This brain is live in the demo. Start the server with "
+                                  "another --space to delete it.")
+        _wipe_space(safe, d)
+
+
+def clear_space(name: str) -> dict:
+    """Empty a brain: wipe it and re-create it empty under the same name.
+
+    The live brain is cleared only while no voice session is connected and no memory write is
+    queued: a live session holds the old instance and would write the old owner back into the
+    new store. New sessions are refused until the fresh instance is bound (_CLEARING, see
+    _counted). _wipe_space retires the old instance, so background writes still queued on it
+    (voice turns finish on threads after their task is done) fail instead of leaking back in.
+    """
+    d, safe = space_dir(name)
+    with _SPACES_LOCK:
+        if not space_exists(safe):
+            raise FileNotFoundError(safe)
+        live = safe == ACTIVE_SPACE
+        _CLEARING.add(safe)              # before the session check: see _counted
+        try:
+            if live and (_LIVE_SESSIONS or any(not t.done() for t in list(_REMEMBER_TASKS))):
+                raise PermissionError("A voice session is using this brain. End it, then clear.")
+            _wipe_space(safe, d)
+            d.mkdir(parents=True, exist_ok=True)
+            _write_space_language(safe, "en")
+            if live:
+                use_space(safe)          # rebind the global vm to a fresh, empty instance
+        finally:
+            _CLEARING.discard(safe)
+        return {"cleared": safe}
 
 
 def use_space(name: str) -> str:
@@ -1945,6 +2068,30 @@ def remember_turn(pending, reply: str, owner: dict, history_turn_id: str = "",
 # Task references are kept so queued tasks can still complete after the session ends.
 _REMEMBER_LOCK = asyncio.Lock()
 _REMEMBER_TASKS: set[asyncio.Task] = set()
+
+# Voice websockets currently open. Clearing the live brain waits for 0 (see clear_space).
+_LIVE_SESSIONS = 0
+
+
+def _counted(session):
+    """Wrap a websocket session loop so _LIVE_SESSIONS tracks it (single event loop: no lock).
+
+    A session that opens while the live brain is being cleared would bind the old, wiped
+    instance for its whole life, so it is refused. Count first, then check: clear_space marks
+    _CLEARING first, then checks the count, so one of the two always sees the other.
+    """
+    async def run(sock):
+        global _LIVE_SESSIONS
+        _LIVE_SESSIONS += 1
+        try:
+            if ACTIVE_SPACE in _CLEARING:
+                await sock.send_json({"type": "error", "message":
+                                      "This brain is being cleared. Try again in a few seconds."})
+                return await sock.close(code=1013)
+            return await session(sock)
+        finally:
+            _LIVE_SESSIONS -= 1
+    return run
 
 
 async def _remember_background(pending, reply: str, owner: dict,
@@ -2959,14 +3106,15 @@ def _rb_cluster(m) -> str:
                       meta.get("emotion", ""))
 
 
-def fact_index(uid: str) -> dict:
-    """Left-brain memory id -> original fact text.
+def fact_index(uid: str, mem=None) -> dict:
+    """Left-brain memory id -> original fact text. ``mem`` defaults to the live ``vm``.
 
     The original text lives in the vector store; the cognitive graph's memories table only has id/slot/heat etc., no text --
     at first get_memory_record was used, and every heartnote's cause came out empty.
     """
+    mem = vm if mem is None else mem
     try:
-        entries = vm._o._get_repo()._vector_store.list_entries(user_id=uid)
+        entries = mem._o._get_repo()._vector_store.list_entries(user_id=uid)
         return {e["id"]: e["text"] for e in entries}
     except Exception as e:
         print(f"[web] reading left-brain facts failed: {e}", flush=True)
@@ -3164,20 +3312,31 @@ def rb_human_batch(claims: list) -> None:
     threading.Thread(target=_rb_humanize_now, args=(todo, name, lang), daemon=True).start()
 
 
-def right_brain_tree(uid, facts):
+def right_brain_tree(uid, facts=None, mem=None, per_slot: int = RB_ENTITIES_PER_SLOT,
+                     humanize: bool = True):
     """Right hemisphere of the brain map: slot -> judgement -> evidence.
 
     Reads the right brain's judgement table (supermem/rightbrain/traits_store.py). The old
     slot->entity->heartnote structure is no longer written; _right_brain_tree_v1 is only for viewing old data.
+    ``facts`` (id -> live fact text) resolves each evidence's cause, so a deleted fact drops out and an
+    edited one shows its new text. ``mem`` defaults to the live ``vm``; ``per_slot`` caps judgements per
+    slot (the /memories page passes a large one, with humanize=False: one rewrite call for every claim
+    would hold up -- or, on a line-count mismatch, drop -- the brain map's own titles).
     """
+    mem = vm if mem is None else mem
+    facts = facts or {}
+    # ponytail: the plain-language rewrite is keyed to the live brain's owner name (owner_name()
+    # reads ACTIVE_SPACE); other brains show the stored claim and cost no LLM calls.
+    human = humanize and mem is vm
     try:
-        store = vm._o._right._traits()
+        store = mem._o._right._traits()
     except Exception as e:
         print(f"[web] reading judgement table failed: {type(e).__name__}: {e}", flush=True)
         return []
 
-    traits = list(store.all(uid, per_slot=RB_ENTITIES_PER_SLOT))
-    rb_human_batch([t.claim for t in traits])     # queue the missing ones in one go, see rb_human
+    traits = list(store.all(uid, per_slot=per_slot))
+    if human:
+        rb_human_batch([t.claim for t in traits])     # queue the missing ones in one go, see rb_human
     out = []
     for t in traits:
         out.append({
@@ -3186,9 +3345,10 @@ def right_brain_tree(uid, facts):
             # Node titles use the plain-language version; until the rewrite is ready it's the original, swapped in on the next poll.
             # raw is kept -- the frontend matches it against each turn's hits; the plain-language version wouldn't match.
             "raw": t.claim,
-            "text": rb_human(t.claim),
+            "text": rb_human(t.claim) if human else t.claim,
             "desc": "",               # the judgement is itself a summary; no extra line of raw facts
-            "notes": [{"text": e.quote, "emotion": e.emotion, "cause": e.cause}
+            "notes": [{"text": e.quote, "emotion": e.emotion,
+                       "cause": facts.get(e.cause_id, "") if e.cause_id else e.cause}
                       for e in t.evidence],
         })
     return out
@@ -3294,28 +3454,71 @@ def note_hits(result) -> None:
             _LAST_HIT_IDS.add(str(mid))
 
 
+def _entity_names(cog) -> dict:
+    """memory id -> entity names, in the order entity_ids_for_memory() returns them (by entity id).
+    One JOIN per space instead of one lookup per memory."""
+    with cog._conn() as c:
+        rows = c.execute(
+            "SELECT l.memory_id, l.entity_id, e.name FROM entity_memory_links l "
+            "LEFT JOIN entities e ON e.id = l.entity_id "
+            "ORDER BY l.memory_id, l.entity_id").fetchall()
+    out: dict = {}
+    for r in rows:
+        out.setdefault(r["memory_id"], []).append((r["name"] or "").strip() or r["entity_id"])
+    return out
+
+
+def left_entries(mem=None) -> list[dict]:
+    """Every left-brain entry of one space joined to its slot and entity names, uncapped.
+
+    [{id, text, slot, entities, date, role}] in store order. memory_snapshot() caps this for the
+    brain map; the /memories page filters and pages it. ``mem`` defaults to the live ``vm``.
+    ponytail: list_entries reads at most 10,000 entries (mem0 get_all top_k).
+    """
+    from supermem.leftbrain.cognitive_graph.types import SlotV2
+
+    mem = vm if mem is None else mem
+    uid = mem._o._user_id
+    repo = mem._o._get_repo()
+    # Slots are annotated in the cognitive graph, not on memory entries -- build an id -> slot reverse lookup first
+    cog = repo._cognitive_store
+    slot_of: dict = {}
+    for slot in SlotV2:
+        for mid in cog.memory_ids_for_slots(uid, [slot]):
+            slot_of.setdefault(mid, slot.value)
+    # Which entities each memory is attached to: the frontend uses this to connect two memories about the same
+    # person/thing -- lines on the brain map then reflect real relations, not arbitrary ones.
+    # What's stored are entity ids (person_jiaqi_5ea413); the frontend shows them as labels and also
+    # connects same-named entities, so swap in names here.
+    try:
+        ents = _entity_names(cog)
+    except Exception as e:
+        print(f"[web] reading entity links failed: {e}", flush=True)
+        ents = {}
+    out = []
+    for e in repo._vector_store.list_entries(user_id=uid):
+        # list_entries' date just takes the first 10 chars of time_start; a pure time string gets cut into
+        # something like "09:20:37". If it doesn't look like a date, blank it; don't send garbage to the frontend.
+        d = str(e.get("date", ""))
+        mid = str(e["id"])
+        out.append({"id": mid, "text": e["text"], "slot": slot_of.get(mid, "daily_life"),
+                    "entities": ents.get(mid, []), "date": d if d[:4].isdigit() else "",
+                    "role": e.get("role") or "user"})
+    return out
+
+
 def memory_snapshot(limit: int = 48) -> dict:
     """Memories already in the store, so the frontend can fill the brain map when the page opens.
 
     Read-only, no models: left brain via list_entries + the cognitive graph's slot annotations, right brain via list_all.
     If the store is empty (new user) return empty lists, and the frontend grows from an empty map as before.
     """
-    from supermem.leftbrain.cognitive_graph.types import SlotV2
-
     uid = vm._o._user_id
     left, right = [], []
     try:
-        repo = vm._o._get_repo()
-        entries = repo._vector_store.list_entries(user_id=uid)
-        # Slots are annotated in the cognitive graph, not on memory entries -- build an id -> slot reverse lookup first
-        cog = repo._cognitive_store
-        slot_of = {}
-        for slot in SlotV2:
-            for mid in cog.memory_ids_for_slots(uid, [slot]):
-                slot_of.setdefault(mid, slot.value)
         # The assistant's own words are also stored as is (see 3ed67f7), but the brain map draws "memories about the
         # user" -- growing the assistant's replies into nodes would treat its own words as knowledge about the user.
-        entries = [e for e in entries if e.get("role") != "assistant"]
+        entries = [e for e in left_entries(vm) if e["role"] != "assistant"]
         # Each slot is capped too. A slot on the brain map is a fixed-size sector -- when daily_life
         # accumulates twenty-odd items that sector blurs, while other slots have three or four dots. With caps all clusters have similar density.
         #
@@ -3323,42 +3526,23 @@ def memory_snapshot(limit: int = 48) -> dict:
         # must be what the backend really retrieved; hit but not drawn looks like "retrieved 5, only 3 lit up".
         # Hits go in first, and the remaining slots are filled in the original order.
         per_slot, kept = {}, []
-        hit_first = ([e for e in entries if str(e["id"]) in _LAST_HIT_IDS] +
-                     [e for e in entries if str(e["id"]) not in _LAST_HIT_IDS])
+        hit_first = ([e for e in entries if e["id"] in _LAST_HIT_IDS] +
+                     [e for e in entries if e["id"] not in _LAST_HIT_IDS])
         for e in hit_first:
-            sl = slot_of.get(e["id"], "daily_life")
-            hit = str(e["id"]) in _LAST_HIT_IDS
-            per_slot[sl] = per_slot.get(sl, 0) + 1
-            if hit or per_slot[sl] <= LB_ENTRIES_PER_SLOT:
+            hit = e["id"] in _LAST_HIT_IDS
+            per_slot[e["slot"]] = per_slot.get(e["slot"], 0) + 1
+            if hit or per_slot[e["slot"]] <= LB_ENTRIES_PER_SLOT:
                 kept.append(e)
-        entries = kept
         # Likewise, the hit items must not be cut off by limit
-        head = [e for e in entries if str(e["id"]) in _LAST_HIT_IDS]
-        rest = [e for e in entries if str(e["id"]) not in _LAST_HIT_IDS]
-        for e in (head + rest)[:max(limit, len(head))]:
-            # list_entries' date just takes the first 10 chars of time_start; a pure time string gets cut into
-            # something like "09:20:37". If it doesn't look like a date, blank it; don't send garbage to the frontend.
-            d = str(e.get("date", ""))
-            # Include which entities this memory is attached to: the frontend uses this to connect two memories about the same person/thing
-            # -- lines on the brain map then reflect real relations, not arbitrary ones.
-            # What's stored are entity ids (person_jiaqi_5ea413); the frontend shows them as labels and also
-            # connects same-named entities, so swap in names here.
-            try:
-                ents = []
-                for eid in cog.entity_ids_for_memory(e["id"]) or []:
-                    ent = cog.get_entity(eid)
-                    nm = (getattr(ent, "name", "") if ent else "").strip()
-                    ents.append(nm or eid)
-            except Exception:
-                ents = []
-            # hit: this item was hit by this turn's retrieval and hence kept on the map as a guarantee.
-            # The frontend uses "which item is new on the map" to judge "what entities did the sentence just said extract", and the guaranteed
-            # ones are **old memories** -- without marking them, saying "la la la" would make last time's entities
-            # (Jiaqi, roommate, gaming...) pop up in the tag bar.
-            left.append({"text": e["text"], "date": d if d[:4].isdigit() else "",
-                         "slot": slot_of.get(e["id"], "daily_life"),
-                         "hit": str(e["id"]) in _LAST_HIT_IDS,
-                         "entities": list(ents)[:6]})
+        head = [e for e in kept if e["id"] in _LAST_HIT_IDS]
+        rest = [e for e in kept if e["id"] not in _LAST_HIT_IDS]
+        # hit: this item was hit by this turn's retrieval and hence kept on the map as a guarantee.
+        # The frontend uses "which item is new on the map" to judge "what entities did the sentence just said extract", and the guaranteed
+        # ones are **old memories** -- without marking them, saying "la la la" would make last time's entities
+        # (Jiaqi, roommate, gaming...) pop up in the tag bar.
+        left = [{"text": e["text"], "date": e["date"], "slot": e["slot"],
+                 "hit": e["id"] in _LAST_HIT_IDS, "entities": e["entities"][:6]}
+                for e in (head + rest)[:max(limit, len(head))]]
     except Exception as e:
         print(f"[web] left-brain snapshot read failed: {e}", flush=True)
     try:
@@ -3368,13 +3552,78 @@ def memory_snapshot(limit: int = 48) -> dict:
     return {"left": left, "right": right}
 
 
+# ── /memories page callbacks (routes live in web/memories_api.py) ─────────────
+SEMANTIC_TOP_K = 200   # ponytail: mem0 searches with threshold 0.0, so this is a rank cutoff
+
+
+def semantic_ids(mem, q: str) -> list:
+    """Ranked (memory_id, score) for a query. Uses the vector store directly: SuperMem.search would
+    bump heat, book subgraph activations for the live session and hide near-duplicates."""
+    q = (q or "").strip()
+    if not q:
+        return []
+    hits = mem._o._get_repo().search(q, user_id=mem._o._user_id, top_k=SEMANTIC_TOP_K,
+                                     include_assistant=True)
+    return [(h.memory_id, float(h.base_score)) for h in hits]
+
+
+def _update_fact(mem, mid: str, text: str) -> bool:
+    # user_id makes the repo re-annotate the graph (one LLM call); without it the graph keeps
+    # the old entities.
+    with mem._o._write_lock:
+        mem._o._check_live()      # a clear/delete retired this instance while we waited: 409
+        return mem._o._get_repo().update_memory(mid, text, user_id=mem._o._user_id)
+
+
+def _delete_fact(mem, mid: str) -> bool:
+    with mem._o._write_lock:
+        mem._o._check_live()
+        return mem._o._get_repo().delete_memory(mid)
+
+
+def _brain_changed(space: str) -> None:
+    """A write landed in this brain: drop its compiled cartridge so the next turn recompiles."""
+    try:
+        _CARTRIDGES.pop(space_dir(space)[1], None)
+    except ValueError:
+        pass
+
+
+def _job_prepare(mem) -> None:
+    # The voice loop's last reply would otherwise become prior_reply for the first chunk.
+    with mem._o._write_lock:
+        mem._o._check_live()
+        mem._o._exchanges.clear()
+
+
+def _job_finish(mem) -> None:
+    # Jobs pass no session_id, so the session-boundary batch never fires on its own; run it
+    # once, and don't leave the transcript's last reply as the voice loop's prior_reply.
+    with mem._o._write_lock:
+        mem._o._check_live()
+        mem.flush()
+        mem._o._exchanges.clear()
+
+
+INGEST_JOBS = Jobs(prepare=_job_prepare, finish=_job_finish)
+
+
 # classify must be wrapped: passing vm.classify directly would weld in **the current** instance,
 # so after switching spaces the brain map would still classify for the old space.
-app = utils.build_app(MODE, realtime_session if MODE == "realtime" else llm_tts_session,
+app = utils.build_app(MODE, _counted(realtime_session if MODE == "realtime" else llm_tts_session),
                       lambda *a, **k: vm.classify(*a, **k), memory_snapshot, audio_of,
                       spaces=(list_spaces, create_space, use_space, lambda: ACTIVE_SPACE),
                       set_lang=set_lang,
-                      compare=(lambda: COMPARE, _set_compare))
+                      compare=(lambda: COMPARE, _set_compare),
+                      memories=dict(
+                          resolve=resolve_space, delete_space=delete_space,
+                          clear_space=clear_space, facts=left_entries,
+                          profile=lambda mem: right_brain_tree(
+                              mem._o._user_id, fact_index(mem._o._user_id, mem), mem,
+                              per_slot=10_000, humanize=False),
+                          semantic=semantic_ids, update_fact=_update_fact,
+                          delete_fact=_delete_fact, jobs=INGEST_JOBS, plan=plan_chunks,
+                          on_change=_brain_changed))
 
 
 @app.get("/api/cartridge")

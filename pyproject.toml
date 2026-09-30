@@ -75,6 +75,8 @@ dependencies = [
     "websockets>=14",     # uvicorn serving WebSocket; examples/05 also uses it for realtime
     "sounddevice",        # the voice agent in examples/: microphone + speaker
     "pywebrtc-audio",     # echo cancellation (lets you barge in over a loudspeaker)
+    "pypdf",              # /memories page: text from uploaded PDFs
+    "python-docx",        # /memories page: text from uploaded DOCX
 ]
 
 [project.optional-dependencies]

@@ -147,6 +147,7 @@ button{cursor:pointer;background:none;border:none}
 .btn.on{border-color:rgba(121,215,162,.5);color:#a2e3bf}
 .btn[disabled]{opacity:.35;cursor:default}
 .btn[disabled]:hover{background:none}
+a.btn{text-decoration:none}
 
 /* ── Right column ─────────────────────────────────────────────────── */
 .rightpane{display:flex;flex-direction:column;min-width:0;min-height:0;border-left:1px solid var(--line)}
@@ -529,6 +530,7 @@ button{cursor:pointer;background:none;border:none}
         <img src="./images/unpod-wordmark.png" alt="Unpod" class="brand-wm" />
       </div>
       <div class="export">
+        <a class="btn sm" href="/memories" target="_blank" rel="noopener" data-i18n="memoriesLink">Memories →</a>
         <button class="btn sm" id="btnNew" data-i18n-title="newChat"
                 title="New chat" data-i18n="newChat">New chat</button>
         <select class="sel" id="langSel" data-i18n-title="langTitle" title="Language">
@@ -689,6 +691,7 @@ const I18N = {
     coreTitleEm:'Neural', coreTitleRest:'Synthesis Core', coreState:'State: Synthesizing · Convergence {0}%',
     emotion:'Emotion', personality:'Personality', preference:'Preference',
     newChat:'New chat', expand:'Expand sidebar', collapse:'Collapse sidebar',
+    memoriesLink:'Memories →',
     download:'Download', dlAll:'All memories in this space', dlLeft:'Left · Facts',
     dlRight:'Right · Profile', dlChat:'This conversation', spaceCreate:'Create space', spaceCreating:'Creating…', cancel:'Cancel',
     ownerNote:'The owner of this memory graph — every memory is anchored to you.',

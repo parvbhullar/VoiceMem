@@ -207,6 +207,27 @@ reports actual rendered progress, so interrupted context contains only the
 heard prefix. TTS providers may return `TimedAudioChunk` alignment metadata;
 plain PCM providers use segment duration and an adaptive speech-rate fallback.
 
+#### Managing memories
+
+Open `http://localhost:8787/memories` (or **Memories →** in the demo's top bar)
+to work on any brain without switching the demo's live one:
+
+- browse, search (substring or semantic), edit and delete facts, filtered by
+  slot, entity and role; read the right-brain profile;
+- add memories from pasted text or a `.txt`, `.md`, `.json`, `.pdf` or `.docx`
+  file. Transcripts are `Name: text` lines or a JSON list of turns
+  (`speaker`/`role` + `text`/`content`); name the owner speaker, whose turns
+  become the user's memories. Loading runs in the background and can be
+  cancelled;
+- create, clear and delete brains. The brain live in the demo cannot be
+  deleted, and can be cleared only while no voice session is connected.
+
+Limits: 10 MB per file, 500 chunks per load, and each chunk costs several LLM
+calls (about 5-20 s), so a large file takes a while. Split bigger files.
+
+The server has no authentication and these routes delete data. Keep it on
+localhost or a trusted network.
+
 
 ## Customize Your Voice Agent with SuperMem
 

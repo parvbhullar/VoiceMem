@@ -4,6 +4,7 @@ This holds: local E5 (memory embedding and slot classification share one model),
 LLM/TTS/Realtime streams, and FastAPI + WebSocket wiring. run.py only assembles these into the
 0-300ms speculative-prefetch dialogue flow.
 """
+import asyncio
 import os
 import re
 from pathlib import Path
@@ -151,18 +152,23 @@ def hits_payload(result, has_audio=None, cluster_of=None):
 
 # ── FastAPI + WS wiring (wiring only, all rendering is in index.html) ──────────
 def build_app(mode, session, classify, snapshot=None, audio_of=None, spaces=None,
-              set_lang=None, compare=None):
+              set_lang=None, compare=None, memories=None):
     """session(sock): the session loop passed in by run.py (llm_tts / realtime). classify(query): used to grow the brain map.
     snapshot(): memories already in the store, so the frontend fills the brain map when the page opens.
     spaces=(list_fn, create_fn, use_fn, active_fn): create/list/switch Memory Spaces.
     set_lang(lang): syncs a UI language switch to the assistant (reply language + extraction language).
     compare=(get_state, set_state): the A/B comparison toggle and both arms' config. The routes live in
-    web/compare.py -- it does not import this module (which pulls in torch/TTS), so it can be unit-tested."""
+    web/compare.py -- it does not import this module (which pulls in torch/TTS), so it can be unit-tested.
+    memories=dict of register_routes() callbacks: the /memories operator page (routes in web/memories_api.py)."""
     app = FastAPI()
 
     if compare:
         from compare import register_routes
         register_routes(app, *compare)
+
+    if memories:                                     # the /memories operator page and its routes
+        from memories_api import register_routes as register_memories
+        register_memories(app, **memories)
 
     @app.websocket("/ws")
     async def ws(sock: WebSocket):
@@ -232,7 +238,9 @@ def build_app(mode, session, classify, snapshot=None, audio_of=None, spaces=None
             body = await req.json()
             name, lang = body.get("name", ""), body.get("language", "")
             try:
-                return _create_space(name, lang)
+                # Building + warming a brain takes seconds and may wait on _SPACES_LOCK behind
+                # another brain's open or wipe: never on the event loop that carries voice.
+                return await asyncio.to_thread(_create_space, name, lang)
             except FileExistsError as e:
                 raise HTTPException(409, str(e))
             except ValueError as e:

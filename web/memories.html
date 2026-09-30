@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>SuperMem · Memories</title>
+<style>
+/* The demo's tokens and components (web/supermem.html), trimmed to what this page uses. Dark only. */
+:root{
+  color-scheme:dark;
+  --bg:#212121; --bg-side:#181818; --bg-panel:#1c1c1c; --bg-input:#2b2b2b;
+  --bg-hover:rgba(255,255,255,.055); --bg-active:rgba(255,255,255,.09);
+  --bg-dark:#080808;
+  --line:rgba(255,255,255,.09); --line-2:rgba(255,255,255,.17);
+  --txt:#ececec; --txt-2:#a8a8a8; --txt-3:#7c7c7c;
+  --blue:#6ba7f0; --rose:#ef7bab; --mint:#79d7a2; --amber:#e8b86b;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",
+         "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  --radius:12px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font-family:var(--sans);
+  font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+button,input,select,textarea{font:inherit;color:inherit}
+button{cursor:pointer;background:none;border:none}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.14);border-radius:99px}
+::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.24)}
+::-webkit-scrollbar-track{background:transparent}
+:focus-visible{outline:2px solid #8ab4f8;outline-offset:2px;border-radius:6px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+[hidden]{display:none!important}
+
+.panel{border:1px solid var(--line);border-radius:var(--radius);background:var(--bg-panel);
+  padding:12px 14px;display:flex;flex-direction:column;min-height:0}
+.panel-h{flex:0 0 auto;display:flex;align-items:center;gap:8px;margin-bottom:9px;
+  font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--txt-3)}
+.panel-h::after{content:"";flex:1;height:1px;background:var(--line)}
+.textin{width:100%;margin-top:10px;padding:9px 12px;border-radius:10px;border:1px solid var(--line);
+  background:var(--bg-input);color:var(--txt);font-size:13.5px}
+.textin::placeholder{color:var(--txt-3)}
+.textin:focus{outline:none;border-color:var(--line-2)}
+.textin:disabled{opacity:.45}
+textarea.textin{resize:vertical;line-height:1.5}
+.tag{display:inline-flex;align-items:center;gap:7px;font-size:11.5px;padding:3px 10px;
+  border-radius:99px;border:1px solid var(--line);color:var(--txt-2);white-space:nowrap}
+.tag.emo{border-color:rgba(239,123,171,.42);color:#f2a3c5}
+.tag.ent{border-color:rgba(107,167,240,.42);color:#a5cbf7}
+.tag.sch{border-color:rgba(121,215,162,.42);color:#a2e3bf}
+.btn{padding:7px 15px;border-radius:99px;font-size:13px;border:1px solid var(--line-2);
+  color:var(--txt);transition:background .15s,border-color .15s,color .15s,opacity .15s}
+.btn:hover{background:var(--bg-hover)}
+.btn.primary{background:#ececec;color:#141414;border-color:#ececec}
+.btn.primary:hover{background:#fff;border-color:#fff}
+.btn.danger{border-color:rgba(239,123,171,.55);color:#f2a3c5}
+.btn.sm{padding:5px 11px;font-size:12px}
+.btn.on{border-color:rgba(121,215,162,.5);color:#a2e3bf}
+.btn[disabled]{opacity:.35;cursor:default}
+.btn[disabled]:hover{background:none}
+.btn.primary[disabled]:hover{background:#ececec}   /* else the dark label vanishes under the pointer */
+a.btn{text-decoration:none;white-space:nowrap}
+.sel{appearance:none;padding:6px 30px 6px 11px;border-radius:9px;border:1px solid var(--line);
+  background:var(--bg-input) url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%23a8a8a8' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/></svg>") no-repeat right 10px center;
+  font-size:12.5px;color:var(--txt);max-width:100%}
+.sel:focus{outline:none;border-color:var(--line-2)}
+.sel option{background:var(--bg-input);color:var(--txt)}
+.pill{display:inline-flex;align-items:center;gap:6px;flex:0 0 auto;font-size:11.5px;
+  padding:3px 10px;border-radius:99px;border:1px solid var(--line);color:var(--txt-2)}
+.pill.space{border-color:rgba(107,167,240,.4);color:#a5cbf7}
+.seg{position:relative;display:inline-flex;padding:3px;border-radius:99px;background:#171717;
+  border:1px solid var(--line)}
+.seg-thumb{position:absolute;top:3px;left:3px;bottom:3px;width:calc(50% - 3px);border-radius:99px;
+  background:#3a3a3a;transition:transform .3s cubic-bezier(.2,.8,.2,1)}
+.seg.two .seg-thumb{transform:translateX(100%)}
+.seg button{position:relative;z-index:1;flex:1 0 auto;min-width:102px;padding:5px 14px;
+  border-radius:99px;font-size:12.5px;color:var(--txt-3);transition:color .2s}
+.seg button.on{color:var(--txt)}
+.turn-ctx{margin:8px 0 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--bg-dark)}
+.turn-ctx>summary{padding:5px 10px;font-size:11px;color:var(--txt-2);cursor:pointer;
+  list-style:none;display:flex;gap:6px;align-items:center}
+.turn-ctx>summary::-webkit-details-marker{display:none}
+.turn-ctx>summary::before{content:'▸';color:var(--txt-3)}
+.turn-ctx[open]>summary::before{content:'▾'}
+.turn-ctx pre{margin:0;padding:0 10px 8px;font-size:11px;line-height:1.55;
+  color:var(--txt-2);white-space:pre-wrap;max-height:20vh;overflow-y:auto}
+.mt-table{width:100%;border-collapse:collapse;font-size:12px}
+.mt-table th{font-weight:600;color:var(--txt-3);font-size:10.5px;letter-spacing:.05em;
+  text-transform:uppercase;text-align:left;padding:4px 8px;border-bottom:1px solid var(--line)}
+.mt-table td{padding:7px 8px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line);color:var(--txt)}
+.mt-table tr:last-child td{border-bottom:0}
+#toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,14px);padding:9px 16px;
+  border-radius:10px;background:#2f2f2f;border:1px solid var(--line-2);font-size:13px;
+  color:var(--txt);opacity:0;pointer-events:none;z-index:70;transition:opacity .2s,transform .2s}
+#toast.on{opacity:1;transform:translate(-50%,0)}
+
+/* ── This page ─────────────────────────────────────────────────────── */
+.top{display:flex;flex-wrap:wrap;align-items:center;gap:10px 12px;padding:11px 16px;
+  border-bottom:1px solid var(--line);background:var(--bg-side)}
+.top h1{margin:0 6px 0 0;font-size:14px;font-weight:600;white-space:nowrap}
+.top h1 span{color:var(--txt-3);font-weight:400}
+.top .textin{margin:0;width:170px;padding:5px 11px;font-size:12.5px}
+.top .push{margin-left:auto}
+.inline{display:inline-flex;flex-wrap:wrap;align-items:center;gap:8px}
+.grid{display:grid;grid-template-columns:minmax(300px,380px) minmax(0,1fr);gap:14px;
+  padding:14px 16px 40px;align-items:start}
+.col{display:flex;flex-direction:column;gap:14px;min-width:0}
+.drop{margin-top:10px;padding:14px 12px;border:1px dashed var(--line-2);border-radius:10px;
+  text-align:center;font-size:12.5px;color:var(--txt-3);cursor:pointer}
+.drop:hover,.drop.over{background:var(--bg-hover);color:var(--txt-2)}
+.drop.off{opacity:.45;cursor:default;background:none}
+.file{margin-top:10px;display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:10px;
+  border:1px solid var(--line);background:var(--bg-input);font-size:13px}
+.file span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file button{color:var(--txt-3);font-size:16px;line-height:1;padding:0 4px}
+.fields{display:grid;grid-template-columns:1fr 1fr;gap:0 10px}
+.fields label{display:block;margin-top:10px;font-size:11px;color:var(--txt-3)}
+.fields label .textin,.fields label .sel{margin-top:4px;width:100%}
+.fields .wide{grid-column:1/-1}
+.fields input[type=date]{padding:6px 11px}
+.actions{display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap}
+.err{color:var(--rose);font-size:12px}
+.err:empty,.hint:empty{display:none}
+.hint,.muted{color:var(--txt-3);font-size:12px}
+.muted{padding:10px 0}
+#jobs{display:flex;flex-direction:column;gap:10px}
+.job{border-top:1px solid var(--line);padding-top:10px}
+.job:first-child{border-top:0;padding-top:0}
+.job-h{display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+.job-h .nm{flex:1 1 120px;min-width:0;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.job-meta{margin-top:3px;font-size:12px;color:var(--txt-2);font-variant-numeric:tabular-nums}
+.st-running,.st-queued{border-color:rgba(107,167,240,.42);color:#a5cbf7}
+.st-done{border-color:rgba(121,215,162,.42);color:#a2e3bf}
+.st-failed{border-color:rgba(239,123,171,.42);color:#f2a3c5}
+.st-cancelled{border-style:dashed;color:var(--txt-3)}
+.mem-h{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.mem-h .panel-h{flex:1;margin:0}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.bar .textin{margin:0;flex:1 1 200px;width:auto;padding:6px 11px;font-size:12.5px}
+.bar .sel{flex:0 1 auto}
+#total{margin:10px 0 4px;font-size:12px;color:var(--txt-3)}
+.tbl{overflow-x:auto;position:relative}   /* keeps the .sr header inside the scroller */
+.mt-table td.txt{min-width:220px;white-space:pre-wrap;word-break:break-word;font-size:13px;line-height:1.5}
+.mt-table td.txt .asst{color:var(--txt-2)}
+.mt-table td.txt textarea{margin:0;min-height:64px}
+.mt-table td .tags{display:flex;flex-wrap:wrap;gap:5px}
+.mt-table td.dt,.mt-table td.sc{white-space:nowrap;color:var(--txt-2);font-variant-numeric:tabular-nums}
+.mt-table td.act{white-space:nowrap}
+.mt-table td.act .inline{gap:6px;flex-wrap:nowrap}
+.pager{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:10px;
+  font-size:12px;color:var(--txt-3)}
+.pf-slot{margin:14px 0 6px;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--rose)}
+.pf-slot:first-child{margin-top:4px}
+.pf{padding:9px 0;border-bottom:1px solid var(--line)}
+.pf-t{display:flex;align-items:flex-start;gap:8px;justify-content:space-between;font-size:13.5px}
+.pf ul{list-style:none;margin:6px 0 0;padding:0 0 0 12px;border-left:1px solid var(--line)}
+.pf li{font-size:12.5px;color:var(--txt-2);padding:3px 0}
+.pf li .tag{margin-right:6px;padding:1px 8px;font-size:11px}
+.pf .cause{color:var(--txt-3);font-size:12px;margin-top:1px}
+.danger-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.danger-row .textin{margin:0;flex:1 1 180px;width:auto;padding:5px 11px;font-size:12.5px}
+#confirmRow{margin-top:10px}
+#confirmRow label{flex-basis:100%;font-size:12px;color:var(--txt-2)}
+@media (max-width:900px){
+  .grid{grid-template-columns:minmax(0,1fr);padding:12px 16px 40px}
+  .top .push{margin-left:0}
+}
+/* Phones: each fact is a card, actions right under its text instead of off-screen to the right. */
+@media (max-width:600px){
+  .mt-table,.mt-table tbody{display:block}
+  .mt-table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+  .mt-table tr{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;padding:9px 0;
+    border-bottom:1px solid var(--line)}
+  .mt-table td,.mt-table tr:last-child td{padding:0;border:0}
+  .mt-table td.txt{flex:0 0 100%;min-width:0}
+  .mt-table td.act{order:1;flex:0 0 100%}
+}
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>SuperMem <span>· Memories</span></h1>
+  <label class="sr" for="brainSel">Brain</label>
+  <select class="sel" id="brainSel"></select>
+  <span class="pill space" id="livePill" hidden>Live in demo</span>
+  <button class="btn sm" id="newBtn">New brain</button>
+  <span class="inline" id="newRow" hidden>
+    <label class="sr" for="newName">New brain name</label>
+    <input class="textin" id="newName" placeholder="Brain name" autocomplete="off" />
+    <button class="btn sm primary" id="createBtn">Create</button>
+    <button class="btn sm" id="newCancel">Cancel</button>
+    <span class="err" id="newErr" role="alert"></span>
+  </span>
+  <a class="btn sm push" href="/">← Demo</a>
+</header>
+
+<main class="grid">
+  <div class="col">
+    <section class="panel" aria-labelledby="addH">
+      <div class="panel-h" id="addH">Add memories</div>
+      <label class="sr" for="pasteText">Text to add</label>
+      <textarea class="textin" id="pasteText" rows="7"
+                placeholder="Paste notes, a document, or a transcript (one “Name: text” line per turn)"></textarea>
+      <div class="drop" id="drop" role="button" tabindex="0">
+        Drop a file here, or click to choose<br />.txt · .md · .json · .pdf · .docx
+      </div>
+      <input type="file" id="fileIn" accept=".txt,.md,.json,.pdf,.docx" hidden />
+      <div class="file" id="fileRow" hidden>
+        <span id="fileName"></span>
+        <button id="fileX" aria-label="Remove file" title="Remove file">×</button>
+      </div>
+      <div class="fields">
+        <label>Format
+          <select class="sel" id="fmt">
+            <option value="auto">Auto</option><option value="prose">Prose</option>
+            <option value="transcript">Transcript</option>
+          </select>
+        </label>
+        <label>Date <input class="textin" type="date" id="obsDate" /></label>
+        <label class="wide">Owner speaker, for transcripts
+          <input class="textin" id="owner" placeholder="First speaker if blank" autocomplete="off" />
+        </label>
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="addBtn" disabled>Add to brain</button>
+        <span class="err" id="addErr" role="alert"></span>
+      </div>
+    </section>
+    <section class="panel" aria-labelledby="jobsH">
+      <div class="panel-h" id="jobsH">Loads</div>
+      <div id="jobs"><div class="hint">Nothing loaded yet.</div></div>
+    </section>
+  </div>
+
+  <div class="col">
+    <section class="panel" aria-labelledby="memH">
+      <div class="mem-h">
+        <div class="panel-h" id="memH">Memories</div>
+        <div class="seg" id="tabs">
+          <span class="seg-thumb"></span>
+          <button class="on" id="tabFacts" aria-pressed="true">Facts</button>
+          <button id="tabProfile" aria-pressed="false">Profile</button>
+        </div>
+      </div>
+      <div id="factsView">
+        <div class="bar">
+          <label class="sr" for="q">Search memories</label>
+          <input class="textin" id="q" type="search" placeholder="Search…" autocomplete="off" />
+          <button class="btn sm" id="semBtn" aria-pressed="false"
+                  title="Rank by meaning instead of matching words">Semantic</button>
+          <label class="sr" for="slotSel">Slot</label>
+          <select class="sel" id="slotSel"><option value="">All slots</option></select>
+          <label class="sr" for="entSel">Entity</label>
+          <select class="sel" id="entSel"><option value="">All entities</option></select>
+          <label class="sr" for="roleSel">Role</label>
+          <select class="sel" id="roleSel">
+            <option value="user">About the user</option>
+            <option value="assistant">Assistant replies</option>
+            <option value="">All</option>
+          </select>
+        </div>
+        <div id="total" aria-live="polite"></div>
+        <div class="tbl">
+          <table class="mt-table">
+            <thead><tr><th>Text</th><th>Slot</th><th>Entities</th><th>Date</th>
+              <th id="scoreH" hidden>Score</th><th><span class="sr">Actions</span></th></tr></thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+        <div class="muted" id="factsMsg" hidden></div>
+        <div class="pager" id="pager" hidden>
+          <button class="btn sm" id="prev">Prev</button>
+          <span id="pageInfo"></span>
+          <button class="btn sm" id="next">Next</button>
+        </div>
+      </div>
+      <div id="profileView" hidden></div>
+    </section>
+
+    <section class="panel" aria-labelledby="dangerH">
+      <div class="panel-h" id="dangerH">Danger zone</div>
+      <div class="danger-row">
+        <button class="btn sm danger" id="clearBtn">Clear brain</button>
+        <button class="btn sm danger" id="delBtn">Delete brain</button>
+      </div>
+      <div class="danger-row" id="confirmRow" hidden>
+        <label for="confirmIn" id="confirmLab"></label>
+        <input class="textin" id="confirmIn" autocomplete="off" />
+        <button class="btn sm danger" id="confirmGo" disabled></button>
+        <button class="btn sm" id="confirmNo">Cancel</button>
+      </div>
+      <div class="err" id="dangerErr" role="alert" style="margin-top:8px"></div>
+    </section>
+  </div>
+</main>
+<div id="toast" role="status"></div>
+
+<script>
+(function(){
+// Every write names its brain with ?space=; this page never switches the demo's live brain.
+const $ = id => document.getElementById(id);
+const PAGE = 50, SPACE_KEY = 'vm-mem-space';
+let SPACE = '', ACTIVE = '', FILE = null;
+let page = 1, semantic = false, tab = 'facts', profileStale = true;
+let factsSeq = 0, profileSeq = 0, jobTimer = null, liveJobs = new Set();
+let openRow = null;        // restores the one row in edit or delete-confirm state
+let pendingReload = false; // a load finished while a row was open: reload when it closes
+let focusRow = -1;         // after a save/delete reload, focus this row's Edit button
+let adding = false;        // an /api/ingest POST is in flight
+const MAX_MB = 10;         // web/ingest.py MAX_BYTES
+const composing = e => e.isComposing || e.keyCode === 229;   // Enter that picks an IME candidate
+let danger = '';           // 'clear' | 'delete' while the confirm row is open
+
+function el(tag, cls, text){
+  const e = document.createElement(tag);
+  if(cls) e.className = cls;
+  if(text != null) e.textContent = text;
+  return e;
+}
+function button(label, cls, onclick){ const b = el('button', cls, label); b.onclick = onclick; return b; }
+let toastT = null;
+function toast(m){ const t = $('toast'); t.textContent = m; t.classList.add('on');
+  clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('on'), 2200); }
+function remember(v){ try{ localStorage.setItem(SPACE_KEY, v); }catch(_){} }
+function recall(){ try{ return localStorage.getItem(SPACE_KEY); }catch(_){ return null; } }
+const sq = () => 'space=' + encodeURIComponent(SPACE);
+const json = (method, body) => ({method, headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+const plural = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
+
+// One helper for every request: a non-2xx throws the server's detail, so every caller can show it.
+async function api(url, opts){
+  const r = await fetch(url, opts);
+  let d = null;
+  try{ d = await r.json(); }catch(_){}
+  if(!r.ok){
+    let m = d && d.detail;
+    if(Array.isArray(m)) m = m.map(x => x.msg || JSON.stringify(x)).join('; ');   // FastAPI 422
+    throw new Error(m || r.statusText || ('HTTP ' + r.status));
+  }
+  return d;
+}
+
+// ── Brains ──────────────────────────────────────────────────────────────
+async function loadBrains(pick){
+  let d;
+  try{ d = await api('/api/spaces'); }
+  catch(e){ setFactsMsg('Could not list brains: ' + e.message, true); return; }
+  ACTIVE = d.active || '';
+  const names = d.spaces.map(s => s.name);
+  $('brainSel').replaceChildren(...names.map(n => {
+    const o = el('option', '', n === ACTIVE ? n + ' · live' : n); o.value = n; return o;
+  }));
+  selectBrain([pick, recall(), ACTIVE].find(n => n && names.includes(n)) || names[0] || '');
+}
+
+function selectBrain(name){
+  SPACE = name; $('brainSel').value = name; remember(name);
+  $('livePill').hidden = !name || name !== ACTIVE;
+  page = 1; openRow = null; pendingReload = false; profileStale = true; profileSeq++;
+  closeDanger(); $('dangerErr').textContent = '';
+  clearTimeout(jobTimer); liveJobs = new Set();
+  $('slotSel').value = ''; $('entSel').value = '';
+  $('profileView').replaceChildren(); setFactsMsg('Loading…');
+  syncAdd();
+  if(!name){ setFactsMsg('No brains yet. Create one with “New brain”.'); return; }
+  loadFacts(); if(tab === 'profile') loadProfile();
+  loadJobs();
+}
+
+$('brainSel').onchange = e => selectBrain(e.target.value);
+function showNew(on){
+  $('newRow').hidden = !on; $('newBtn').hidden = on; $('newErr').textContent = '';
+  if(on){ $('newName').value = ''; $('newName').focus(); }
+}
+$('newBtn').onclick = () => showNew(true);
+$('newCancel').onclick = () => showNew(false);
+$('newName').onkeydown = e => { if(composing(e)) return; if(e.key === 'Enter') createBrain(); else if(e.key === 'Escape') showNew(false); };
+$('createBtn').onclick = createBrain;
+async function createBrain(){
+  const name = $('newName').value.trim(), b = $('createBtn');
+  if(!name) return;
+  b.disabled = true; b.textContent = 'Creating…'; $('newErr').textContent = '';
+  try{
+    const d = await api('/api/spaces', json('POST', {name}));
+    showNew(false); toast('Brain created'); await loadBrains(d.id);
+  }catch(e){ $('newErr').textContent = e.message; }
+  finally{ b.disabled = false; b.textContent = 'Create'; }
+}
+
+// ── Add memories ────────────────────────────────────────────────────────
+function syncAdd(){
+  const text = $('pasteText').value.trim();
+  $('pasteText').disabled = !!FILE || adding;
+  $('drop').classList.toggle('off', !!text || adding);
+  $('drop').setAttribute('aria-disabled', text || adding ? 'true' : 'false');
+  $('fileX').disabled = adding;
+  $('addBtn').disabled = adding || !SPACE || (!FILE && !text);
+}
+function setFile(f){
+  $('addErr').textContent = '';
+  if(f && f.size > MAX_MB * 1024 * 1024){ f = null; $('addErr').textContent = 'The file is larger than ' + MAX_MB + ' MB.'; }
+  FILE = f || null;
+  $('fileIn').value = '';
+  $('drop').hidden = !!FILE; $('fileRow').hidden = !FILE;
+  $('fileName').textContent = FILE ? FILE.name : '';
+  syncAdd();
+}
+$('pasteText').oninput = syncAdd;
+$('fileIn').onchange = e => setFile(e.target.files[0]);
+$('fileX').onclick = () => { setFile(null); $('drop').focus(); };
+const dropOff = () => $('drop').classList.contains('off');
+$('drop').onclick = () => { if(!dropOff()) $('fileIn').click(); };
+$('drop').onkeydown = e => { if((e.key === 'Enter' || e.key === ' ') && !dropOff()){ e.preventDefault(); $('fileIn').click(); } };
+$('drop').ondragover = e => { e.preventDefault(); if(!dropOff()) $('drop').classList.add('over'); };
+$('drop').ondragleave = () => $('drop').classList.remove('over');
+$('drop').ondrop = e => {
+  e.preventDefault(); $('drop').classList.remove('over');
+  if(dropOff() || !e.dataTransfer.files.length) return;
+  if(e.dataTransfer.files.length > 1){ $('addErr').textContent = 'Drop one file at a time.'; return; }
+  setFile(e.dataTransfer.files[0]);
+};
+// A file dropped anywhere else would make the browser open it in place of this page.
+document.addEventListener('dragover', e => e.preventDefault());
+document.addEventListener('drop', e => e.preventDefault());
+{ const d = new Date(); $('obsDate').value = new Date(d - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10); }
+
+$('addBtn').onclick = async () => {
+  if(adding) return;
+  const b = $('addBtn'), file = FILE, text = $('pasteText').value;
+  const p = new URLSearchParams({space: SPACE, filename: file ? file.name : '', format: $('fmt').value,
+                                 owner: $('owner').value.trim(), observed_at: $('obsDate').value});
+  adding = true; b.textContent = 'Adding…'; $('addErr').textContent = ''; syncAdd();
+  try{
+    const d = await api('/api/ingest?' + p, {method:'POST', body: file || new Blob([text])});
+    if($('pasteText').value === text) $('pasteText').value = '';
+    if(FILE === file) setFile(null);
+    toast('Queued ' + plural(d.total, 'chunk') + ' as ' + d.format);
+    loadJobs();
+  }catch(e){ $('addErr').textContent = e.message; }
+  finally{ adding = false; b.textContent = 'Add to brain'; syncAdd(); }
+};
+
+// ── Loads (background jobs) ─────────────────────────────────────────────
+const isLive = j => j.state === 'queued' || j.state === 'running';
+function dur(s){
+  s = Math.max(0, Math.round(s));
+  const m = Math.floor(s / 60), h = Math.floor(m / 60);
+  return h ? h + 'h ' + (m % 60) + 'm' : m ? m + 'm ' + (s % 60) + 's' : s + 's';
+}
+
+async function loadJobs(){
+  if(!SPACE) return;
+  const space = SPACE;
+  clearTimeout(jobTimer);
+  let d;
+  try{ d = await api('/api/ingest?' + sq()); }
+  catch(e){
+    if(space !== SPACE) return;
+    $('jobs').replaceChildren(el('div', 'err', 'Could not read loads: ' + e.message));
+    if(liveJobs.size) jobTimer = setTimeout(loadJobs, 3000);
+    return;
+  }
+  if(space !== SPACE) return;
+  const now = new Set(d.jobs.filter(isLive).map(j => j.id));
+  const ended = d.jobs.filter(j => liveJobs.has(j.id) && !now.has(j.id));
+  if(ended.length){                    // a load just finished
+    toast(ended.map(j => 'Load ' + j.state + ': ' + j.filename).join(' · '));
+    if(openRow) pendingReload = true; else reloadData();   // don't wipe an open edit
+  }
+  liveJobs = now;
+  renderJobs(d.jobs);
+  clearTimeout(jobTimer);             // two overlapping calls must not leave two poll loops
+  if(now.size) jobTimer = setTimeout(loadJobs, 1000);
+}
+
+// Rows are kept and patched in place (keyed by job id): rebuilding them every second would drop
+// keyboard focus from Cancel and close an open error list.
+function renderJobs(jobs){
+  const box = $('jobs');
+  if(!jobs.length){ box.replaceChildren(el('div', 'hint', 'Nothing loaded yet.')); return; }
+  const old = new Map([...box.querySelectorAll('.job')].map(r => [r.dataset.id, r]));
+  const rows = jobs.map(j => updateJob(old.get(j.id) || newJob(j), j));
+  if(rows.some((r, i) => box.children[i] !== r) || box.children.length !== rows.length) box.replaceChildren(...rows);
+}
+function newJob(j){
+  const row = el('div', 'job'), head = el('div', 'job-h');
+  row.dataset.id = j.id;
+  const nm = el('span', 'nm', j.filename); nm.title = j.filename;
+  const cancel = button('Cancel', 'btn sm', async () => {
+    cancel.disabled = true;
+    try{ await api('/api/ingest/' + encodeURIComponent(j.id) + '/cancel', {method:'POST'}); }
+    catch(e){ cancel.disabled = false; toast('Cancel failed: ' + e.message); }
+    loadJobs();
+  });
+  head.append(nm, el('span', 'tag', j.format), el('span', 'tag st'), cancel);
+  const det = el('details', 'turn-ctx'); det.hidden = true;
+  det.append(el('summary'), el('pre'));
+  row.append(head, el('div', 'job-meta'), det);
+  return row;
+}
+function updateJob(row, j){
+  const st = row.querySelector('.st'), cancel = row.querySelector('.job-h button');
+  st.className = 'tag st st-' + j.state; st.textContent = j.state;
+  cancel.hidden = !isLive(j);
+  const bits = [j.done + ' / ' + j.total + ' chunks', plural(j.facts, 'fact')];
+  if(j.error_count) bits.push(plural(j.error_count, 'error'));
+  if(j.started_at){
+    // ponytail: server epoch vs browser clock; they agree when the demo runs on localhost.
+    const took = (j.finished_at || Date.now() / 1000) - j.started_at;
+    bits.push(dur(took));
+    if(isLive(j) && j.done > 0) bits.push('~' + dur(took / j.done * (j.total - j.done)) + ' left');
+  }
+  row.querySelector('.job-meta').textContent = bits.join(' · ');
+  const det = row.querySelector('details');
+  det.hidden = !j.errors.length;
+  if(j.errors.length){
+    det.querySelector('summary').textContent = plural(Math.max(j.error_count, j.errors.length), 'error');
+    det.querySelector('pre').textContent = j.errors.map(x => (x.index < 0 ? 'job' : '#' + x.index) + ': ' +
+                                                      x.error + (x.text ? '\n  ' + x.text : '')).join('\n');
+  }
+  return row;
+}
+
+// ── Facts ───────────────────────────────────────────────────────────────
+function reloadData(){
+  pendingReload = false;
+  loadFacts();
+  if(tab === 'profile') loadProfile(); else profileStale = true;
+}
+function reset(){ page = 1; loadFacts(); }
+let qT = null;
+$('q').oninput = () => { clearTimeout(qT); qT = setTimeout(reset, 300); };
+$('q').onkeydown = e => { if(e.key === 'Enter'){ clearTimeout(qT); reset(); } };
+$('semBtn').onclick = () => {
+  semantic = !semantic;
+  $('semBtn').classList.toggle('on', semantic); $('semBtn').setAttribute('aria-pressed', semantic);
+  reset();
+};
+for(const id of ['slotSel', 'entSel', 'roleSel']) $(id).onchange = reset;
+$('prev').onclick = () => { page--; loadFacts(); };
+$('next').onclick = () => { page++; loadFacts(); };
+
+function fillSel(sel, values, all){
+  const cur = sel.value;
+  // A selected value whose last fact was just deleted stays, so the control matches the rows shown.
+  if(cur && !values.includes(cur)) values = [...values, cur];
+  sel.replaceChildren(el('option', '', all), ...values.map(v => { const o = el('option', '', v); o.value = v; return o; }));
+  sel.firstChild.value = '';
+  sel.value = cur;
+}
+function setFactsMsg(m, err){
+  $('rows').replaceChildren(); $('pager').hidden = true; $('total').textContent = '';
+  $('factsMsg').hidden = !m; $('factsMsg').textContent = m || '';
+  $('factsMsg').className = err ? 'err' : 'muted';
+}
+
+async function loadFacts(){
+  if(!SPACE) return;
+  const seq = ++factsSeq, q = $('q').value.trim();
+  const p = new URLSearchParams({space: SPACE, q, mode: semantic ? 'semantic' : 'substring',
+    slot: $('slotSel').value, entity: $('entSel').value, role: $('roleSel').value, page, size: PAGE});
+  let d;
+  try{ d = await api('/api/mem?' + p); }
+  catch(e){ if(seq === factsSeq) setFactsMsg(e.message, true); return; }
+  if(seq !== factsSeq) return;
+  const pages = Math.max(1, Math.ceil(d.total / PAGE));
+  if(page > pages){ page = pages; return loadFacts(); }   // the last row of the last page went away
+  fillSel($('slotSel'), d.slots, 'All slots');
+  fillSel($('entSel'), d.entities, 'All entities');
+  // From what was asked for, not the selects; the role filter counts too.
+  const filtered = !!(q || p.get('slot') || p.get('entity'));
+  const who = {user: ' about the user', assistant: ' from the assistant'}[p.get('role')] || '';
+  const scored = semantic && !!q;
+  openRow = null; pendingReload = false;
+  $('scoreH').hidden = !scored;
+  $('total').textContent = (filtered ? d.total + (d.total === 1 ? ' match' : ' matches') : plural(d.total, 'fact')) + who;
+  $('rows').replaceChildren(...d.items.map(r => factRow(r, scored)));
+  if(focusRow >= 0){                  // after a save/delete, keep the keyboard near where it was
+    const tr = $('rows').children[Math.min(focusRow, $('rows').children.length - 1)];
+    (tr ? tr.querySelector('.act button') : $('q')).focus();
+    focusRow = -1;
+  }
+  $('factsMsg').hidden = d.total > 0; $('factsMsg').className = 'muted';
+  // Every row has a slot, so an empty slot list means the brain itself is empty.
+  $('factsMsg').textContent = !d.slots.length ? 'No memories in this brain yet. Add some on the left.'
+    : who && !filtered ? 'No matches. Set Role to “All” to see every memory.' : 'No matches.';
+  $('pager').hidden = pages < 2;
+  $('pageInfo').textContent = 'Page ' + page + ' of ' + pages;
+  $('prev').disabled = page <= 1; $('next').disabled = page >= pages;
+}
+
+function closeOpen(){ const f = openRow; openRow = null; if(f) f(); }
+// Ends the open row (Esc, Cancel, No); runs a reload a finished load deferred meanwhile.
+function finishRow(){
+  closeOpen();
+  if(!pendingReload) return;
+  const tr = document.activeElement.closest('#rows tr');   // the Edit button view() just focused
+  focusRow = tr ? rowIndex(tr) : -1;
+  reloadData();
+}
+const rowIndex = tr => [...$('rows').children].indexOf(tr);
+
+function factRow(r, scored){
+  const tr = el('tr'), text = el('td', 'txt'), act = el('td', 'act');
+  const slot = el('td'); slot.append(el('span', 'tag sch', r.slot));
+  const ents = el('td'), tags = el('div', 'tags');
+  tags.append(...r.entities.map(n => el('span', 'tag ent', n))); ents.append(tags);
+  tr.append(text, slot, ents, el('td', 'dt', r.date || '—'));
+  if(scored) tr.append(el('td', 'sc', Number(r.score).toFixed(3)));
+  tr.append(act);
+
+  function view(focus){
+    text.replaceChildren(el('span', r.role === 'assistant' ? 'asst' : '', r.text));
+    const box = el('span', 'inline'), eb = button('Edit', 'btn sm', edit);
+    box.append(eb, button('Delete', 'btn sm', confirmDelete));
+    act.replaceChildren(box);
+    if(focus === true) eb.focus();     // back from edit/confirm: don't drop focus to <body>
+  }
+  const restore = () => view(true);
+  function edit(){
+    closeOpen(); openRow = restore;
+    const ta = el('textarea', 'textin'); ta.value = r.text; ta.setAttribute('aria-label', 'Memory text');
+    const msg = el('div', 'hint', 'Enter saves · Shift+Enter new line · Esc cancels');
+    const save = button('Save', 'btn sm primary', submit), cancel = button('Cancel', 'btn sm', finishRow);
+    async function submit(){
+      const t = ta.value.trim();
+      if(!t){ msg.className = 'err'; msg.textContent = 'Text cannot be empty.'; return; }
+      if(t === r.text){ finishRow(); return; }
+      ta.disabled = save.disabled = true; msg.className = 'hint'; msg.textContent = 'Saving…';
+      try{
+        await api('/api/mem/' + encodeURIComponent(r.id) + '?' + sq(), json('PATCH', {text: t}));
+        toast('Saved'); focusRow = rowIndex(tr); reloadData();   // the edit re-tags entities
+      }catch(e){
+        ta.disabled = save.disabled = false; msg.className = 'err'; msg.textContent = e.message; ta.focus();
+      }
+    }
+    ta.onkeydown = e => {
+      if(composing(e)) return;
+      if(e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); submit(); }
+      else if(e.key === 'Escape'){ e.preventDefault(); finishRow(); }
+    };
+    text.replaceChildren(ta, msg);
+    const box = el('span', 'inline'); box.append(save, cancel); act.replaceChildren(box);
+    ta.style.height = Math.min(240, ta.scrollHeight + 4) + 'px';
+    ta.focus();
+  }
+  function confirmDelete(){
+    closeOpen(); openRow = restore;
+    const box = el('span', 'inline'), msg = el('span', 'err');
+    const yes = button('Yes', 'btn sm danger', async () => {
+      yes.disabled = true; msg.textContent = '';
+      try{
+        await api('/api/mem/' + encodeURIComponent(r.id) + '?' + sq(), {method:'DELETE'});
+        toast('Deleted'); focusRow = rowIndex(tr); reloadData();
+      }catch(e){ yes.disabled = false; msg.textContent = e.message; }
+    });
+    box.append(el('span', 'hint', 'Delete?'), yes, button('No', 'btn sm', finishRow), msg);
+    act.replaceChildren(box); yes.focus();
+  }
+  view();
+  return tr;
+}
+
+// ── Profile ─────────────────────────────────────────────────────────────
+function showTab(t){
+  tab = t;
+  $('tabs').classList.toggle('two', t === 'profile');
+  $('tabFacts').classList.toggle('on', t === 'facts'); $('tabFacts').setAttribute('aria-pressed', t === 'facts');
+  $('tabProfile').classList.toggle('on', t === 'profile'); $('tabProfile').setAttribute('aria-pressed', t === 'profile');
+  $('factsView').hidden = t !== 'facts'; $('profileView').hidden = t !== 'profile';
+  if(t === 'profile' && profileStale) loadProfile();
+}
+$('tabFacts').onclick = () => showTab('facts');
+$('tabProfile').onclick = () => showTab('profile');
+
+async function loadProfile(){
+  if(!SPACE) return;
+  const seq = ++profileSeq, box = $('profileView');
+  profileStale = false;
+  if(!box.childElementCount) box.replaceChildren(el('div', 'muted', 'Loading…'));
+  let d;
+  try{ d = await api('/api/mem/profile?' + sq()); }
+  catch(e){ if(seq === profileSeq){ profileStale = true; box.replaceChildren(el('div', 'err', e.message)); } return; }
+  if(seq !== profileSeq) return;
+  if(!d.items.length){ box.replaceChildren(el('div', 'muted', 'No profile yet. It grows from conversations.')); return; }
+  const bySlot = new Map();
+  for(const it of d.items){ if(!bySlot.has(it.slot)) bySlot.set(it.slot, []); bySlot.get(it.slot).push(it); }
+  const out = [];
+  for(const [slot, items] of bySlot){
+    out.push(el('h3', 'pf-slot', slot));
+    for(const it of items){
+      const row = el('div', 'pf'), head = el('div', 'pf-t'), t = el('span', '', it.text);
+      t.title = it.raw || '';
+      head.append(t, el('span', 'tag', it.cluster));
+      row.append(head);
+      if(it.notes.length){
+        const ul = el('ul');
+        for(const n of it.notes){
+          const li = el('li');
+          if(n.emotion) li.append(el('span', 'tag emo', n.emotion));
+          li.append(document.createTextNode(n.text || ''));
+          if(n.cause) li.append(el('div', 'cause', n.cause));
+          ul.append(li);
+        }
+        row.append(ul);
+      }
+      out.push(row);
+    }
+  }
+  box.replaceChildren(...out);
+}
+
+// ── Danger zone ─────────────────────────────────────────────────────────
+function closeDanger(){ danger = ''; $('confirmRow').hidden = true; }
+function openDanger(kind){
+  if(!SPACE) return;
+  danger = kind; $('dangerErr').textContent = '';
+  $('confirmRow').hidden = false;
+  $('confirmLab').textContent = 'Type the brain’s name (' + SPACE + ') to confirm. ' +
+    (kind === 'clear' ? 'Every memory in it is erased.' : 'The brain and its recordings are removed.');
+  $('confirmGo').textContent = kind === 'clear' ? 'Clear brain' : 'Delete brain';
+  $('confirmIn').value = ''; $('confirmGo').disabled = true; $('confirmIn').focus();
+}
+$('clearBtn').onclick = () => openDanger('clear');
+$('delBtn').onclick = () => openDanger('delete');
+$('confirmNo').onclick = closeDanger;
+$('confirmIn').oninput = () => { $('confirmGo').disabled = $('confirmIn').value !== SPACE; };
+$('confirmIn').onkeydown = e => {
+  if(composing(e)) return;
+  if(e.key === 'Enter' && !$('confirmGo').disabled) $('confirmGo').click();
+  else if(e.key === 'Escape') closeDanger();
+};
+$('confirmGo').onclick = async () => {
+  const b = $('confirmGo'), confirm = $('confirmIn').value, kind = danger;
+  b.disabled = true; $('dangerErr').textContent = '';
+  try{
+    if(kind === 'clear'){
+      await api('/api/mem/clear?' + sq(), json('POST', {confirm}));
+      // The first read reopens the wiped brain (seconds): don't leave erased rows on screen.
+      closeDanger(); toast('Brain cleared'); page = 1; openRow = null;
+      setFactsMsg('Loading…'); $('profileView').replaceChildren(); profileSeq++;
+      reloadData();
+    }else{
+      await api('/api/spaces/' + encodeURIComponent(SPACE), json('DELETE', {confirm}));
+      closeDanger(); toast('Brain deleted'); remember(''); await loadBrains();
+    }
+  }catch(e){ $('dangerErr').textContent = e.message; b.disabled = false; }
+};
+
+loadBrains();
+})();
+</script>
+</body>
+</html>
