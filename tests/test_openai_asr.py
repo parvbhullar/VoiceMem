@@ -16,7 +16,9 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from supermem.utils.audio.asr import OpenAIStreamingASR, _wav_bytes  # noqa: E402
+import httpx  # noqa: E402
+
+from supermem.utils.audio.asr import ElevenLabsScribeASR, OpenAIStreamingASR, _wav_bytes  # noqa: E402
 
 RATE = 16000
 
@@ -210,6 +212,41 @@ class LanguageTest(unittest.TestCase):
 
     def test_an_explicit_language_is_kept(self):
         self.assertEqual(OpenAIStreamingASR(language="hi", transcribe=lambda w: "").language, "hi")
+
+
+class ElevenLabsScribeTest(unittest.TestCase):
+    """Scribe keeps the language the user spoke in: Hindi stays Devanagari, never an English translation."""
+
+    def _asr(self, reply, seen, language=""):
+        def handler(req):
+            seen.append(req)
+            return httpx.Response(200, json=reply)
+        return ElevenLabsScribeASR(language=language, api_key="k",
+                                   client=httpx.Client(transport=httpx.MockTransport(handler)))
+
+    def test_returns_the_text_in_the_spoken_script(self):
+        seen = []
+        asr = self._asr({"language_code": "hin", "text": " नमस्ते, आप कैसे हैं? "}, seen)
+        self.assertEqual(asr._api_transcribe(b"RIFF"), "नमस्ते, आप कैसे हैं?")
+        self.assertEqual(asr.last_language, "hin")
+        req = seen[0]
+        self.assertEqual(req.url.path, "/v1/speech-to-text")
+        self.assertEqual(req.headers["xi-api-key"], "k")
+        body = req.content.decode("latin-1")
+        self.assertIn('name="model_id"', body)
+        self.assertIn("scribe_v1", body)
+        self.assertNotIn('name="language_code"', body)      # auto: let Scribe detect
+
+    def test_fixed_language_is_passed_through(self):
+        seen = []
+        asr = self._asr({"language_code": "hin", "text": "हाँ"}, seen, language="hi")
+        asr._api_transcribe(b"RIFF")
+        self.assertIn('name="language_code"', seen[0].content.decode("latin-1"))
+
+    def test_streaming_contract_is_inherited(self):
+        asr = ElevenLabsScribeASR(api_key="k", transcribe=lambda w: "मैं रिया हूँ")
+        asr.feed(_audio(0.5))
+        self.assertEqual(asr.flush(), "मैं रिया हूँ")
 
 
 if __name__ == "__main__":
