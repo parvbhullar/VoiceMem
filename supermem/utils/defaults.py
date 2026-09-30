@@ -51,6 +51,10 @@ def default_utils(base_url, memory_root):
         if _pick == "openai":
             from supermem.utils.audio.asr import OpenAIStreamingASR
             return OpenAIStreamingASR()
+        if _pick == "elevenlabs":
+            # ElevenLabs Scribe: keeps the spoken language (Hindi stays Hindi), see ElevenLabsScribeASR.
+            from supermem.utils.audio.asr import ElevenLabsScribeASR
+            return ElevenLabsScribeASR()
         if _pick == "sherpa":
             from supermem.utils.audio.asr import StreamingASR
             from supermem.utils.common.paths import model_path

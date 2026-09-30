@@ -26,6 +26,7 @@ Note: memory vectors use local 384-dim E5 (the speculation budget cannot afford 
 import argparse
 import asyncio
 import base64
+import collections
 import json
 import os
 import re
@@ -244,7 +245,13 @@ UI_LANG = ARGS.lang          # UI language. Switchable anytime at the top right;
 #: in an English store the user occasionally drops a sentence in another language, the assistant follows, this turn's memory ends up in that language too,
 #: and the store gets mixed. The language is fixed when the space is created; this just enforces it.
 _LANG_NOTE = {
-    "en": "Always reply in English, even if the user writes in another language.",
+    # EN is the default UI: mirror the caller. A Hindi question answered in English
+    # (and read out in English) is what the demo used to do, and it is wrong for a voice agent.
+    "en": "Reply in the language and script of the caller's own words in this turn "
+          "(what they said, not the memory or context text, which may be in another "
+          "language): English -> English; Hindi in Devanagari -> Hindi in Devanagari; "
+          "Hinglish (Hindi in Latin letters) -> Hinglish; Marathi -> Marathi. "
+          "Never switch to the memory's language.",
     "hi": "Always reply in Hindi (Devanagari script), even if the user writes in "
           "another language. Keep it natural spoken Hindi, not literary Hindi; "
           "English technical words are fine where a Hindi speaker would use them.",
@@ -1079,6 +1086,18 @@ def _cartridge_engine(arm):
     return engine
 
 
+def _reply_script_hint(text: str) -> str:
+    """Which script the reply must be in, decided from the caller's words.
+
+    A generic "same language" rule was not enough: Gemma answered a Devanagari
+    question in romanised Hindi, copying the memory's Hinglish. Naming the
+    script explicitly, from what the caller actually typed or said, fixes it."""
+    if re.search(r"[\u0900-\u097F]", text):
+        return ("(The caller wrote in Devanagari. Reply in Devanagari script -- "
+                "देवनागरी में जवाब दें -- not in Latin letters.)")
+    return "(Reply in the language and script of the caller's words above, not the memory's.)"
+
+
 def _cartridge_provider(history: str, space: str):
     """compare.fan_out's ``cartridge`` hook: the provider for a cartridge arm.
 
@@ -1095,6 +1114,10 @@ def _cartridge_provider(history: str, space: str):
         async def fn(text: str, memory_context: str = ""):
             turn = "\n\n".join(x for x in (history, memory_context) if x)
             msgs = rt.messages(space, text, turn_memory=turn)
+            # The language rule sits in the system prompt, ~8K tokens of cartridge away from the
+            # utterance; Gemma then answered a Devanagari question in the memory's Hinglish. Repeat
+            # it right after the words it refers to (the user message is volatile, the prefix stays byte-stable).
+            msgs[-1]["content"] += "\n\n" + _reply_script_hint(text)
             try:
                 async for kind, val in engine.stream(msgs, max_tokens=512):
                     if kind == "delta":
@@ -1638,7 +1661,8 @@ async def _announce_turn(pending, send) -> None:
     now, run the acoustic one in the background, and issue a tag_update to
     override the emotion in the UI only once it is trustworthy.
     """
-    await send({"type": "user_transcript", "text": pending.text})
+    # spoken: the page reads a compare turn's answers aloud only when the user spoke it, not when they typed.
+    await send({"type": "user_transcript", "text": pending.text, "spoken": bool(getattr(pending, "spoken", False))})
     note_hits(pending.result)      # make sure the brain-map snapshot has these items on the graph
     await send({"type": "memory_hits",
                 **fill_tags(utils.hits_payload(pending.result, has_audio=audio_of,
@@ -3645,6 +3669,65 @@ async def api_cartridge_refresh() -> dict:
         return {"space": ACTIVE_SPACE, "error": f"{type(e).__name__}: {e}"}
     return {"space": ACTIVE_SPACE, **cart.manifest(),
             "prefetch": await _prefetch_cartridges(ACTIVE_SPACE)}
+
+
+# ── Compare-mode speech (ElevenLabs) ──────────────────────────────────────────
+#: A compare turn is silent server-side (realtime carries one stream, and the
+#: two panels are two answers). For a spoken turn the page reads both panels
+#: out itself, left then right, through this endpoint; the key never leaves
+#: the server. Replays hit the cache, not ElevenLabs.
+ELEVEN_MODEL = os.environ.get("ELEVENLABS_MODEL", "eleven_v3")
+ELEVEN_VOICE = os.environ.get("ELEVENLABS_VOICE_ID", "MmQVkVZnQ0dUbfWzcW6f")
+_TTS_CACHE: "collections.OrderedDict[str, bytes]" = collections.OrderedDict()
+_TTS_CACHE_MAX = 64
+_TTS_MAX_CHARS = 2500
+
+
+@app.get("/api/tts")
+async def api_tts(text: str = ""):
+    """mp3 of ``text`` in the demo voice, streamed as ElevenLabs produces it."""
+    import hashlib
+    import httpx
+    from fastapi import HTTPException
+    from fastapi.responses import Response, StreamingResponse
+    text = text.strip()
+    if not text:
+        raise HTTPException(400, "empty text")
+    if len(text) > _TTS_MAX_CHARS:
+        raise HTTPException(413, f"text longer than {_TTS_MAX_CHARS} chars")
+    key = os.environ.get("ELEVENLABS_API_KEY", "")
+    if not key:
+        raise HTTPException(503, "ELEVENLABS_API_KEY is not set")
+    ck = hashlib.sha256(f"{ELEVEN_MODEL}|{ELEVEN_VOICE}|{text}".encode()).hexdigest()
+    if ck in _TTS_CACHE:
+        _TTS_CACHE.move_to_end(ck)
+        return Response(_TTS_CACHE[ck], media_type="audio/mpeg")
+
+    client = httpx.AsyncClient(timeout=60.0)
+    req = client.build_request(
+        "POST", f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVEN_VOICE}/stream",
+        params={"output_format": "mp3_44100_128"},
+        headers={"xi-api-key": key}, json={"text": text, "model_id": ELEVEN_MODEL})
+    resp = await client.send(req, stream=True)
+    if resp.status_code != 200:
+        detail = (await resp.aread()).decode("utf-8", "replace")[:300]
+        await resp.aclose(); await client.aclose()
+        print(f"[tts] elevenlabs HTTP {resp.status_code}: {detail}", flush=True)
+        raise HTTPException(502, f"ElevenLabs HTTP {resp.status_code}")
+
+    async def body():
+        buf = bytearray()
+        try:
+            async for chunk in resp.aiter_bytes():
+                buf += chunk
+                yield chunk
+            # Only a complete clip is cached: a replay of half a sentence would be worse than a re-fetch.
+            _TTS_CACHE[ck] = bytes(buf)
+            while len(_TTS_CACHE) > _TTS_CACHE_MAX:
+                _TTS_CACHE.popitem(last=False)
+        finally:
+            await resp.aclose(); await client.aclose()
+    return StreamingResponse(body(), media_type="audio/mpeg")
 
 
 #: Where evaluation/cartridges/run_bench.py writes its runs.
