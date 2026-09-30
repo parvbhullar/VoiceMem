@@ -34,8 +34,8 @@ button{cursor:pointer;background:none;border:none}
 /* Top bar across the full width; below it the stage (brain map + controls) on the left and a
    full-height chat panel on the right. */
 #app{
-  position:fixed;inset:0;display:grid;gap:12px;padding:0 12px 12px;
-  grid-template-columns:minmax(0,1fr) clamp(380px,36vw,620px);
+  position:fixed;inset:0;display:grid;gap:12px 0;padding:0 12px 12px;
+  grid-template-columns:minmax(0,3fr) 12px var(--chat-w,minmax(340px,2fr));  /* 60:40 until dragged */
   grid-template-rows:auto minmax(0,1fr);
 }
 
@@ -78,12 +78,8 @@ button{cursor:pointer;background:none;border:none}
 /* ── Left stage: brain map + controls ─────────────────────────────── */
 .stage{display:flex;flex-direction:column;gap:12px;min-width:0;min-height:0}
 .controls{flex:0 0 clamp(236px,36%,330px);min-height:0;display:grid;gap:12px;
-  grid-template-columns:auto minmax(0,1fr) minmax(0,1fr) minmax(0,1.3fr);
-  grid-template-rows:minmax(0,1fr);grid-template-areas:"orb in rc out"}
+  grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);grid-template-rows:minmax(0,1fr)}
 .controls>.panel{min-height:0;overflow-y:auto}
-.p-in{grid-area:in} .p-recall{grid-area:rc} .p-out{grid-area:out}
-#orb{grid-area:orb;align-self:center;width:132px;height:132px;
-  opacity:.75;pointer-events:none;border-radius:50%}
 .panel{border:1px solid var(--line);border-radius:var(--radius);background:var(--bg-panel);
   padding:12px 14px;display:flex;flex-direction:column;min-height:0}
 .panel-h{flex:0 0 auto;display:flex;align-items:center;gap:8px;margin-bottom:9px;
@@ -151,10 +147,32 @@ button{cursor:pointer;background:none;border:none}
 .btn[disabled]:hover{background:none}
 a.btn{text-decoration:none}
 
-/* ── Right column ─────────────────────────────────────────────────── */
-.rightpane{display:flex;flex-direction:column;min-width:0;min-height:0;border-left:1px solid var(--line)}
-.topbar{flex:0 0 auto;display:flex;align-items:center;gap:12px;padding:11px 14px;
-  border-bottom:1px solid var(--line)}
+/* ── Top bar + right chat panel ───────────────────────────────────── */
+.topbar{grid-column:1/-1;margin:0 -12px;display:flex;align-items:center;gap:12px;
+  padding:11px 16px;border-bottom:1px solid var(--line)}
+.chatpane{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;
+  border:1px solid var(--line);border-radius:14px;background:var(--bg-side)}
+.chatpane .p-in{flex:0 0 auto;max-height:30%;overflow-y:auto;border:0;border-radius:0;
+  border-bottom:1px solid var(--line);background:none;padding:12px 22px}
+/* Pane slider: drag (or arrow keys) to resize the chat panel; double-click resets. */
+.splitter{position:relative;cursor:col-resize;touch-action:none}
+.splitter::after{content:"";position:absolute;top:0;bottom:0;left:5px;width:2px;border-radius:2px;
+  background:transparent;transition:background .15s}
+.splitter:hover::after,.splitter:focus-visible::after,body.dragging .splitter::after{background:var(--line-2)}
+body.dragging{cursor:col-resize;user-select:none}
+.brainsel{display:flex;align-items:center;gap:8px;margin-left:10px;height:36px;padding:0 4px 0 5px;
+  border:1px solid var(--line-2);border-radius:10px;background:var(--bg-input);min-width:0}
+.brainsel:hover{border-color:rgba(255,255,255,.28)}
+.brainsel .av{width:26px;height:26px;flex:0 0 26px;border-radius:7px;display:flex;align-items:center;
+  justify-content:center;font-size:13px;font-weight:700;color:var(--mint);background:rgba(121,215,162,.16)}
+.brainsel select{appearance:none;-webkit-appearance:none;border:0;background:transparent;
+  font-size:14px;font-weight:600;color:var(--txt);cursor:pointer;min-width:0;max-width:220px;
+  padding:4px 22px 4px 0;background:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%23a8a8a8' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/></svg>") no-repeat right 4px center}
+.brainsel select:focus{outline:none}
+.brainsel select option{background:var(--bg-input);color:var(--txt)}
+.composer{flex:0 0 auto;padding:12px 14px 14px;border-top:1px solid var(--line)}
+.composer .textin{margin-top:0;padding:12px 14px;border-radius:12px}
+.composer .out-foot{margin-top:10px;padding-top:0;border-top:0}
 .seg{position:relative;display:flex;padding:3px;border-radius:99px;background:#171717;
   border:1px solid var(--line)}
 .seg-thumb{position:absolute;top:3px;left:3px;bottom:3px;width:calc(50% - 3px);border-radius:99px;
@@ -169,7 +187,6 @@ a.btn{text-decoration:none}
   font-size:12.5px;color:var(--txt)}
 .sel:focus{outline:none;border-color:var(--line-2)}
 
-.viewport{flex:1;min-height:0;overflow:hidden}
 .track{display:flex;width:200%;height:100%;transition:transform .34s cubic-bezier(.2,.8,.2,1)}
 .track.mem{transform:translateX(-50%)}
 .pane{width:50%;flex:0 0 50%;min-width:0;height:100%;display:flex;flex-direction:column;overflow:hidden}
@@ -182,7 +199,8 @@ a.btn{text-decoration:none}
 .pill svg{width:11px;height:11px;stroke:currentColor;fill:none;stroke-width:1.6}
 .pill.space{border-color:rgba(107,167,240,.4);color:#a5cbf7}
 .chat{flex:1;overflow:auto;padding:20px 22px;display:flex;flex-direction:column;gap:16px}
-.chat .turn{max-width:78%;display:flex;flex-direction:column;gap:5px}
+.chat .turn{display:flex;flex-direction:column;gap:5px}
+.chat .turn.user,.chat .turn.ai{max-width:78%}
 .chat .turn.user{align-self:flex-end;align-items:flex-end}
 .chat .turn.ai{align-self:flex-start;align-items:flex-start}
 .chat .who{font-size:11px;color:var(--txt-3);padding:0 4px}
@@ -196,7 +214,8 @@ a.btn{text-decoration:none}
 .chat .empty{margin:auto;text-align:center;color:var(--txt-3);font-size:13.5px;line-height:1.9}
 .chat .empty b{display:block;font-weight:500;font-size:15px;color:var(--txt-2);margin-bottom:4px}
 
-.brainwrap{position:relative;flex:1;min-height:0;overflow:hidden;background:var(--bg-dark)}
+.brainwrap{position:relative;flex:1;min-height:240px;overflow:hidden;background:var(--bg-dark);
+  border:1px solid var(--line);border-radius:14px}
 /* brain silhouette image ab display नहीं होता — reference design में brain shape
    नहीं, wireframe sphere है। sizing math अभी भी इसी hidden anchor पर टिका है। */
 #brain{position:absolute;left:0;top:0;opacity:0;pointer-events:none;user-select:none;
@@ -278,12 +297,13 @@ a.btn{text-decoration:none}
   color:var(--txt);opacity:0;pointer-events:none;z-index:70;transition:opacity .2s,transform .2s}
 #toast.on{opacity:1;transform:translate(-50%,0)}
 
-@media (max-width:1180px){
-  #app{grid-template-columns:56px minmax(320px,380px) minmax(340px,1fr)}
-}
 @media (max-width:860px){
-  #app,#app.collapsed{grid-template-columns:1fr;grid-template-rows:auto 1fr;overflow:auto}
-  .rightpane{border-left:none;border-top:1px solid var(--line);min-height:70vh}
+  #app{grid-template-columns:1fr;grid-template-rows:none;grid-auto-rows:max-content;gap:12px;overflow:auto}
+  .splitter{display:none}
+  .topbar,.export{flex-wrap:wrap}
+  .brainwrap{flex:0 0 380px}
+  .controls{flex:0 0 auto;grid-template-columns:1fr;grid-template-rows:auto}
+  .chatpane{min-height:70vh}
 }
 @media (prefers-reduced-motion:reduce){*{animation-duration:.001ms!important;transition-duration:.001ms!important}}
 
@@ -301,15 +321,13 @@ a.btn{text-decoration:none}
 /* flex:1 means flex:1 1 0% — it can shrink below its content. cols has a 190px floor, so once it over-shrinks the ctx
    overflows .cmp and sits on top of .out-foot (reproduced at both 1920x1080 and 1440x900; it looks like
    "Injected memory context" and "Start talking" squeezed onto the same line).
-   1 0 auto: may grow, never shrinks below its content; when it does not fit, .center.cmp-on scrolls. */
+   1 0 auto: may grow, never shrinks below its content; when it does not fit, the panel scrolls. */
 .cmp{display:flex;flex-direction:column;gap:8px;min-height:0;flex:0 0 auto}
 /* Each arm needs enough room to read a reply. Without a floor, when the centre column is short flex squeezes them to a few
    pixels — measured 64px at 1440x900 and 5px at 1280x720, all text hidden under overflow:hidden,
    which looks like "the panels are empty". So cols gets a floor, and when space runs out the centre column scrolls
-   instead of the panels vanishing. The centre column only scrolls while compare is on (.center.cmp-on); the default layout is untouched. */
+   instead of the panels vanishing (.controls>.panel scrolls). */
 .cmp-cols{display:grid;grid-template-columns:1fr 1fr;gap:8px;flex:0 0 auto}
-.center.cmp-on{overflow-y:auto}
-.p-out.cmp-on{flex:0 0 auto}
 .cmp-col{display:flex;flex-direction:column;min-width:0;border:1px solid var(--line);
   border-radius:var(--radius);background:var(--bg-panel);overflow:hidden}
 .cmp-col.mem{border-color:rgba(121,215,162,.45)}
@@ -326,8 +344,8 @@ a.btn{text-decoration:none}
 .cmp-keys .cmp-model{width:100%}
 .seg-gone{flex:1}
 .seg-gone.brand{display:flex;align-items:center;gap:8px;min-width:0}
-.brand-ic{height:20px;width:20px;border-radius:5px;flex:0 0 auto;object-fit:contain}
-.brand-wm{height:13px;width:auto;flex:0 0 auto;object-fit:contain}
+/* Same height as the top-bar buttons, natural aspect ratio. */
+.brand-ic,.brand-wm{height:32px;width:auto;flex:0 0 auto;border-radius:7px}
 .cmp-model{flex:1;min-width:0;background:var(--bg-input);border:1px solid transparent;
   border-radius:7px;padding:3px 7px;font-size:11px;color:var(--txt)}
 .cmp-model:focus{border-color:var(--line-2);outline:none}
@@ -351,15 +369,6 @@ a.btn{text-decoration:none}
 .cmp-keys input{background:var(--bg-input);border:1px solid transparent;border-radius:7px;
   padding:3px 7px;font-size:11px;color:var(--txt);min-width:0}
 .cmp-keys input:focus{border-color:var(--line-2);outline:none}
-
-/* ── Right column split top/bottom: brain map + per-turn compare feed ──────────────────────────────────────── */
-.rsplit{display:flex;flex-direction:column;height:100%;min-height:0}
-/* The brain map gets a fixed 42%: it is background information and should not grow with the feed. min-height is a floor
-   so it still looks like a brain when the window is very short. */
-.brainpart{flex:0 0 42%;min-height:220px;position:relative;min-width:0;
-  display:flex;flex-direction:column}
-.feedpart{flex:1 1 auto;display:flex;flex-direction:column;min-height:0;
-  border-top:1px solid var(--line)}
 
 /* ── One turn = the user's line + both arms side by side ─────────────────────────────────────────── */
 .turn{padding:2px 0 10px;border-bottom:1px solid var(--line)}
@@ -450,6 +459,10 @@ a.btn{text-decoration:none}
     <div class="seg-gone brand">
       <img src="./images/unpod-icon.png" alt="" class="brand-ic" />
       <img src="./images/unpod-wordmark.png" alt="Unpod" class="brand-wm" />
+      <label class="brainsel" data-i18n-title="memspace" title="Memory Space">
+        <span class="av" id="spaceAv">D</span>
+        <select id="spaceSel"></select>
+      </label>
     </div>
     <div class="export">
       <a class="btn sm" href="/memories" target="_blank" rel="noopener" data-i18n="memoriesLink">Memories →</a>
@@ -488,20 +501,6 @@ a.btn{text-decoration:none}
     </div>
 
   <div class="controls">
-    <canvas id="orb" width="264" height="264" aria-hidden="true"></canvas>
-
-    <div class="panel p-in">
-      <div class="panel-h" data-i18n="liveInput">Live input</div>
-      <div class="spk" id="spk">
-        <span class="av" id="spkAv">Y</span>
-        <span class="nm" id="spkNm">You</span>
-        <span class="id" id="spkId" data-i18n="voiceMatched">speaker 0 · voice matched</span>
-        <span class="lv" id="spkLv"><i></i><i></i><i></i><i></i><i></i></span>
-      </div>
-      <div class="live-text idle" id="liveInput" data-i18n="waitingYou">Waiting for you to speak…</div>
-      <div class="tags" id="tags"></div>
-    </div>
-
     <div class="panel p-recall">
       <div class="panel-h" data-i18n="topk">Top-K recall</div>
       <div class="recall-cols">
@@ -569,6 +568,34 @@ a.btn{text-decoration:none}
           <pre id="cmpCtx"></pre>
         </details>
       </div>
+    </div>
+  </div>
+  </section>
+
+  <!-- Right: full-height chat. #chatLog is the per-turn compare feed; addTurn() appends into it,
+       so older turns stay above while the brain map on the left lights up. -->
+  <div class="splitter" id="splitter" role="separator" aria-orientation="vertical"
+       tabindex="0" data-i18n-aria="resizeChat" aria-label="Resize chat panel"></div>
+
+  <section class="chatpane">
+    <div class="chat-head">
+      <span class="ttl" id="chatTitle" data-i18n="newChat">New chat</span>
+    </div>
+    <div class="panel p-in">
+      <div class="panel-h" data-i18n="liveInput">Live input</div>
+      <div class="spk" id="spk">
+        <span class="av" id="spkAv">Y</span>
+        <span class="nm" id="spkNm">You</span>
+        <span class="id" id="spkId" data-i18n="voiceMatched">speaker 0 · voice matched</span>
+        <span class="lv" id="spkLv"><i></i><i></i><i></i><i></i><i></i></span>
+      </div>
+      <div class="live-text idle" id="liveInput" data-i18n="waitingYou">Waiting for you to speak…</div>
+      <div class="tags" id="tags"></div>
+    </div>
+    <div class="chat" id="chatLog"></div>
+    <div class="composer">
+      <input id="textIn" class="textin" data-i18n-ph="typeHint"
+             placeholder="Or just type and press Enter" />
       <div class="out-foot">
         <div class="voice" id="voice">
           <div class="ear"><span class="ring"></span></div>
@@ -580,20 +607,6 @@ a.btn{text-decoration:none}
           <button class="btn primary" id="talkBtn" data-i18n="talkStart">Start talking</button>
         </div>
       </div>
-    </div>
-  </div>
-  </section>
-
-  <!-- Right: full-height chat. #chatLog is the per-turn compare feed; addTurn() appends into it,
-       so older turns stay above while the brain map on the left lights up. -->
-  <section class="chatpane">
-    <div class="chat-head">
-      <span class="ttl" id="chatTitle" data-i18n="newChat">New chat</span>
-    </div>
-    <div class="chat" id="chatLog"></div>
-    <div class="composer">
-      <input id="textIn" class="textin" data-i18n-ph="typeHint"
-             placeholder="Or just type and press Enter" />
     </div>
   </section>
 </div>
@@ -635,7 +648,8 @@ a.btn{text-decoration:none}
    ══════════════════════════════════════════════════════════════════════ */
 const I18N = {
   hi: {
-    chat:'चैट', memspace:'मेमोरी स्पेस', liveInput:'लाइव इनपुट',
+    chat:'चैट', memspace:'मेमोरी स्पेस', liveInput:'लाइव इनपुट', resizeChat:'चैट पैनल का आकार बदलें',
+    spaceSwitchLive:'ब्रेन बदलने से पहले सेशन खत्म करें', spaceSwitchFail:'ब्रेन नहीं बदला: {0}',
     dialogue:'बातचीत', searchChats:'चैट खोजें', typeHint:'या टाइप करके Enter दबाएँ',
     topk:'Top-K खोज', aiReply:'AI का जवाब',
     langTitle:'भाषा / Language', dlScopeTitle:'क्या डाउनलोड करना है', langEnglish:'अंग्रेज़ी',
@@ -674,7 +688,7 @@ const I18N = {
     andMore:'…और {0}',
     spaceStat:'{0} तथ्य · {1} प्रोफ़ाइल नोट',
     badgeStat:'{0} (L{1}/R{2})',
-    startHint:'<b>बातचीत शुरू करें</b>यह चैट {0} में है। कुछ बोलें, या बाईं तरफ़ टाइप करें।',
+    startHint:'<b>बातचीत शुरू करें</b>यह चैट {0} में है। कुछ बोलें, या नीचे टाइप करें।',
     createdIn:'{0} में बना। चैट दूसरे स्पेस में नहीं जा सकती।',
     downloadedChat:'बातचीत डाउनलोड हो गई।', downloadedN:'{0} मेमोरी डाउनलोड हुईं ({1}).',
     rbInternalOnly:'इस बार {0} दायाँ-दिमाग़ हिट, सब अंदरूनी नोट',
@@ -687,7 +701,8 @@ const I18N = {
     disconnected:'{0}. नाता टूट गया।',
   },
   en: {
-    chat:'Chat', memspace:'Memory Space', liveInput:'Live input',
+    chat:'Chat', memspace:'Memory Space', liveInput:'Live input', resizeChat:'Resize chat panel',
+    spaceSwitchLive:'End the session before switching brain', spaceSwitchFail:'Could not switch brain: {0}',
     dialogue:'Dialogue', searchChats:'Search chats', typeHint:'Or just type and press Enter',
     topk:'Top-K recall', aiReply:'AI reply',
     langTitle:'Language', dlScopeTitle:'What to download', langEnglish:'English',
@@ -728,7 +743,7 @@ const I18N = {
     andMore:'…and {0} more',
     spaceStat:'{0} facts · {1} profile notes',
     badgeStat:'{0} (L{1}/R{2})',
-    startHint:'<b>Start a conversation</b>This chat lives in {0}. Say something, or type on the left.',
+    startHint:'<b>Start a conversation</b>This chat lives in {0}. Say something, or type below.',
     createdIn:'Created in {0}. A chat cannot move to another space.',
     downloadedChat:'Conversation downloaded.', downloadedN:'Downloaded {0} memories ({1}).',
     rbInternalOnly:'{0} right-brain hits this turn, all internal notes',
@@ -1462,6 +1477,21 @@ function fillSpaceSel(){
     if(sid===activeSpace) o.selected=true;
     sel.appendChild(o);
   }
+  if($('spaceAv')) $('spaceAv').textContent=(SPACES[activeSpace]?.name||'?').charAt(0).toUpperCase();
+}
+/* Switch brain: the backend rebinds its active space first, then the page starts a fresh chat in it and
+   reloads that brain's memories. Refused mid-session so a live voice turn never lands in the wrong brain. */
+async function switchSpace(sid){
+  if(sid===activeSpace) return;
+  if(live){ toast(i18n('spaceSwitchLive')); fillSpaceSel(); return; }
+  try{
+    const r=await fetch('/api/spaces/'+encodeURIComponent(sid)+'/use',{method:'POST'});
+    if(!r.ok) throw new Error((await r.json().catch(()=>({}))).detail||('HTTP '+r.status));
+  }catch(e){ toast(i18n('spaceSwitchFail', e.message)); fillSpaceSel(); return; }
+  ensureSpaceObj(sid);
+  createSession(sid);
+  fillSpaceSel();
+  loadMemories();
 }
 if($('spaceSel')) $('spaceSel').addEventListener('change',e=>switchSpace(e.target.value));
 
@@ -1717,7 +1747,6 @@ function cmpApply(d){
   }
   $('cmpTg').classList.toggle('on',CMP.on);
   $('cmp').hidden=!CMP.on;
-  document.querySelector('.p-out').classList.toggle('cmp-on',CMP.on);
   // A compare turn sends no answer_*, so the single-arm box would sit on "No reply yet" forever; keeping it only misleads.
   $('reply').hidden=CMP.on;
   renderCmp();
@@ -2118,6 +2147,31 @@ $('btnNew').addEventListener('click',()=>{
    so there is no longer a need for a switch control, or to pin the container to one screen. */
 setTimeout(window.VMBrain.resize,60);
 
+/* ── Pane slider ─────────────────────────────────────────────────────────── */
+(function(){
+  const app=$('app'), bar=$('splitter'), KEY='vm-chat-w';
+  // Chat keeps at least 340px, the stage at least 480px. The width is a per-viewer convenience, so localStorage.
+  const setW=w=>{ w=Math.round(Math.max(340,Math.min(w,innerWidth-480)));
+    app.style.setProperty('--chat-w',w+'px'); return w; };
+  const save=w=>{ try{ localStorage.setItem(KEY,String(w)); }catch(e){} };
+  const cur=()=>document.querySelector('.chatpane').getBoundingClientRect().width;
+  try{ const w=+localStorage.getItem(KEY); if(w) setW(w); }catch(e){}
+  bar.addEventListener('pointerdown',e=>{
+    e.preventDefault(); bar.setPointerCapture(e.pointerId); document.body.classList.add('dragging');
+    const right=app.getBoundingClientRect().right-12;       // chat's right edge (app padding)
+    const move=ev=>setW(right-ev.clientX-6);
+    const up=()=>{ bar.removeEventListener('pointermove',move); bar.removeEventListener('pointerup',up);
+      document.body.classList.remove('dragging'); save(cur()); };
+    bar.addEventListener('pointermove',move); bar.addEventListener('pointerup',up);
+  });
+  bar.addEventListener('keydown',e=>{
+    const d=e.key==='ArrowLeft'?24:e.key==='ArrowRight'?-24:0; if(!d) return;
+    e.preventDefault(); save(setW(cur()+d));
+  });
+  bar.addEventListener('dblclick',()=>{ app.style.removeProperty('--chat-w');
+    try{ localStorage.removeItem(KEY); }catch(e){} });
+})();
+
 /* ── Export ─────────────────────────────────────────────────────────── */
 function saveFile(text,name,mime){
   const url=URL.createObjectURL(new Blob([text],{type:mime}));
@@ -2153,7 +2207,7 @@ $('dlBtn').addEventListener('click',async()=>{
   toast(i18n('downloadedN', n, sp.name));
 });
 
-/* ── Voice state / waveform / level / orb ─────────────────────────────────── */
+/* ── Voice state / waveform / level ───────────────────────────────────────── */
 const voice=$('voice'), voiceLab=$('voiceLab');
 const LAB={idle:i18n('idle'),user:i18n('listening'),ai:i18n('replying'),paused:i18n('paused')};
 function setVoice(s){
@@ -2182,67 +2236,6 @@ new ResizeObserver(sizeWave).observe(wave); sizeWave();
 })();
 const lvBars=Array.prototype.slice.call($('spkLv').querySelectorAll('i'));
 setInterval(()=>{ lvBars.forEach(b=>b.style.height=(lvOn?4+Math.random()*10:4)+'px'); },110);
-
-const ORB={strands:3,lines:7,points:88,spacing:.06,base:.34,shrink:.45,
-  idleAmp:.14,liveAmp:1.0,idleSpeed:.10,liveSpeed:.5,rot:.5,liveRot:1.2,
-  spread:.3,lw:1.1,squish:.88,halo:5,haloA:.34,mid:2,midA:.42,
-  dark:[58,116,220],light:[150,205,245]};
-let orbLevel=0,orbPhase=0,orbRot=0;
-const orbGlow=document.createElement('canvas');
-function orbPoint(th,t,si,R,a,sq){
-  const ph=(si/ORB.strands)*Math.PI*2;
-  const r=R*(1+a*(.4*Math.sin(3*th+ph+t)+.24*Math.sin(5*th-ph*2+t*.6)+.16*Math.sin(2*th+ph*1.5-t*1.4)));
-  const wob=.09*R*a*Math.sin(4*th-t*1.8+ph);
-  return {x:r*Math.cos(th)+wob*Math.cos(th+Math.PI/2), y:r*Math.sin(th)*sq+wob*Math.sin(th+Math.PI/2)};
-}
-(function startOrb(){
-  const cvs=$('orb'), c=cvs.getContext('2d'), W=cvs.width, H=cvs.height;
-  orbGlow.width=W; orbGlow.height=H; const g=orbGlow.getContext('2d');
-  let last=performance.now(), acc=0;
-  (function f(now){
-    requestAnimationFrame(f);
-    const dt=Math.min((now-last)/1000,.1); last=now; acc+=dt;
-    if(orbLevel<.03&&acc<.05) return; acc=0;
-    const want=aiSpeaking?.55:(lvOn?.85:0);
-    orbLevel+=(want-orbLevel)*(want>orbLevel?.2:.05);
-    const a=ORB.idleAmp+(ORB.liveAmp-ORB.idleAmp)*orbLevel;
-    const sq=1-(1-ORB.squish)*orbLevel;
-    orbPhase+=dt*(ORB.idleSpeed+(ORB.liveSpeed-ORB.idleSpeed)*orbLevel);
-    orbRot+=dt*(ORB.rot+(ORB.liveRot-ORB.rot)*orbLevel);
-    const R=Math.min(W,H)*ORB.base*(1-ORB.shrink*orbLevel);
-    g.clearRect(0,0,W,H); g.save(); g.translate(W/2,H/2); g.rotate(orbRot);
-    const grad=g.createRadialGradient(0,0,0,0,0,R*2.1);
-    grad.addColorStop(0,'rgba('+ORB.dark+',1)');
-    grad.addColorStop(.55,'rgba('+ORB.dark+',1)');
-    grad.addColorStop(1,'rgba('+ORB.light+',1)');
-    const M=ORB.lines, half=(M-1)/2, sp=R*ORB.spacing;
-    g.strokeStyle=grad; g.lineWidth=ORB.lw; g.lineJoin='round'; g.lineCap='round';
-    for(let si=0;si<ORB.strands;si++){
-      const spin=orbRot*ORB.spread*si, cs=Math.cos(spin), sn=Math.sin(spin);
-      for(let k=0;k<M;k++){
-        const Rk=R+(k-half)*sp, edge=1-Math.abs(k-half)/(half+.001);
-        g.beginPath();
-        for(let i=0;i<=ORB.points;i++){
-          const th=(i/ORB.points)*Math.PI*2, p=orbPoint(th,orbPhase,si,Rk,a,sq);
-          const x=p.x*cs-p.y*sn, y=p.x*sn+p.y*cs;
-          i?g.lineTo(x,y):g.moveTo(x,y);
-        }
-        g.globalAlpha=.5+.5*edge; g.stroke();
-      }
-    }
-    g.globalAlpha=1; g.restore();
-    c.clearRect(0,0,W,H); c.save(); c.translate(W/2,H/2);
-    const bg=c.createRadialGradient(0,0,0,0,0,R*2.1);
-    bg.addColorStop(0,'rgba(60,130,255,'+(.2+.28*orbLevel)+')');
-    bg.addColorStop(.5,'rgba(30,70,190,'+(.09+.13*orbLevel)+')');
-    bg.addColorStop(1,'rgba(0,0,0,0)');
-    c.fillStyle=bg; c.beginPath(); c.arc(0,0,R*2.1,0,Math.PI*2); c.fill(); c.restore();
-    c.save(); c.globalCompositeOperation='lighter';
-    c.filter='blur('+ORB.halo+'px)'; c.globalAlpha=ORB.haloA; c.drawImage(orbGlow,0,0);
-    c.filter='blur('+ORB.mid+'px)';  c.globalAlpha=ORB.midA;  c.drawImage(orbGlow,0,0);
-    c.filter='none'; c.globalAlpha=1; c.drawImage(orbGlow,0,0); c.restore();
-  })(last);
-})();
 
 /* ── One Q&A turn (shared by simulation / typing) ──────────────────────────────────── */
 let busy=false, turnSess=null;
