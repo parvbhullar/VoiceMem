@@ -56,6 +56,7 @@ dependencies = [
     "funasr",             # streaming ASR (default)
     "modelscope",         # how funasr fetches models
     "sherpa-onnx",        # VAD + speaker ID + fallback ASR (pure onnx)
+    "sherpa-onnx-core",   # ships libonnxruntime.dylib; uv misses it (sdist declares no deps)
     # Local E5 (memory vectors / slot classification). Floor 5.2.3 matches what
     # super.ai/super pins, so installing into that env does not move the package.
     # The <6 ceiling states a constraint pip would otherwise have to discover by
