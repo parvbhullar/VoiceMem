@@ -2134,6 +2134,10 @@ async def _remember_background(pending, reply: str, owner: dict,
 
 def queue_remember_turn(pending, reply: str, owner: dict,
                         history_turn_id: str = "", memory_vm=None) -> None:
+    if os.environ.get("SUPERMEM_INGEST", "1") == "0":
+        # Read-only brain: evaluation runs ask the same QA bank against a fixed memory;
+        # writing every question and answer back would change the brain under test.
+        return
     memory_vm = memory_vm or vm
     task = asyncio.create_task(
         _remember_background(pending, reply, owner, history_turn_id, memory_vm))

@@ -243,6 +243,15 @@ class ElevenLabsScribeTest(unittest.TestCase):
         asr._api_transcribe(b"RIFF")
         self.assertIn('name="language_code"', seen[0].content.decode("latin-1"))
 
+    def test_keyterms_are_sent_as_repeated_fields(self):
+        seen = []
+        asr = self._asr({"text": "CIBIL"}, seen)
+        asr.keyterms = ["CIBIL", "Raghavan"]
+        asr._api_transcribe(b"RIFF")
+        body = seen[0].content.decode("latin-1")
+        self.assertEqual(body.count('name="keyterms"'), 2)
+        self.assertIn("Raghavan", body)
+
     def test_streaming_contract_is_inherited(self):
         asr = ElevenLabsScribeASR(api_key="k", transcribe=lambda w: "मैं रिया हूँ")
         asr.feed(_audio(0.5))

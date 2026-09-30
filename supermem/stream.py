@@ -277,6 +277,8 @@ class VoiceStream:
         self._pcm = []             # this turn's audio (16k mono), for StreamState's on-demand perception
         self._pcm_len = 0          # samples accumulated; over the cap the oldest are dropped (see _MAX_TURN_S)
         self._preroll = []         # a short stretch before speech onset, prepended to the turn (see _PREROLL_SAMPLES)
+        self._voice_end_t = None   # [lat] when voice last stopped this turn
+        self._text_t = None        # [lat] when the first transcript text arrived
 
     @property
     def asr(self):
@@ -343,6 +345,8 @@ class VoiceStream:
         self._spec, self._spec_text, self._last_memory = None, "", None
         self._pcm, self._pcm_len = [], 0
         self._preroll = []
+        # [lat] turn breakdown: when voice last stopped, when the first word of text arrived.
+        self._voice_end_t, self._text_t = None, None
 
     async def feed_text(self, text) -> Turn:
         """Typed turn: speculate once and return a Turn directly."""
@@ -404,6 +408,13 @@ class VoiceStream:
         audible = speaking or (
             not self._text.strip() and self._spoke
             and float(np.sqrt(np.mean(frame * frame))) >= SOUND_LEVEL)
+        now = time.monotonic()
+        if speaking:
+            self._voice_end_t = None
+        elif self._spoke and self._voice_end_t is None:
+            self._voice_end_t = now
+        if self._text.strip() and self._text_t is None:
+            self._text_t = now
         if audible:
             if speaking and self._silence > 0 and self._spec:   # barge-in: speaking again -> discard this speculation
                 self._spec.cancel(); self._spec, self._spec_text = None, ""
@@ -431,8 +442,19 @@ class VoiceStream:
         need_silence = self.confirm_s if self._text.strip() else SOUND_ONLY_SILENCE_S
         if self._spoke and self._silence >= need_silence and (self._text.strip() or sound_only):
             flush = getattr(self._asr, "flush", None)      # chunked ASR (paraformer) pads the partial
+            t_flush = time.monotonic()
             if flush is not None:                          # trailing chunk with zeros and emits it
-                self._text = flush() or self._text
+                # Off the event loop: an API-backed ASR's flush is a network round trip
+                # (1.4s+ for Scribe), and doing it inline froze the whole socket meanwhile.
+                self._text = (await asyncio.to_thread(flush)) or self._text
+            t_done = time.monotonic()
+            ve = self._voice_end_t or t_flush
+            # Where the gap between "stopped talking" and "reply starts" goes. Reading order:
+            # waiting for the first transcript, then the final transcription (blocking).
+            print(f"[lat] turn: voice end -> first text "
+                  f"{max(0.0, ((self._text_t or ve) - ve)) * 1000:.0f}ms, -> flush start "
+                  f"{(t_flush - ve) * 1000:.0f}ms, flush {(t_done - t_flush) * 1000:.0f}ms, "
+                  f"total {(t_done - ve) * 1000:.0f}ms, audio {self._pcm_len / 16000:.1f}s", flush=True)
             turn = await self._confirm()                   # VAD confirmed finished -> hand over precomputed memory
             pcm = np.concatenate(self._pcm) if self._pcm else None
             self._reset_turn()

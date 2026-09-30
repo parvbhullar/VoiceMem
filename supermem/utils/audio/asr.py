@@ -375,6 +375,8 @@ class ElevenLabsScribeASR(OpenAIStreamingASR):
         self.api_key = api_key or os.environ.get("ELEVENLABS_API_KEY", "")
         self._http = client
         self.last_language = ""
+        # Domain words Scribe should expect ("CIBIL" came back as "Sybil" without them).
+        self.keyterms = [k.strip() for k in os.environ.get("SUPERMEM_ASR_KEYTERMS", "").split(",") if k.strip()]
 
     def _api_transcribe(self, wav: bytes) -> str:
         if self._http is None:
@@ -383,8 +385,19 @@ class ElevenLabsScribeASR(OpenAIStreamingASR):
         data = {"model_id": self.model, "tag_audio_events": "false"}
         if self.language:
             data["language_code"] = self.language
-        r = self._http.post(self.URL, headers={"xi-api-key": self.api_key}, data=data,
-                            files={"file": ("turn.wav", wav, "audio/wav")})
+        if self.keyterms:
+            data["keyterms"] = self.keyterms            # a list is sent as repeated form fields
+        # Scribe mostly answers in 1-2 s but spiked to 17 s; a bounded wait plus one retry
+        # keeps a slow call from holding the whole turn.
+        for attempt in (0, 1):
+            try:
+                r = self._http.post(self.URL, headers={"xi-api-key": self.api_key}, data=data,
+                                    files={"file": ("turn.wav", wav, "audio/wav")},
+                                    timeout=float(os.environ.get("SUPERMEM_ASR_TIMEOUT_S", "8")))
+                break
+            except Exception:  # noqa: BLE001 -- httpx timeout / network: retry once, then give up
+                if attempt:
+                    raise
         if r.status_code != 200:
             raise RuntimeError(f"Scribe HTTP {r.status_code}: {r.text[:200]}")
         j = r.json()

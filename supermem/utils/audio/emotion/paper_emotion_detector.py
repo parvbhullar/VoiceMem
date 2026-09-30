@@ -124,6 +124,12 @@ class PaperAlignedEmotionDetector:
             return self._attributor
         if self._attributor_failed:
             return None
+        if os.environ.get("SUPERMEM_OMNI_ATTRIBUTION", "1") == "0":
+            # Off by switch: same fallback as a failed load. On a CPU-only box the 3B Omni
+            # model loads offloaded to disk and one attribution runs for minutes, holding
+            # ~2 cores the whole time -- every STT call and reply in the demo slowed with it.
+            self._attributor_failed = True
+            return None
         try:
             from supermem.utils.audio.emotion.attribution_qwen_omni import QwenOmniEmotionAttributor
 
