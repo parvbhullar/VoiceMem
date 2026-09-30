@@ -196,6 +196,27 @@ def _close_on_exit(mem0_instance) -> None:
     atexit.register(_close)
 
 
+def evict_client(memory_root) -> None:
+    """Drop this space's cached mem0 client and close it (Qdrant lock + history sqlite).
+
+    Call before deleting a space's files. The cache outlives the space, so without this a
+    space re-created under the same name reuses the old client: it serves the deleted
+    vectors from RAM and fails every write with "attempt to write a readonly database".
+    """
+    key = str((Path(memory_root) / "vectors").resolve())   # same key as __init__ builds
+    with _MEM0_CLIENT_CACHE_LOCK:
+        client = _MEM0_CLIENT_CACHE.pop(key, None)
+    if client is None:
+        return
+    for close in (lambda: client.vector_store.client.close(), getattr(client, "close", None)):
+        if close is None:
+            continue
+        try:
+            close()
+        except Exception:
+            pass
+
+
 class Mem0BackendStore:
     """Drop-in replacement for ``LocalMemoryStore`` backed by real ``mem0.Memory``.
 

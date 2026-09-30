@@ -296,6 +296,12 @@ class Orchestrator:
 
         self._cache: dict[str, Any] = {}
         self._lock = threading.Lock()
+        # _lock only guards building the lazy singletons in _cache, and _finish_ingest takes it
+        # itself -- never hold it around an ingest (deadlock). _write_lock serialises the slow
+        # write path per instance: the voice loop's background ingest threads, the /memories
+        # job worker, and the page's edit/delete all go through it.
+        self._write_lock = threading.RLock()
+        self._retired = False      # set by retire(): this brain's files were wiped
         self._ingest_count = 0
 
         # Conversation exchanges: storing only the user's half leaves "let's do it your way" dangling. The reply layer calls
@@ -1095,6 +1101,7 @@ class Orchestrator:
         """
         import time
 
+        self._check_live()        # the fast path below writes to sqlite too
         ts = observed_at or time.strftime("%H:%M:%S")
 
         if agent_reply is None:
@@ -1172,6 +1179,7 @@ class Orchestrator:
                 "facts_count":         None,
                 "memory_ids":          [],
                 "affect":              None,
+                "error":               None,
                 "triggered_reminders": [],
                 "proactive_memories":  [],
                 "current_scene":       scene_tag or "",
@@ -1216,7 +1224,29 @@ class Orchestrator:
         return self._get_repo().append_extracted(
             extracted, user_id=self._user_id, extra_metadata=extra_metadata)
 
+    _retired = False               # class default, so instances built with __new__ have it too
+
+    def retire(self) -> None:
+        """Refuse every later write: the caller is about to delete this brain's files.
+
+        Waits for the write in flight (it holds _write_lock), then flips the flag, so a
+        background ingest still queued on the lock cannot write into a wiped or re-created
+        directory through this stale instance.
+        """
+        with self._write_lock:
+            self._retired = True
+
+    def _check_live(self) -> None:
+        if self._retired:
+            raise RuntimeError("This brain was cleared or deleted.")
+
     def _finish_ingest(self, ctx: dict) -> dict:
+        """Serialised entry to _finish_ingest_locked (see _write_lock in __init__)."""
+        with self._write_lock:
+            self._check_live()
+            return self._finish_ingest_locked(ctx)
+
+    def _finish_ingest_locked(self, ctx: dict) -> dict:
         """The fact extraction + graph write (left/right brain) part of Ingest(), split out so that
         with async_facts=True it can run on a background thread."""
         text = ctx["text"]; speaker = ctx["speaker"]; emotion = ctx["emotion"]
@@ -1423,6 +1453,10 @@ class Orchestrator:
             "memory_ids":          result.memory_ids,
             "persistent_memory_created": bool(result.memory_ids or heartnote_id),
             "affect":              result.affect,
+            # Extraction swallows its failures (missing key, network) and returns 0 facts;
+            # surface the reason so callers like the /memories job can tell "nothing to store"
+            # from "could not store".
+            "error":               getattr(result, "error", None),
             "triggered_reminders": triggered_reminders,
             "proactive_memories":  proactive_memories,
             "current_scene":       scene_tag or "",

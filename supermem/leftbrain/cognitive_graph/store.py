@@ -721,7 +721,8 @@ class CognitiveGraphStore:
                    (id, user_id, slot, memory_type, content, confidence, sensitivity, ttl, created_at, updated_at)
                    VALUES (?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(id) DO UPDATE SET
-                     slot=excluded.slot, confidence=excluded.confidence, updated_at=excluded.updated_at""",
+                     slot=excluded.slot, content=excluded.content,
+                     confidence=excluded.confidence, updated_at=excluded.updated_at""",
                 (memory_id, user_id, slot.value, memory_type, content,
                  confidence, sensitivity, ttl, now, now),
             )
@@ -1067,3 +1068,17 @@ class CognitiveGraphStore:
             c.execute("DELETE FROM entities WHERE user_id=?", (user_id,))
             c.execute("DELETE FROM slot_profiles WHERE user_id=?", (user_id,))
             c.execute("DELETE FROM affective_edges WHERE user_id=?", (user_id,))
+
+    def unlink_memory(self, memory_id: str) -> None:
+        """Drop this memory's entity links; ingest_annotated_fact re-creates them on edit."""
+        with self._conn() as c:
+            c.execute("DELETE FROM entity_memory_links WHERE memory_id=?", (memory_id,))
+
+    def delete_memory(self, memory_id: str) -> None:
+        """Remove one memory's graph record and entity links.
+
+        Entities and edges stay: other memories may share them.
+        """
+        with self._conn() as c:
+            c.execute("DELETE FROM entity_memory_links WHERE memory_id=?", (memory_id,))
+            c.execute("DELETE FROM memories WHERE id=?", (memory_id,))

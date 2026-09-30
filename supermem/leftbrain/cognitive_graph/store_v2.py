@@ -340,5 +340,14 @@ class CognitiveGraphStoreV2(CognitiveGraphStore):
             c.execute("DELETE FROM slot_summaries WHERE user_id=?", (user_id,))
         super().delete_user(user_id)
 
+    def delete_memory(self, memory_id: str) -> None:
+        """Delete one memory's V2 tags, then its base graph rows.
+
+        Tags go first: memory_tags.memory_id is a foreign key to memories(id).
+        """
+        with self._conn() as c:
+            c.execute("DELETE FROM memory_tags WHERE memory_id=?", (memory_id,))
+        super().delete_memory(memory_id)
+
 
 __all__ = ["CognitiveGraphStoreV2"]

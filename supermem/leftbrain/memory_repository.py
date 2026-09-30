@@ -194,6 +194,10 @@ class LeftBrainMemoryRepository:
                 try:
                     annotated = self._cognitive_annotator.annotate([new_text])
                     if annotated:
+                        # A failed LLM call also comes back as one fact with no entities, so only
+                        # replace the links when the new annotation has some; keep the old ones otherwise.
+                        if annotated[0].entities:
+                            self._cognitive_store.unlink_memory(memory_id)
                         self._cognitive_store.ingest_annotated_fact(user_id, annotated[0], [memory_id])
                 except Exception as _cog_err:
                     import logging
@@ -201,13 +205,22 @@ class LeftBrainMemoryRepository:
         return updated
 
     def delete_memory(self, memory_id: str) -> bool:
-        """Delete a single memory. Syncs the JSON mirror."""
+        """Delete a single memory. Syncs the JSON mirror and the cognitive graph."""
         deleted = self._vector_store.delete_memory(memory_id)
         if deleted:
             store = self.load_json_store()
             results = [obj for obj in store["results"]
                        if not (isinstance(obj, dict) and str(obj.get("id", "")) == memory_id)]
             self._write_json_store(results)
+            # The graph's memories row feeds the KV cartridge, replay and slot summaries
+            # directly; leaving it would keep a deleted fact alive there. The vector store
+            # stays the source of truth, so a graph failure is logged, not raised.
+            if self._cognitive_store is not None:
+                try:
+                    self._cognitive_store.delete_memory(memory_id)
+                except Exception as _cog_err:
+                    import logging
+                    logging.getLogger(__name__).warning("cognitive graph delete failed: %s", _cog_err)
         return deleted
 
     def append_extracted(
