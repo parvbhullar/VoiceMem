@@ -1,0 +1,717 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>CacheBlend × TurboQuant for Unpod</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style>
+/* Layout: single reading column (max 1080px) in Unpod's deck idiom — mono eyebrows, serif headlines, violet for CacheBlend, amber for TurboQuant */
+:root{
+  --bg:#FAF9FD; --surface:#FFFFFF; --ink:#17142B; --muted:#5F5A7A; --line:#DEDAEE;
+  --cb:#5B34F0; --cb-soft:#E6DFFF; --cb-ink:#FFFFFF;
+  --tq:#B8650F; --tq-soft:#FBE9D4;
+  --ok:#1E7F55; --bad:#B4323A;
+  --code:#F2F0FA;
+  --f-display:"Source Serif 4", Georgia, "Times New Roman", serif;
+  --f-body:"IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono:"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0F0D1F; --surface:#17142C; --ink:#ECEAF8; --muted:#A39FC2; --line:#2D2949;
+  --cb:#9C85FF; --cb-soft:#2B2254; --cb-ink:#0F0D1F;
+  --tq:#F0A55B; --tq-soft:#3A2A17; --ok:#4FC28C; --bad:#F07A80; --code:#1D1936; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0F0D1F; --surface:#17142C; --ink:#ECEAF8; --muted:#A39FC2; --line:#2D2949;
+  --cb:#9C85FF; --cb-soft:#2B2254; --cb-ink:#0F0D1F;
+  --tq:#F0A55B; --tq-soft:#3A2A17; --ok:#4FC28C; --bad:#F07A80; --code:#1D1936; color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--f-body);font-size:16px;line-height:1.6;margin:0}
+.wrap{max-width:1080px;margin:0 auto;padding-inline:20px;padding-block:48px 80px;display:flex;flex-direction:column;gap:72px}
+h1,h2,h3{font-family:var(--f-display);font-weight:400;line-height:1.15;text-wrap:balance;margin:0}
+h1{font-size:clamp(2rem,4.6vw,3.1rem)}
+h2{font-size:clamp(1.55rem,3vw,2.1rem)}
+h3{font-size:1.25rem}
+p{margin:0;max-width:68ch}
+.eyebrow{font-family:var(--f-mono);font-size:.74rem;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.eyebrow.cb{color:var(--cb)} .eyebrow.tq{color:var(--tq)}
+section{display:flex;flex-direction:column;gap:22px}
+.lede{font-size:1.1rem;color:var(--muted)}
+.cb-t{color:var(--cb);font-weight:600} .tq-t{color:var(--tq);font-weight:600}
+code,.mono{font-family:var(--f-mono);font-size:.88em}
+
+.glance{display:grid;grid-template-columns:1fr 1fr;gap:0;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.glance>div{padding:22px 24px 24px 0;display:flex;flex-direction:column;gap:10px;min-width:0}
+.glance>div+div{padding-left:24px;border-left:1px solid var(--line)}
+.glance .big{font-family:var(--f-display);font-size:1.45rem;line-height:1.25}
+.glance dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:6px 0 0;font-size:.92rem}
+.glance dt{font-family:var(--f-mono);font-size:.74rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding-top:3px}
+.glance dd{margin:0}
+.formula{font-family:var(--f-mono);font-size:.85rem;background:var(--code);padding:10px 14px;border-radius:4px;overflow-x:auto;white-space:nowrap}
+
+/* demo panels */
+.demo{background:var(--surface);border:1px solid var(--line);border-radius:6px;display:grid;grid-template-columns:minmax(0,1fr)}
+.demo .stage{padding:18px;border-bottom:1px solid var(--line);min-width:0;display:flex;flex-direction:column;gap:12px}
+.demo .stage svg{width:100%;height:auto;display:block}
+.demo .side{padding:18px 20px;display:flex;flex-direction:column;gap:14px;min-width:0}
+.head-row{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}
+.controls{display:flex;gap:8px;flex-wrap:wrap}
+.controls button{font-family:var(--f-mono);font-size:.78rem;padding:6px 12px;border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:4px;cursor:pointer}
+.controls button:hover{border-color:var(--muted)}
+.controls button:focus-visible{outline:2px solid var(--cb);outline-offset:2px}
+.controls button.primary{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.steps{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:2px 16px;counter-reset:s}
+.steps li{counter-increment:s;display:grid;grid-template-columns:26px 1fr;gap:8px;font-size:.88rem;line-height:1.45;padding:7px 8px;border-radius:4px;color:var(--muted);cursor:pointer}
+.steps li::before{content:counter(s);font-family:var(--f-mono);font-size:.74rem;padding-top:1px}
+.steps li.on{background:var(--code);color:var(--ink)}
+.demo.cbd .steps li.on::before{color:var(--cb)} .demo.tqd .steps li.on::before{color:var(--tq)} .demo.intd .steps li.on::before{color:var(--cb)}
+.steps li:focus-visible{outline:2px solid var(--cb)}
+.caption{font-size:.95rem;min-height:3.2em}
+
+svg text{font-family:var(--f-mono);fill:var(--muted)}
+svg .ink{fill:var(--ink)}
+svg .lbl{font-size:11px}
+svg .sm{font-size:10px}
+svg .ttl{font-family:var(--f-body);font-size:13px;font-weight:600;fill:var(--ink)}
+
+/* flowcharts */
+.flows{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.flows figure{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:16px;display:flex;flex-direction:column;gap:10px;min-width:0}
+.flows .mwrap{overflow-x:auto}
+.flows pre.mermaid{margin:0;background:none;font-size:13px}
+
+/* tables */
+.tbl{overflow-x:auto;border-top:1px solid var(--ink)}
+table{border-collapse:collapse;width:100%;min-width:720px;font-size:.92rem}
+th,td{text-align:left;vertical-align:top;padding:12px 14px 12px 0;border-bottom:1px solid var(--line)}
+thead th{font-family:var(--f-mono);font-size:.74rem;letter-spacing:.1em;text-transform:uppercase;font-weight:500;color:var(--muted)}
+tbody th{font-family:var(--f-mono);font-weight:500;font-size:.78rem;letter-spacing:.04em;color:var(--muted);width:17%}
+td{width:41.5%}
+
+/* calculator */
+.calc{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:20px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:28px}
+.calc .inputs{display:flex;flex-direction:column;gap:16px}
+.calc label{font-family:var(--f-mono);font-size:.74rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);display:flex;flex-direction:column;gap:6px}
+.calc select,.calc input[type=range]{font-family:var(--f-body);font-size:.95rem;width:100%}
+.calc select{padding:6px 8px;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:4px}
+.calc input[type=range]{accent-color:var(--cb)}
+.calc .val{font-family:var(--f-display);font-size:1.4rem;color:var(--ink);letter-spacing:0;text-transform:none}
+.bars{display:flex;flex-direction:column;gap:12px}
+.bar{display:grid;grid-template-columns:110px 1fr 150px;gap:12px;align-items:center;font-size:.88rem}
+.bar .name{font-family:var(--f-mono);font-size:.78rem}
+.bar .track{height:18px;background:var(--code);border-radius:3px;overflow:hidden}
+.bar .fill{height:100%;border-radius:3px;transition:width .4s ease}
+.bar .num{font-family:var(--f-mono);font-size:.8rem;font-variant-numeric:tabular-nums;text-align:right}
+.note{font-size:.82rem;color:var(--muted)}
+
+/* integration */
+.points{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0;border-top:1px solid var(--line)}
+.points>div{padding:18px 20px 18px 0;display:flex;flex-direction:column;gap:8px;min-width:0}
+.points>div+div{padding-left:20px;border-left:1px solid var(--line)}
+.points .tag{font-family:var(--f-mono);font-size:.72rem;letter-spacing:.1em;text-transform:uppercase}
+.points p{font-size:.92rem}
+pre.code{margin:0;background:var(--code);border-radius:6px;padding:16px 18px;overflow-x:auto;font-family:var(--f-mono);font-size:.82rem;line-height:1.55;color:var(--ink)}
+pre.code .c{color:var(--muted)}
+.two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:28px}
+.two>div{display:flex;flex-direction:column;gap:12px;min-width:0}
+ul.plain{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:8px;font-size:.93rem}
+ul.plain li{max-width:66ch}
+.phase{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.phase>div{border-top:2px solid var(--ink);padding-top:12px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.phase .when{font-family:var(--f-mono);font-size:.74rem;color:var(--muted);letter-spacing:.08em;text-transform:uppercase}
+.phase p{font-size:.92rem}
+.src{font-size:.85rem;color:var(--muted);display:flex;flex-direction:column;gap:4px;border-top:1px solid var(--line);padding-top:16px}
+.src a{color:var(--cb)}
+
+@media (max-width:820px){
+  .steps{grid-template-columns:1fr}
+  .flows,.two,.phase{grid-template-columns:1fr}
+  .calc{grid-template-columns:1fr}
+  .points{grid-template-columns:1fr}
+  .points>div+div{padding-left:0;border-left:0;border-top:1px solid var(--line)}
+}
+@media (max-width:620px){
+  .glance{grid-template-columns:1fr}
+  .glance>div+div{padding-left:0;border-left:0;border-top:1px solid var(--line)}
+  .bar{grid-template-columns:78px 1fr 96px;gap:8px}
+  .wrap{gap:56px}
+}
+@media (prefers-reduced-motion:reduce){.bar .fill{transition:none}}
+</style>
+
+<div class="wrap">
+
+<header style="display:flex;flex-direction:column;gap:18px">
+  <div class="eyebrow">KV cache · Unpod context engine · research note</div>
+  <h1><span class="cb-t" style="font-weight:400">CacheBlend</span> decides which KV to recompute. <span class="tq-t" style="font-weight:400">TurboQuant</span> decides how many bits each KV value keeps.</h1>
+  <p class="lede">They attack different bottlenecks, so they stack. CacheBlend cuts prefill compute when reused context is not the prefix. TurboQuant cuts the bytes every cached token costs in HBM, DRAM, NVMe and on the wire. Unpod's KV cartridges need both: CacheBlend to attach them anywhere in the prompt, TurboQuant to keep millions of them cheap and fast to move.</p>
+</header>
+
+<section aria-labelledby="g1">
+  <h2 id="g1" class="eyebrow" style="font-family:var(--f-mono);font-size:.74rem">At a glance</h2>
+  <div class="glance">
+    <div>
+      <div class="eyebrow cb">CacheBlend · compute axis</div>
+      <div class="big">Reuse precomputed KV for chunks anywhere in the prompt, then recompute only the ~15% of tokens whose KV drifted most.</div>
+      <div class="formula">KV(B | A) ≈ KV(B) with HKVD tokens recomputed</div>
+      <dl>
+        <dt>Fixes</dt><dd>Time-to-first-token, GPU-seconds per prefill</dd>
+        <dt>Acts on</dt><dd>Prefill, once per request</dd>
+        <dt>Reported</dt><dd>2.2–3.3× lower TTFT, 2.8–5× throughput vs full recompute</dd>
+      </dl>
+    </div>
+    <div>
+      <div class="eyebrow tq">TurboQuant · memory axis</div>
+      <div class="big">Rotate each K/V vector, quantize it to ~3 bits with no stored scales, and correct the residual with one sign bit.</div>
+      <div class="formula">16 bits → (b−1)-bit PolarQuant + 1-bit QJL</div>
+      <dl>
+        <dt>Fixes</dt><dd>KV memory size and bandwidth, decode speed, concurrency</dd>
+        <dt>Acts on</dt><dd>Every KV write and read; also at-rest storage</dd>
+        <dt>Reported</dt><dd>≥6× smaller KV, 3-bit with no measured accuracy loss; 4-bit up to 8× faster attention logits on H100</dd>
+      </dl>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CacheBlend animation ============ -->
+<section aria-labelledby="s-cb">
+  <div class="eyebrow cb">Architecture animation · 01</div>
+  <h2 id="s-cb">CacheBlend: fuse cartridges, repair cross-attention selectively</h2>
+  <p>Each chunk's KV was computed alone, so it never attended to the chunks before it. Full reuse is fast but wrong; full recompute is right but slow. CacheBlend recomputes only the high-KV-deviation (HKVD) tokens, narrowing the set layer by layer, and hides that work behind loading the next layer from CPU or NVMe.</p>
+  <div class="demo cbd" id="demo-cb">
+    <div class="stage">
+      <svg viewBox="0 0 760 350" role="img" aria-labelledby="cbT">
+        <title id="cbT">CacheBlend: KV cartridges load layer by layer from storage tiers into GPU while selected tokens are recomputed</title>
+        <g id="cb-root"></g>
+      </svg>
+    </div>
+    <div class="side">
+      <div class="head-row"><h3>Per-request flow</h3>
+        <div class="controls"><button class="primary" data-act="play">Pause</button><button data-act="prev" aria-label="Previous step">◀</button><button data-act="next" aria-label="Next step">▶</button><button data-act="reset">Restart</button></div></div>
+      <ol class="steps"></ol>
+    </div>
+  </div>
+</section>
+
+<!-- ============ TurboQuant animation ============ -->
+<section aria-labelledby="s-tq">
+  <div class="eyebrow tq">Architecture animation · 02</div>
+  <h2 id="s-tq">TurboQuant: shrink every K/V vector without calibration</h2>
+  <p>Raw KV vectors have outlier channels, which is why ordinary low-bit quantization needs per-block scales and zero-points. A random rotation spreads the energy evenly, so one fixed grid works for every coordinate. A 1-bit Quantized Johnson–Lindenstrauss (QJL) sketch of the residual removes the bias in the query·key score that attention depends on.</p>
+  <div class="demo tqd" id="demo-tq">
+    <div class="stage">
+      <svg viewBox="0 0 760 350" role="img" aria-labelledby="tqT">
+        <title id="tqT">TurboQuant: a key vector is rotated, quantized on a fixed grid, and its residual stored as sign bits</title>
+        <g id="tq-root"></g>
+      </svg>
+    </div>
+    <div class="side">
+      <div class="head-row"><h3>Per-vector flow</h3>
+        <div class="controls"><button class="primary" data-act="play">Pause</button><button data-act="prev" aria-label="Previous step">◀</button><button data-act="next" aria-label="Next step">▶</button><button data-act="reset">Restart</button></div></div>
+      <ol class="steps"></ol>
+    </div>
+  </div>
+</section>
+
+<!-- ============ Flowcharts ============ -->
+<section aria-labelledby="s-flow">
+  <div class="eyebrow">Flow charts</div>
+  <h2 id="s-flow">Same KV cache, two different decisions</h2>
+  <div class="flows">
+    <figure>
+      <div class="eyebrow cb">CacheBlend · per request</div>
+      <div class="mwrap"><pre class="mermaid">
+flowchart TD
+  A["Request: query + N retrieved chunks"] --> B{"KV cartridge exists<br/>for each chunk?"}
+  B -- "no" --> C["Prefill chunk alone<br/>store as cartridge"]
+  B -- "yes" --> D["Load cartridges layer by layer<br/>NVMe → DRAM → HBM"]
+  C --> D
+  D --> E["Concatenate KV<br/>re-rotate RoPE to new offsets"]
+  E --> F["Early layer: recompute candidates<br/>measure KV deviation"]
+  F --> G["Keep highest-deviation<br/>HKVD tokens"]
+  G --> H["Layer i: recompute HKVD only (~15%)<br/>while layer i+1 loads"]
+  H --> I{"Last layer?"}
+  I -- "no" --> H
+  I -- "yes" --> J["Prefill new query tokens<br/>decode"]
+</pre></div>
+    </figure>
+    <figure>
+      <div class="eyebrow tq">TurboQuant · per K/V vector</div>
+      <div class="mwrap"><pre class="mermaid">
+flowchart TD
+  A["New K or V vector per head<br/>FP16, d = 128"] --> B["Random rotation Πx<br/>fixed seed, no calibration"]
+  B --> C["PolarQuant<br/>(b−1)-bit fixed grid per coordinate<br/>no per-block scale stored"]
+  C --> D["Residual r = x − x̂"]
+  D --> E["QJL: sign of random projection<br/>1 bit per coordinate"]
+  E --> F[("Compressed KV<br/>≈ b bits per value")]
+  F --> G["Attention: full-precision q<br/>q·k ≈ q·x̂ + QJL correction"]
+  G --> H["Softmax · V as usual"]
+</pre></div>
+    </figure>
+  </div>
+</section>
+
+<!-- ============ Comparison table ============ -->
+<section aria-labelledby="s-cmp">
+  <div class="eyebrow">Side by side</div>
+  <h2 id="s-cmp">Where they differ</h2>
+  <div class="tbl"><table>
+    <thead><tr><th></th><th>CacheBlend</th><th>TurboQuant</th></tr></thead>
+    <tbody>
+      <tr><th>Question</th><td>Can I reuse a chunk's cached KV when it is not the prefix, and which tokens must I recompute?</td><td>How few bits can each KV value take without distorting attention?</td></tr>
+      <tr><th>Bottleneck</th><td>Prefill compute, TTFT</td><td>KV capacity and memory bandwidth (decode speed, batch size, storage, transfer)</td></tr>
+      <tr><th>When it runs</th><td>Once per request, during prefill</td><td>On every KV write and every attention read</td></tr>
+      <tr><th>Core trick</th><td>Selective recompute of HKVD tokens with gradual filtering across layers; recompute pipelined with KV loading</td><td>Random rotation → PolarQuant on a fixed grid → 1-bit QJL on the residual for unbiased inner products</td></tr>
+      <tr><th>Approximation</th><td>Most tokens keep KV that never saw the preceding chunks</td><td>Quantized values; score error is unbiased, variance falls with bits</td></tr>
+      <tr><th>Training / calibration</th><td>None</td><td>None (data-oblivious)</td></tr>
+      <tr><th>What changes in the engine</th><td>KV cache layer and prefill scheduler (connector, blender, RoPE re-rotation)</td><td>KV storage format and attention kernels; optionally the storage codec only</td></tr>
+      <tr><th>Maturity</th><td>Open source in LMCache (blending mode). Non-prefix blending through the vLLM V1 connector has open bug reports.</td><td>Research release from Google. Serving engines ship FP8 KV natively; 3–4-bit TurboQuant needs custom kernels.</td></tr>
+      <tr><th>Relevance to cartridges</th><td>Makes cartridges attachable in any order, at any offset</td><td>Makes cartridges ~4–5× cheaper to store and faster to move</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============ Calculator ============ -->
+<section aria-labelledby="s-calc">
+  <div class="eyebrow">Why the two stack</div>
+  <h2 id="s-calc">Cartridge size and load time</h2>
+  <p>CacheBlend can only hide loading if a layer of KV arrives before the previous layer finishes recomputing. Smaller cartridges let them live on slower, cheaper tiers without adding latency. Size per token is <code>2 × layers × kv_heads × head_dim × bits ÷ 8</code>.</p>
+  <div class="calc">
+    <div class="inputs">
+      <label for="m">Model
+        <select id="m">
+          <option value="32,8,128">Llama-3.1-8B (32 L, 8 KV heads)</option>
+          <option value="28,8,128">Llama-3.2-3B (28 L, 8 KV heads)</option>
+          <option value="16,8,64">Llama-3.2-1B (16 L, 8 KV heads)</option>
+          <option value="28,4,128">Qwen2.5-7B (28 L, 4 KV heads)</option>
+        </select>
+      </label>
+      <label for="t">Context carried per call <span class="val" id="tv">16K tokens</span>
+        <input id="t" type="range" min="2" max="64" step="2" value="16">
+      </label>
+      <label for="tier">Cartridge source tier
+        <select id="tier">
+          <option value="7">Local NVMe (~7 GB/s)</option>
+          <option value="50">CPU DRAM → HBM over PCIe 5 (~50 GB/s)</option>
+          <option value="3">Remote store over 25 GbE (~3 GB/s)</option>
+        </select>
+      </label>
+      <p class="note">Bandwidths are round planning figures, not measurements. TurboQuant rows ignore small per-vector norm overhead.</p>
+    </div>
+    <div class="bars" id="bars"></div>
+  </div>
+</section>
+
+<!-- ============ Integration ============ -->
+<section aria-labelledby="s-int">
+  <div class="eyebrow cb">Integration · context engine → inference engine</div>
+  <h2 id="s-int">One voice turn through the cartridge pipeline</h2>
+  <p>The context engine decides <em>what</em> the agent should know; the inference engine decides <em>how cheaply</em> the model can see it. The seam between them is the cartridge: compiled once by the Context Compiler, stored compressed, attached per request by the Context Runtime through the engine's KV connector, and repaired by CacheBlend.</p>
+  <div class="demo intd" id="demo-int">
+    <div class="stage">
+      <svg viewBox="0 0 960 440" role="img" aria-labelledby="intT">
+        <title id="intT">Unpod context engine integrated with an inference engine through KV cartridges</title>
+        <g id="int-root"></g>
+      </svg>
+    </div>
+    <div class="side">
+      <div class="head-row"><h3>Request lifecycle</h3>
+        <div class="controls"><button class="primary" data-act="play">Pause</button><button data-act="prev" aria-label="Previous step">◀</button><button data-act="next" aria-label="Next step">▶</button><button data-act="reset">Restart</button></div></div>
+      <ol class="steps"></ol>
+    </div>
+  </div>
+
+  <h3 style="margin-top:12px">Where each technique plugs into the engine</h3>
+  <div class="points">
+    <div><span class="tag" style="color:var(--cb)">vLLM + LMCache</span>
+      <p>Implement the cartridge store as an LMCache backend and serve it through vLLM's KV Connector API. LMCache's blending mode already carries CacheBlend. Start with FP16 or FP8 cartridges; add TurboQuant first as an at-rest codec that the connector decodes on load, then as a custom attention backend once kernels exist.</p>
+      <p class="note">Fastest path to a working demo. Check the open non-prefix blending issues against the vLLM version you pin.</p></div>
+    <div><span class="tag" style="color:var(--cb)">TensorRT-LLM + Dynamo</span>
+      <p>Dynamo's KV Block Manager (KVBM) already manages GPU, CPU, SSD and remote tiers, NIXL moves blocks between them, and LMCache integration is documented. Register cartridges as KVBM blocks and add TurboQuant as the tier codec. This is the natural place for the NVIDIA engineering asks on placement and runtime boundaries.</p>
+      <p class="note">Best path for multi-node serving and the million-user memory target.</p></div>
+    <div><span class="tag" style="color:var(--cb)">SGLang</span>
+      <p>RadixAttention reuses exact prefixes and HiCache adds tiered storage, but neither blends non-prefix chunks. Use it for the stable system-prompt prefix and keep per-entity cartridges on vLLM or Dynamo until blending lands.</p>
+      <p class="note">Good for prefix-heavy flows; blending needs custom work.</p></div>
+  </div>
+
+  <div class="two">
+    <div>
+      <h3>The cartridge contract</h3>
+      <p style="font-size:.93rem">A cartridge is only valid for the exact model, tokenizer and KV layout it was compiled against. The key has to say so, or the runtime will attach garbage.</p>
+      <pre class="code"><span class="c"># cartridge id = hash of everything below</span>
+cartridge:
+  entity_scope: [user:4411, org:88]      <span class="c"># A, A×B, B</span>
+  chunk_sha: 9f2c…                       <span class="c"># canonicalised text</span>
+  version: 17                            <span class="c"># bumps on memory write</span>
+  model: llama-3.2-3b-instruct@sha:1e0…
+  tokenizer: sha:7ab…
+  kv_layout: {layers: 28, kv_heads: 8, head_dim: 128}
+  rope: {base: 500000, stored: pre_rotation}
+  codec: tq3 | tq4 | fp8 | fp16
+  tokens: 1840
+  tenant_key: kms://unpod/tenant/88      <span class="c"># encrypt at rest</span></pre>
+    </div>
+    <div>
+      <h3>Engineering notes</h3>
+      <ul class="plain">
+        <li><strong>Positions.</strong> Compile each cartridge at offset 0 and store keys before RoPE, or store the offset and re-rotate on attach. CacheBlend relies on this to place chunks anywhere.</li>
+        <li><strong>Blend in full precision.</strong> Decode TurboQuant cartridges to FP16/FP8 before HKVD selection, and write recomputed and new tokens in the engine's native paged format. Measure whether quantization noise changes which tokens get picked.</li>
+        <li><strong>Prefetch during speech.</strong> On a voice call the Context Runtime knows the entities before the caller finishes. Start loading cartridges on the first ASR partial, so the endpointing pause covers most of the transfer.</li>
+        <li><strong>Canonical order.</strong> Keep a stable order (system → org → user → A×B → turn) so the prefix portion hits exact prefix caching and CacheBlend only handles the rest.</li>
+        <li><strong>Tenancy.</strong> Cartridges are derived from private memory. Scope them per tenant, encrypt at rest, and never share blocks across tenants even when chunk hashes match.</li>
+      </ul>
+    </div>
+  </div>
+
+  <h3 style="margin-top:12px">Benchmark plan against the NVIDIA brief</h3>
+  <div class="tbl"><table>
+    <thead><tr><th>Arm</th><th>What it isolates</th><th>Target from brief</th></tr></thead>
+    <tbody>
+      <tr><th>A · Full prefill, FP16</th><td>Baseline TTFT, GPU-seconds and quality on 16–32K warm calls</td><td>Reference</td></tr>
+      <tr><th>B · Prefix cache only</th><td>What exact-prefix reuse already buys</td><td>Shows why non-prefix reuse is needed</td></tr>
+      <tr><th>C · Cartridges + CacheBlend, FP16</th><td>Compute savings from selective recompute</td><td>≥2× lower median TTFT, recompute &lt;15% of tokens per layer</td></tr>
+      <tr><th>D · C with FP8 cartridges</th><td>Native low-bit format already in engines</td><td>Same quality as A</td></tr>
+      <tr><th>E · C with TurboQuant cartridges from NVMe</th><td>Whether cheap tiers stay hidden behind recompute</td><td>TTFT within noise of C; 4–5× more cartridges per TB</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="phase">
+    <div><span class="when">Phase 1</span><h3>Blend</h3><p>vLLM + LMCache blending, FP16 cartridges in CPU DRAM. Context Compiler emits LMCache chunks keyed by the cartridge contract. Run arms A–C on one SLM.</p></div>
+    <div><span class="when">Phase 2</span><h3>Compress</h3><p>FP8, then TurboQuant as an at-rest codec on NVMe and remote tiers; decode in the connector. Run arms D–E and tune prefetch against ASR endpointing.</p></div>
+    <div><span class="when">Phase 3</span><h3>Scale</h3><p>Move to Dynamo KVBM + NIXL for multi-node tiering. With NVIDIA guidance, evaluate quantized attention kernels so cartridges stay compressed in HBM too.</p></div>
+  </div>
+</section>
+
+<div class="src">
+  <span class="eyebrow">Sources</span>
+  <a href="https://arxiv.org/abs/2405.16444">CacheBlend: Fast Large Language Model Serving for RAG with Cached Knowledge Fusion (arXiv 2405.16444)</a>
+  <a href="https://research.google/blog/turboquant-redefining-ai-efficiency-with-extreme-compression/">Google Research: TurboQuant, redefining AI efficiency with extreme compression</a>
+  <a href="https://docs.lmcache.ai/kv_cache_optimizations/blending.html">LMCache docs: Blending</a>
+  <a href="https://github.com/LMCache/LMCache/issues/3238">LMCache issue 3238: CacheBlend non-prefix reuse with vLLM V1 connector</a>
+  <a href="https://docs.nvidia.com/dynamo/v1.3.0/integrations/kv-cache-integrations/lm-cache">NVIDIA Dynamo docs: LMCache integration</a>
+  <span>Unpod: Context Engine with reusable KV cache cartridges (NVIDIA brief)</span>
+</div>
+</div>
+
+<script>
+(function(){
+const NS="http://www.w3.org/2000/svg";
+const reduce=window.matchMedia&&window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+function el(tag,attrs,parent,text){const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);if(text!=null)e.textContent=text;if(parent)parent.appendChild(e);return e;}
+function css(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim();}
+function tween(dur,fn,done){if(reduce||dur<=0){fn(1);done&&done();return;}const t0=performance.now();function f(n){const p=Math.min(1,(n-t0)/dur);const e=p<.5?2*p*p:1-Math.pow(-2*p+2,2)/2;fn(e);if(p<1)requestAnimationFrame(f);else done&&done();}requestAnimationFrame(f);}
+
+/* generic stepper */
+function Stepper(root,steps,render,interval){
+  const list=root.querySelector(".steps");const btn=root.querySelector('[data-act="play"]');
+  steps.forEach((s,i)=>{const li=document.createElement("li");li.tabIndex=0;li.textContent=s;li.addEventListener("click",()=>{go(i);stop();});li.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();go(i);stop();}});list.appendChild(li);});
+  let i=0,timer=null,playing=false;
+  function mark(){[...list.children].forEach((li,k)=>li.classList.toggle("on",k===i));}
+  function go(k){i=(k+steps.length)%steps.length;mark();render(i);}
+  function play(){if(timer)clearInterval(timer);playing=true;btn.textContent="Pause";timer=setInterval(()=>go(i+1),interval);}
+  function stop(){playing=false;btn.textContent="Play";if(timer)clearInterval(timer);timer=null;}
+  btn.addEventListener("click",()=>playing?stop():play());
+  root.querySelector('[data-act="next"]').addEventListener("click",()=>{stop();go(i+1);});
+  root.querySelector('[data-act="prev"]').addEventListener("click",()=>{stop();go(i-1);});
+  root.querySelector('[data-act="reset"]').addEventListener("click",()=>{go(0);if(!reduce)play();});
+  go(0);
+  if(reduce){stop();}else{
+    btn.textContent="Play";
+    const io=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting&&!playing&&!root.dataset.started){root.dataset.started="1";play();}});},{threshold:.35});
+    io.observe(root);
+  }
+}
+
+/* ======== CacheBlend ======== */
+(function(){
+  const g=document.getElementById("cb-root");
+  const chunks=[{n:"A · entity A",len:8},{n:"A×B · relation",len:8},{n:"B · entity B",len:6},{n:"Turn",len:4}];
+  const L=6,cw=14,gap=2,ch=22,rg=5,x0=204,y0=64;
+  // legend
+  const lg=el("g",{},g);
+  [["var(--cb-soft)","reused from cartridge"],["var(--cb)","recomputed / new"],["none","not loaded yet"]].forEach((d,k)=>{
+    const x=204+k*170;const lr=el("rect",{x:x,y:10,width:12,height:12,rx:2,fill:"none",stroke:"var(--line)"},lg);if(d[0]!=="none")lr.setAttribute("style","fill:"+d[0]);el("text",{x:x+18,y:20,class:"lbl"},lg,d[1]);});
+  // tiers
+  el("text",{x:20,y:54,class:"ttl"},g,"Storage tiers");
+  const tiers=[["NVMe / remote",64],["CPU DRAM",136]];
+  const tierChips=[];
+  tiers.forEach((t,k)=>{el("rect",{x:20,y:t[1],width:132,height:60,rx:4,fill:"none",stroke:"var(--line)"},g);el("text",{x:28,y:t[1]+16,class:"sm"},g,t[0]);});
+  ["A","B","C"].forEach((c,k)=>{const r=el("rect",{x:28+k*40,y:96,width:34,height:20,rx:3,style:"fill:var(--cb-soft)",stroke:"var(--cb)"},g);const tx=el("text",{x:45+k*40,y:110,"text-anchor":"middle",class:"sm ink"},g,c);tierChips.push([r,tx]);});
+  el("text",{x:20,y:226,class:"sm"},g,"cartridges computed");
+  el("text",{x:20,y:240,class:"sm"},g,"once, offline");
+  // arrow
+  el("path",{d:"M158 166 H178",stroke:"var(--muted)","stroke-width":1.2,fill:"none","marker-end":"url(#arr)"},g);
+  const defs=el("defs",{},g);const mk=el("marker",{id:"arr",viewBox:"0 0 10 10",refX:9,refY:5,markerWidth:7,markerHeight:7,orient:"auto"},defs);el("path",{d:"M0,0 L10,5 L0,10 z",style:"fill:var(--muted)"},mk);
+  // grid
+  const cells=[];let col=0;const colChunk=[];
+  chunks.forEach((c,ci)=>{const x=x0+col*(cw+gap);el("text",{x:x,y:y0-8,class:"sm"+(ci===3?" ink":"")},g,c.n);for(let j=0;j<c.len;j++){colChunk.push(ci);col++;}col+=0.6;});
+  const total=colChunk.length;
+  const colX=[];col=0;let prev=-1;colChunk.forEach((ci,k)=>{if(prev!==-1&&ci!==prev)col+=0.6;colX.push(x0+col*(cw+gap));col++;prev=ci;});
+  for(let l=0;l<L;l++){el("text",{x:x0-8,y:y0+l*(ch+rg)+15,"text-anchor":"end",class:"sm"},g,"L"+(l+1));cells[l]=[];for(let k=0;k<total;k++){cells[l][k]=el("rect",{x:colX[k],y:y0+l*(ch+rg),width:cw,height:ch,rx:2,fill:"none",stroke:"var(--line)"},g);}}
+  const gridRight=colX[total-1]+cw;
+  // status tags
+  const tagLoad=el("text",{x:gridRight+12,y:0,class:"sm",style:"fill:var(--muted)"},g,"");
+  const tagRe=el("text",{x:gridRight+12,y:0,class:"sm",style:"fill:var(--cb)"},g,"");
+  // HKVD selection (indices into cached tokens 0..21), gradual filtering
+  const sel=[[0,3,8,9,11,14,16,17,19],[8,9,14,16,17,19],[8,9,16,17],[8,16,17],[8,16,17],[8,16,17]];
+  const turn=[22,23,24,25];
+  // timeline
+  const ty=258;el("text",{x:20,y:ty+2,class:"ttl"},g,"Time to first token");
+  const rows=[["Full prefill",1,"var(--muted)","quality ✓"],["Full KV reuse",.18,"var(--bad)","quality ✗"],["CacheBlend",.34,"var(--cb)","quality ✓"]];
+  const bars=[];const TW=470;
+  rows.forEach((r,k)=>{const y=ty+14+k*24;el("text",{x:20,y:y+12,class:"lbl ink"},g,r[0]);el("rect",{x:130,y:y,width:TW,height:14,rx:2,style:"fill:var(--code)"},g);const b=el("rect",{x:130,y:y,width:0,height:14,rx:2,style:"fill:"+r[2]},g);const t=el("text",{x:130+TW+10,y:y+11,class:"sm"},g,"");bars.push([b,r,t]);});
+  function paint(l,k,state){const c=cells[l][k];if(state==="load"){c.setAttribute("style","fill:var(--cb-soft)");c.setAttribute("stroke","var(--cb-soft)");}else if(state==="re"){c.setAttribute("style","fill:var(--cb)");c.setAttribute("stroke","var(--cb)");}else{c.setAttribute("style","");c.setAttribute("fill","none");c.setAttribute("stroke","var(--line)");}}
+  const steps=[
+    "Context Intelligence picks three chunks for this turn: entity A, A×B and entity B. Each has a KV cartridge compiled earlier, alone, at position 0.",
+    "Layer 1 of every cartridge streams into HBM. RoPE is re-rotated so chunk B sits after A, C after B.",
+    "Layer 1 recomputes a wide candidate set and measures how far each token's KV drifts from the cached copy. Layer 2 loads at the same time.",
+    "Only the highest-deviation (HKVD) tokens survive to layer 2, mostly at the start of B and C, where cross-attention to earlier chunks matters most.",
+    "The set keeps shrinking to about 15% of reused tokens. Recompute of layer i overlaps the load of layer i+1, so slow tiers stay hidden.",
+    "All layers done. The new user turn is prefilled normally on top.",
+    "Result: close to full-reuse speed with full-prefill quality."
+  ];
+  function render(s){
+    // compute layer states for step s
+    const loaded=[0,1,2,3,4,6,6][s]; // layers loaded
+    const recomp=[0,0,1,2,4,6,6][s];
+    for(let l=0;l<L;l++)for(let k=0;k<total;k++){
+      let st="none";
+      if(l<loaded&&k<22)st="load";
+      if(l<recomp&&(sel[l].includes(k)))st="re";
+      if(s>=5&&turn.includes(k))st="re";
+      paint(l,k,st);
+    }
+    tierChips.forEach(([r],k)=>r.setAttribute("style","fill:var(--cb-soft);opacity:"+(s>=1&&s<5?.45:1)));
+    if(s>=1&&s<5){tagLoad.setAttribute("y",y0+Math.min(loaded-1,L-1)*(ch+rg)+15);tagLoad.textContent=loaded<L?"← loading":"";}else tagLoad.textContent="";
+    if(s>=2&&s<5){tagRe.setAttribute("y",y0+(recomp-1)*(ch+rg)+15);tagRe.textContent="← recompute "+Math.round(sel[recomp-1].length/22*100)+"%";}else tagRe.textContent="";
+    if(s===4){tagLoad.setAttribute("y",y0+(L-1)*(ch+rg)+15);tagLoad.textContent="← loading";tagRe.setAttribute("y",y0+3*(ch+rg)+15);}
+    bars.forEach(([b,r,t])=>{const target=s>=6?r[1]*TW:0;const from=+b.getAttribute("width");tween(700,e=>b.setAttribute("width",from+(target-from)*e));t.textContent=s>=6?r[3]:"";});
+  }
+  Stepper(document.getElementById("demo-cb"),steps,render,2600);
+})();
+
+/* ======== TurboQuant ======== */
+(function(){
+  const g=document.getElementById("tq-root");
+  const N=16,bw=16,bg=6,x0=40,base=150,S=95;
+  const orig=[.18,-.1,.95,.05,-.14,.1,-.88,0,.12,-.06,.3,.08,-.2,.7,-.03,.1];
+  const rot=[.36,-.41,.27,-.31,.44,-.17,.38,-.4,.22,-.34,.42,-.26,.31,-.37,.19,-.29];
+  const levels=[-.375,-.125,.125,.375]; // 2-bit grid (b-1 = 2)
+  const q=rot.map(v=>levels.reduce((a,b)=>Math.abs(b-v)<Math.abs(a-v)?b:a));
+  const sign=rot.map((v,i)=>((v-q[i])>=0?1:-1));
+  el("text",{x:x0,y:22,class:"ttl"},g,"One key vector (16 of 128 coordinates shown)");
+  el("line",{x1:x0-6,x2:x0+N*(bw+bg),y1:base,y2:base,stroke:"var(--line)"},g);
+  const grid=el("g",{opacity:0},g);
+  levels.forEach(v=>{el("line",{x1:x0-6,x2:x0+N*(bw+bg),y1:base-v*S,y2:base-v*S,stroke:"var(--tq)","stroke-dasharray":"3 3","stroke-width":.8},grid);});
+  el("text",{x:x0,y:base+.375*S+22,class:"sm",style:"fill:var(--tq)"},grid,"dashed lines = fixed 2-bit grid (4 levels)");
+  const bars=[],ghosts=[];
+  for(let i=0;i<N;i++){ghosts.push(el("rect",{x:x0+i*(bw+bg)-1,y:base,width:bw+2,height:0,fill:"none",stroke:"var(--tq)","stroke-width":1,"stroke-dasharray":"2 2",opacity:0},g));bars.push(el("rect",{x:x0+i*(bw+bg),y:base,width:bw,height:0,rx:1,style:"fill:var(--ink)"},g));}
+  const outl=el("text",{x:x0+2*(bw+bg)+bw/2,y:base-.95*S-8,"text-anchor":"middle",class:"sm",style:"fill:var(--bad)"},g,"outlier");
+  // sign bits row
+  const sy=282;const signG=el("g",{opacity:0},g);
+  el("text",{x:x0,y:sy-10,class:"sm"},signG,"QJL residual sketch · 1 bit each");
+  const signCells=[];for(let i=0;i<N;i++){const r=el("rect",{x:x0+i*(bw+bg),y:sy,width:bw,height:18,rx:2,style:"fill:var(--tq-soft)",stroke:"var(--tq)"},signG);el("text",{x:x0+i*(bw+bg)+bw/2,y:sy+13,"text-anchor":"middle",class:"sm",style:"fill:var(--tq)"},signG,sign[i]>0?"+":"−");signCells.push(r);}
+  // memory panel
+  const mx=440;el("text",{x:mx,y:22,class:"ttl"},g,"Bits stored per value");
+  const mem=[];for(let b=0;b<16;b++){mem.push(el("rect",{x:mx+b*18,y:36,width:15,height:24,rx:2,style:"fill:var(--ink)"},g));}
+  const memTxt=el("text",{x:mx,y:80,class:"lbl ink"},g,"FP16 · 16 bits");
+  const memNote=el("text",{x:mx,y:96,class:"sm"},g,"");
+  // attention panel
+  el("text",{x:mx,y:132,class:"ttl"},g,"Attention score q · k (illustrative)");
+  const exact=el("text",{x:mx,y:156,class:"lbl ink"},g,"exact (FP16)      0.8132");
+  const est1=el("text",{x:mx,y:176,class:"lbl",style:"fill:var(--muted)"},g,"");
+  const est2=el("text",{x:mx,y:196,class:"lbl",style:"fill:var(--tq)"},g,"");
+  const rotBox=el("g",{opacity:0},g);
+  el("rect",{x:mx,y:220,width:290,height:44,rx:4,fill:"none",stroke:"var(--line)"},rotBox);
+  el("text",{x:mx+10,y:238,class:"sm ink"},rotBox,"Π = random orthogonal rotation");
+  el("text",{x:mx+10,y:254,class:"sm"},rotBox,"same seed for all tokens · no calibration data");
+  let cur=orig.slice();
+  function setBars(vals,dur){const from=cur.slice();tween(dur,e=>{for(let i=0;i<N;i++){const v=from[i]+(vals[i]-from[i])*e;const h=Math.abs(v)*S;bars[i].setAttribute("height",h);bars[i].setAttribute("y",v>=0?base-h:base);}},()=>{cur=vals.slice();});}
+  function setMem(main,extra,label,note){mem.forEach((r,b)=>{let f="var(--code)";if(b<main)f="var(--ink)";else if(b<main+extra)f="var(--tq)";r.setAttribute("style","fill:"+f);});memTxt.textContent=label;memNote.textContent=note||"";}
+  const steps=[
+    "An FP16 key vector from one attention head. A few outlier channels dominate, so a uniform low-bit grid would clip them or waste levels.",
+    "Multiply by a fixed random rotation Π. Energy spreads evenly across coordinates and their distribution becomes predictable. The query is rotated the same way, so q·k is unchanged.",
+    "PolarQuant: snap each coordinate to a fixed (b−1)-bit grid. Because the distribution is known, no per-block scale or zero-point is stored.",
+    "What is left is a small residual error. On its own it biases the inner products attention relies on.",
+    "QJL: project the residual and keep only its sign, 1 bit per coordinate. This gives an unbiased correction term at almost no memory cost.",
+    "At attention time the full-precision query meets the compressed key. The score lands close to exact while the cache is about 5× smaller than FP16."
+  ];
+  function render(s){
+    const d=900;
+    if(s===0){setBars(orig,d);outl.setAttribute("opacity",1);grid.setAttribute("opacity",0);}
+    if(s>=1){outl.setAttribute("opacity",0);}
+    if(s===1){setBars(rot,d);grid.setAttribute("opacity",0);}
+    if(s>=2){setBars(q,d);grid.setAttribute("opacity",1);}
+    rotBox.setAttribute("opacity",s>=1?1:0);
+    ghosts.forEach((gh,i)=>{if(s>=3){const v=rot[i],qq=q[i];const top=base-Math.max(v,qq)*S,bot=base-Math.min(v,qq)*S;gh.setAttribute("y",top);gh.setAttribute("height",Math.max(1,bot-top));gh.setAttribute("opacity",1);}else gh.setAttribute("opacity",0);});
+    signG.setAttribute("opacity",s>=4?1:0);
+    if(s<2)setMem(16,0,"FP16 · 16 bits");
+    else if(s<4)setMem(2,0,"PolarQuant · 2 bits","+ no scales / zero-points");
+    else setMem(2,1,"TurboQuant · 3 bits","2-bit grid + 1-bit QJL ≈ 5.3× smaller");
+    est1.textContent=s>=2?"grid only         0.7710  (biased)":"";
+    est2.textContent=s>=5?"grid + QJL        0.8098  (unbiased)":"";
+  }
+  Stepper(document.getElementById("demo-tq"),steps,render,2800);
+})();
+
+/* ======== Integration ======== */
+(function(){
+  const g=document.getElementById("int-root");
+  const defs=el("defs",{},g);const mk=el("marker",{id:"arr2",viewBox:"0 0 10 10",refX:9,refY:5,markerWidth:6,markerHeight:6,orient:"auto"},defs);el("path",{d:"M0,0 L10,5 L0,10 z",style:"fill:var(--muted)"},mk);
+  el("text",{x:20,y:18,class:"sm"},g,"SEMANTIC SYSTEM · offline / async");
+  el("text",{x:20,y:246,class:"sm"},g,"INFERENCE SYSTEM · per turn");
+  el("line",{x1:20,x2:940,y1:228,y2:228,stroke:"var(--line)","stroke-dasharray":"4 4"},g);
+  const nodes={};
+  function node(id,x,y,w,h,title,sub,accent){const gg=el("g",{},g);const r=el("rect",{x:x,y:y,width:w,height:h,rx:5,style:"fill:var(--surface)",stroke:accent||"var(--line)","stroke-width":accent?1.5:1},gg);el("text",{x:x+10,y:y+20,class:"ttl"},gg,title);(sub||[]).forEach((s,k)=>el("text",{x:x+10,y:y+38+k*14,class:"sm"},gg,s));nodes[id]={g:gg,r:r,x:x,y:y,w:w,h:h,accent:accent};return gg;}
+  node("mem",20,30,150,80,"Entity memory",["A · A×B · B","graph, vectors, facts"]);
+  node("ci",200,30,170,80,"Context Intelligence",["retrieve · scope","rank · predict"]);
+  node("cc",400,30,200,80,"Context Compiler",["canonicalise · version","prefill → KV → TQ encode"],"var(--cb)");
+  // store with tiers
+  const st=node("store",630,26,310,190,"Cartridge store",["tiered, keyed by cartridge contract"]);
+  const tiers=[["GPU HBM","hot · FP8 / TQ*"],["CPU DRAM","warm · TQ4"],["Local NVMe","cool · TQ3"],["Remote object store","cold · TQ3"]];
+  const tierR=[];tiers.forEach((t,k)=>{const y=76+k*34;const r=el("rect",{x:642,y:y,width:286,height:28,rx:3,style:"fill:var(--bg)",stroke:"var(--line)"},g);el("text",{x:652,y:y+18,class:"sm ink"},g,t[0]);el("text",{x:918,y:y+18,"text-anchor":"end",class:"sm",style:"fill:var(--tq)"},g,t[1]);tierR.push(r);});
+  node("caller",20,300,130,70,"Caller",["streaming ASR","partial transcript"]);
+  node("rt",180,290,170,90,"Context Runtime",["resolve cartridge ids","prefetch · attach plan"],"var(--cb)");
+  // engine
+  node("eng",380,258,420,172,"Inference engine",["vLLM / TensorRT-LLM + Dynamo"]);
+  const sub=[["KV connector · LMCache / KVBM","var(--muted)"],["TQ decode + RoPE re-rotate","var(--tq)"],["CacheBlend selective recompute","var(--cb)"],["Paged KV (FP16/FP8) → SLM / LLM","var(--ink)"]];
+  const subR=[];sub.forEach((s,k)=>{const y=312+k*28;const r=el("rect",{x:392,y:y,width:396,height:22,rx:3,style:"fill:var(--bg)",stroke:"var(--line)"},g);el("text",{x:402,y:y+15,class:"sm",style:"fill:"+s[1]},g,s[0]);subR.push(r);});
+  node("tts",830,320,110,60,"TTS",["first audio"]);
+  const P={
+    mem_ci:"M170 70 H198",ci_cc:"M370 70 H398",cc_st:"M600 70 H628",
+    caller_rt:"M150 335 H178",
+    rt_ci:"M250 290 V112",ci_rt:"M300 112 V288",
+    st_eng:"M785 216 V256",
+    rt_eng:"M350 335 H378",
+    eng_tts:"M800 350 H828",
+    eng_mem:"M470 258 V200 H95 V112"
+  };
+  const paths={};for(const k in P){paths[k]=el("path",{d:P[k],fill:"none",stroke:"var(--line)","stroke-width":1.3,"marker-end":"url(#arr2)"},g);}
+  ["mem_ci","ci_cc","cc_st","eng_mem"].forEach(k=>paths[k].setAttribute("stroke-dasharray","4 3"));
+  const dot=el("circle",{r:6,cx:-20,cy:-20,style:"fill:var(--cb)"},g);
+  const clock=el("text",{x:20,y:420,class:"lbl ink"},g,"");
+  let gen=0;function fly(keys,color){const my=++gen;let idx=0;dot.setAttribute("style","fill:"+color);function next(){if(idx>=keys.length||my!==gen)return;const p=paths[keys[idx]];const len=p.getTotalLength();tween(900,e=>{if(my!==gen)return;const pt=p.getPointAtLength(len*e);dot.setAttribute("cx",pt.x);dot.setAttribute("cy",pt.y);},()=>{idx++;next();});}next();}
+  function hi(ids,subs,tierIdx){for(const k in nodes){const n=nodes[k];n.r.setAttribute("stroke",ids.includes(k)?"var(--cb)":(n.accent||"var(--line)"));n.r.setAttribute("stroke-width",ids.includes(k)?2.2:(n.accent?1.5:1));}
+    subR.forEach((r,k)=>{r.setAttribute("stroke",subs.includes(k)?sub[k][1]:"var(--line)");r.setAttribute("stroke-width",subs.includes(k)?2:1);});
+    tierR.forEach((r,k)=>{r.setAttribute("stroke",tierIdx.includes(k)?"var(--tq)":"var(--line)");r.setAttribute("stroke-width",tierIdx.includes(k)?2:1);});}
+  function lit(keys){for(const k in paths)paths[k].setAttribute("stroke",keys.includes(k)?"var(--cb)":"var(--line)");}
+  const steps=[
+    "Offline: new memory about A, B and A×B is canonicalised and versioned. The Context Compiler prefills each chunk once, TurboQuant-encodes its KV and writes the cartridge to the right tier.",
+    "The caller starts speaking. Streaming ASR sends the first partial transcript to the Context Runtime.",
+    "The Runtime asks Context Intelligence what this agent needs now. It returns ranked cartridge ids and versions for A, A×B and B.",
+    "Prefetch while the caller is still talking: compressed cartridges move NVMe or remote → DRAM → HBM via the KV connector (NIXL / GPUDirect Storage). About 4–5× fewer bytes than FP16.",
+    "End of utterance: the Runtime sends the attach plan. The engine decodes TurboQuant blocks and re-rotates RoPE to each chunk's offset.",
+    "CacheBlend recomputes the HKVD tokens (target under 15% per layer), pipelined with remaining layer loads. Only the new turn is fully prefilled.",
+    "First token goes to TTS and the caller hears audio. Brief target: at least 2× lower median TTFT than full prefill on 16–32K context.",
+    "After the turn: new facts flow back to entity memory. The Compiler bumps the version and recompiles the affected cartridge asynchronously."
+  ];
+  const clocks=["","t = 0 ms · caller speaking","t ≈ 40 ms · entities resolved","t ≈ 40–600 ms · transfer hidden under speech","t = end of utterance","t + prefill (blended)","t + TTFT · first audio","after the turn · async"];
+  function render(s){
+    clock.textContent=clocks[s];
+    switch(s){
+      case 0:hi(["mem","ci","cc","store"],[],[2,3]);lit(["mem_ci","ci_cc","cc_st"]);fly(["mem_ci","ci_cc","cc_st"],"var(--cb)");break;
+      case 1:hi(["caller","rt"],[],[]);lit(["caller_rt"]);fly(["caller_rt"],"var(--cb)");break;
+      case 2:hi(["rt","ci"],[],[]);lit(["rt_ci","ci_rt"]);fly(["rt_ci","ci_rt"],"var(--cb)");break;
+      case 3:hi(["store","eng"],[0],[0,1,2,3]);lit(["st_eng"]);fly(["st_eng"],"var(--tq)");break;
+      case 4:hi(["rt","eng"],[0,1],[0]);lit(["rt_eng"]);fly(["rt_eng"],"var(--cb)");break;
+      case 5:gen++;hi(["eng"],[2,3],[0]);lit([]);dot.setAttribute("cx",-20);break;
+      case 6:hi(["eng","tts"],[3],[]);lit(["eng_tts"]);fly(["eng_tts"],"var(--cb)");break;
+      case 7:hi(["mem","cc","store"],[],[1,2]);lit(["eng_mem","mem_ci","ci_cc","cc_st"]);fly(["eng_mem","mem_ci","ci_cc","cc_st"],"var(--cb)");break;
+    }
+  }
+  Stepper(document.getElementById("demo-int"),steps,render,3200);
+})();
+
+/* ======== Calculator ======== */
+(function(){
+  const m=document.getElementById("m"),t=document.getElementById("t"),tier=document.getElementById("tier"),tv=document.getElementById("tv"),bars=document.getElementById("bars");
+  const fmts=[["FP16",16,"var(--muted)"],["FP8",8,"var(--ink)"],["TurboQuant 4-bit",4,"var(--tq)"],["TurboQuant 3-bit",3,"var(--tq)"]];
+  const rows=fmts.map(f=>{const d=document.createElement("div");d.className="bar";d.innerHTML='<span class="name"></span><div class="track"><div class="fill"></div></div><span class="num"></span>';d.querySelector(".name").textContent=f[0];d.querySelector(".fill").style.background=f[2];bars.appendChild(d);return d;});
+  const foot=document.createElement("p");foot.className="note";bars.appendChild(foot);
+  function fmtB(b){if(b>=1073741824)return (b/1073741824).toFixed(2)+" GiB";return (b/1048576).toFixed(0)+" MiB";}
+  function upd(){const [L,H,D]=m.value.split(",").map(Number);const tok=+t.value*1024;tv.textContent=t.value+"K tokens";const bw=+tier.value*1e9;
+    let max=0;const vals=fmts.map(f=>{const b=2*L*H*D*f[1]/8*tok;max=Math.max(max,b);return b;});
+    rows.forEach((r,k)=>{r.querySelector(".fill").style.width=(vals[k]/max*100)+"%";r.querySelector(".num").textContent=fmtB(vals[k])+" · "+(vals[k]/bw*1000).toFixed(0)+" ms";});
+    const perTok=2*L*H*D*2;foot.textContent="FP16 is "+(perTok/1024).toFixed(0)+" KiB per token for this model. Load times assume the whole context comes from the selected tier; CacheBlend hides the part that arrives faster than per-layer recompute.";}
+  [m,t,tier].forEach(e=>e.addEventListener("input",upd));upd();
+})();
+})();
+</script>
+
+<!--claude-mermaid-runtime-begin:3477-->
+<style>.mermaid-diagram{margin-block:4px}.mermaid-diagram svg{display:block;margin:0 auto;max-width:100%;height:auto}</style>
+<script src="/_runtime/mermaid-11.16.1.min.js"></script>
+<script>(function(){
+var CFG={"palettes":{"light":{"surface":"#f4efe4","text":"#42392e","line":"#8a7f6d","border":"#7a6c52","bg":"#fffdf8"},"dark":{"surface":"#262b34","text":"#f2f3f5","line":"#a8adb8","border":"#9aa4b8","bg":"#1f232b"}}};
+if(typeof mermaid==='undefined')return;
+var pres=Array.prototype.slice.call(document.querySelectorAll('pre.mermaid')).filter(function(p){if(p.hasAttribute('data-claude-mermaid-claimed'))return false;p.setAttribute('data-claude-mermaid-claimed','1');return true;});
+if(!pres.length)return;
+var mq=window.matchMedia?window.matchMedia('(prefers-color-scheme: dark)'):null;
+var root=document.documentElement;
+var items=pres.map(function(pre){
+var mount=document.createElement('div');mount.className='mermaid-diagram';
+return {pre:pre,mount:mount,src:pre.textContent||''};
+});
+var seq=0;
+var renderGen=0;
+var lastKey='';
+function pageBg(fallback){
+var els=[document.body,document.documentElement];
+for(var i=0;i<els.length;i++){
+var c=els[i]&&getComputedStyle(els[i]).backgroundColor;
+if(c&&c!=='transparent'&&c!=='rgba(0, 0, 0, 0)')return c;
+}
+return fallback;
+}
+function render(){
+var theme=root.getAttribute('data-theme');
+var dark=theme==='dark'||(!!(mq&&mq.matches)&&theme!=='light');
+var pal=dark?CFG.palettes.dark:CFG.palettes.light;
+var bg=pageBg(pal.bg);
+var key=(dark?'d':'l')+'|'+bg;
+if(key===lastKey)return;
+lastKey=key;
+var gen=++renderGen;
+var font=getComputedStyle(document.body).fontFamily||'sans-serif';
+var nat={useMaxWidth:false};
+mermaid.initialize({
+startOnLoad:false,securityLevel:'strict',theme:'base',
+flowchart:nat,sequence:nat,er:nat,state:nat,class:nat,pie:nat,
+gantt:nat,journey:nat,timeline:nat,gitGraph:nat,mindmap:nat,xyChart:nat,
+quadrantChart:nat,sankey:nat,c4:nat,requirement:nat,block:nat,
+packet:nat,kanban:nat,architecture:nat,radar:nat,
+themeVariables:{background:bg,mainBkg:pal.surface,primaryColor:pal.surface,
+primaryTextColor:pal.text,lineColor:pal.line,primaryBorderColor:pal.border,
+nodeBorder:pal.border,clusterBorder:pal.border,edgeLabelBackground:bg,
+clusterBkg:'rgba(127,127,127,0.07)',titleColor:pal.text,
+darkMode:dark,rowOdd:bg,rowEven:'rgba(127,127,127,0.07)',
+attributeBackgroundColorOdd:bg,attributeBackgroundColorEven:'rgba(127,127,127,0.07)',
+fontSize:'16px',fontFamily:font},
+themeCSS:'.node rect, .node circle, .node polygon, .node path, .cluster rect { stroke-width: 2px; }'
+});
+items.forEach(function(it){
+var id='claude-mermaid-'+seq++;
+mermaid.render(id,it.src).then(function(r){
+if(gen!==renderGen)return;
+var prev=it.pre.previousElementSibling;
+if(prev&&prev.className==='mermaid-diagram'&&prev!==it.mount)return;
+it.mount.innerHTML=r.svg;
+if(!it.mount.parentNode)it.pre.parentNode.insertBefore(it.mount,it.pre);
+it.pre.style.display='none';
+},function(){
+var scratch=document.getElementById(id);
+if(scratch)scratch.parentNode.removeChild(scratch);
+scratch=document.getElementById('d'+id);
+if(scratch)scratch.parentNode.removeChild(scratch);
+if(gen!==renderGen)return;
+if(it.mount.parentNode)it.mount.parentNode.removeChild(it.mount);
+it.pre.style.display='';
+});
+});
+}
+render();
+if(mq&&mq.addEventListener)mq.addEventListener('change',render);
+if(typeof MutationObserver!=='undefined')new MutationObserver(render).observe(root,{attributes:true,attributeFilter:['data-theme']});
+})();</script>
+<!--claude-mermaid-runtime-end-->
+
+</body></html>
