@@ -351,3 +351,42 @@ class OpenAIStreamingASR:
         self._asked_at = 0
         self._inflight = None
         self._text = ""
+
+
+class ElevenLabsScribeASR(OpenAIStreamingASR):
+    """ElevenLabs Scribe over the batch API, same streaming contract as
+    ``OpenAIStreamingASR`` (single-flight partials, one synchronous flush).
+    Enabled by ``SUPERMEM_ASR=elevenlabs``.
+
+    Why: with language "auto", gpt-4o-mini-transcribe sometimes answers a Hindi
+    utterance with an English *translation* ("You tell me, who led ser..."),
+    and the reply then follows the English. Scribe transcribes in the language
+    that was spoken -- Hindi stays Devanagari, English stays Latin inside a
+    Hinglish sentence -- and reports which one it heard (``last_language``).
+    """
+
+    URL = "https://api.elevenlabs.io/v1/speech-to-text"
+
+    def __init__(self, model: str = "", language: str = "", transcribe=None,
+                 partial_every_s: float = 0.9, api_key: str = "", client=None) -> None:
+        model = model or os.environ.get("SUPERMEM_ASR_MODEL_ELEVENLABS", "") or "scribe_v1"
+        super().__init__(model=model, language=language, transcribe=transcribe,
+                         partial_every_s=partial_every_s)
+        self.api_key = api_key or os.environ.get("ELEVENLABS_API_KEY", "")
+        self._http = client
+        self.last_language = ""
+
+    def _api_transcribe(self, wav: bytes) -> str:
+        if self._http is None:
+            import httpx
+            self._http = httpx.Client(timeout=30.0)      # kept alive: partials reuse the TLS connection
+        data = {"model_id": self.model, "tag_audio_events": "false"}
+        if self.language:
+            data["language_code"] = self.language
+        r = self._http.post(self.URL, headers={"xi-api-key": self.api_key}, data=data,
+                            files={"file": ("turn.wav", wav, "audio/wav")})
+        if r.status_code != 200:
+            raise RuntimeError(f"Scribe HTTP {r.status_code}: {r.text[:200]}")
+        j = r.json()
+        self.last_language = j.get("language_code") or ""
+        return (j.get("text") or "").strip()

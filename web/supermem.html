@@ -387,6 +387,10 @@ a.btn{text-decoration:none}
   word-break:break-word;min-height:44px}
 .tc-body.idle{color:var(--txt-3)}
 .tc-body.err{color:var(--rose);font-size:12px}
+.tc-play{margin:0 12px 10px;padding:3px 10px;border-radius:99px;border:1px solid var(--line-2);
+  background:transparent;color:var(--txt-2);font-size:11px;cursor:pointer}
+.tc-play:hover{color:var(--txt);background:var(--bg-hover)}
+.tc-play.on{color:var(--mint);border-color:rgba(121,215,162,.5)}
 .turn-ctx{margin:10px 0 12px;border:1px solid var(--line);border-radius:var(--radius);
   background:var(--bg-dark)}
 .turn-ctx>summary{padding:5px 10px;font-size:11px;color:var(--txt-2);cursor:pointer;
@@ -1794,8 +1798,11 @@ function buildCmpTurn(rec){
     const kv=document.createElement('div'); kv.className='tc-kv';
     const body=document.createElement('div');
     body.className='tc-body idle'; body.textContent=i18n('cmpWaiting');
-    card.append(h,body,kv); cols.appendChild(card);
-    cards[panel]={card,who,ttfb,tot,kv,body,text:''};
+    const play=document.createElement('button'); play.className='tc-play'; play.hidden=true;
+    play.__rec=rec; play.__panel=panel;
+    play.addEventListener('click',()=>replayArm(rec,panel));
+    card.append(h,body,kv,play); cols.appendChild(card);
+    cards[panel]={card,who,ttfb,tot,kv,body,play,text:''};
   }
   wrap.appendChild(cols);
 
@@ -1844,6 +1851,7 @@ function paintArm(c,arm){
   c.ttfb.textContent=arm.ttfb!=null ? arm.ttfb+'ms' : '';
   c.tot.textContent=arm.ms!=null ? '· '+arm.ms+'ms total' : '';
   c.kv.textContent=kvText(arm.usage);
+  paintPlay(c.play);
 }
 
 /* Per-turn "Intelligence": everything this turn measured, per arm. Same rule as the scorecard:
@@ -1969,6 +1977,67 @@ function feedDone(panel,m){
   arm.usage=m.usage||null;
   paintArm(FEED.cards[panel],arm);
   paintIntel(FEED);
+  pumpSpeech(FEED.rec);
+}
+
+/* ── Compare-mode speech (ElevenLabs via /api/tts) ─────────────────────
+   A spoken compare turn is read out left panel first, then right, each as soon as
+   it has finished generating. Typed turns stay silent. Every card has a replay
+   button; the server caches the audio so a replay does not synthesise again.
+   The mic is muted while this plays (like a memory replay): the browser's AEC does
+   not fully cancel speaker output, and the echo would open a turn by itself. */
+const SPEECH={audio:null, rec:null, panel:null, auto:null};
+let cmpSpeaking=false;
+function armSettled(arm){ return !!arm && (arm.ms!=null || !!arm.error); }
+function armSpeakable(arm){ return !!arm && !arm.error && !!(arm.text||'').trim(); }
+function paintPlay(btn){
+  if(!btn) return;
+  const arm=btn.__rec.arms[btn.__panel];
+  btn.hidden=!(armSettled(arm) && armSpeakable(arm));
+  const on=SPEECH.rec===btn.__rec && SPEECH.panel===btn.__panel;
+  btn.textContent=on ? '■ Stop' : '▶ Replay';
+  btn.classList.toggle('on',on);
+}
+function paintPlayButtons(){ document.querySelectorAll('#chatLog .tc-play').forEach(paintPlay); }
+function stopSpeech(){
+  const a=SPEECH.audio;
+  if(a){ a.onended=a.onerror=null; a.pause(); a.removeAttribute('src'); a.load(); }
+  SPEECH.audio=null; SPEECH.rec=null; SPEECH.panel=null; cmpSpeaking=false;
+  paintPlayButtons();
+}
+function playArm(rec,panel){
+  const text=(rec.arms[panel].text||'').trim().slice(0,2500);
+  return new Promise(res=>{
+    const a=new Audio('/api/tts?text='+encodeURIComponent(text));
+    SPEECH.audio=a; SPEECH.rec=rec; SPEECH.panel=panel; cmpSpeaking=true; paintPlayButtons();
+    const done=ok=>{
+      if(SPEECH.audio===a){ SPEECH.audio=null; SPEECH.rec=null; SPEECH.panel=null; cmpSpeaking=false; paintPlayButtons(); }
+      res(ok);
+    };
+    a.onended=()=>done(true);
+    a.onerror=()=>{ toast('TTS failed (ElevenLabs)'); done(false); };
+    a.play().catch(()=>done(false));
+  });
+}
+/* Auto read-out: next unspoken panel in a-then-b order, once it has settled. */
+function pumpSpeech(rec){
+  if(!rec || SPEECH.auto!==rec || SPEECH.audio) return;
+  rec.heard=rec.heard||{};
+  for(const p of ['a','b']){
+    if(rec.heard[p]) continue;
+    const arm=rec.arms[p];
+    if(!arm.started || !armSettled(arm)) return;          // left must finish before right may speak
+    rec.heard[p]=true;
+    if(!armSpeakable(arm)) continue;
+    playArm(rec,p).then(()=>pumpSpeech(rec));
+    return;
+  }
+}
+function replayArm(rec,panel){
+  const wasThis=SPEECH.rec===rec && SPEECH.panel===panel;
+  SPEECH.auto=null;                                       // a manual click ends the automatic sequence
+  stopSpeech();
+  if(!wasThis) playArm(rec,panel);
 }
 
 /* Latest evaluation/cartridges/run_bench.py summary (GET /api/bench). A live turn cannot measure
@@ -2364,6 +2433,7 @@ async function startMic(){
   micProc=micCtx.createScriptProcessor(2048,1,1);
   micProc.onaudioprocess=e=>{
     if(!ws||ws.readyState!==1||paused||replaying) return;
+    if(cmpSpeaking) return;                          // compare answers being read out, see stopSpeech()
     if(HALF_DUPLEX && assistantAudible()) return;   // mic muted, see above
     const f32=e.inputBuffer.getChannelData(0);
     let peak=0; for(let i=0;i<f32.length;i++){ const v=Math.abs(f32[i]); if(v>peak) peak=v; }
@@ -2376,6 +2446,7 @@ function stopMic(){
   if(micProc){ micProc.disconnect(); micProc.onaudioprocess=null; micProc=null; }
   if(micStream){ for(const t of micStream.getTracks()) t.stop(); micStream=null; }
   lvOn=false;
+  SPEECH.auto=null; stopSpeech();       // session over: nothing keeps talking
 }
 
 /* --- Backend memory → a separate space -------------------------------------- */
@@ -2650,7 +2721,11 @@ function handle(m){
       lvOn=false; s.ui.input=m.text; paint(s);
       // In compare mode, no longer push a single user bubble into the feed: the centred line in feedNewTurn is it,
       // two copies would duplicate. Non-compare mode (A/B off) works as before.
-      if(CMP.on) FEED=feedNewTurn(m.text);
+      stopSpeech();                        // a new turn cuts off whatever is still being read out
+      if(CMP.on){
+        FEED=feedNewTurn(m.text);
+        if(FEED){ FEED.rec.spoken=!!m.spoken; SPEECH.auto=m.spoken ? FEED.rec : null; }
+      }
       else addTurn(s,'user',m.text,s.ui.speaker||i18n('you'));
       window.VMBrain.spark();            // retrieval not back yet: light the start node first, the signal starts here
       break;
