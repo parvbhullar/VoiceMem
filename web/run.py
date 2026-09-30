@@ -1066,10 +1066,14 @@ def _cartridge_runtime(space: str):
 def _cartridge_engine(arm):
     from supermem.cartridge import Engine
     base = resolve_base_url(arm.base_url or None) or "https://api.openai.com/v1"
-    local = any(h in base for h in ("localhost", "127.0.0.1", "0.0.0.0", "host.docker.internal"))
-    return Engine(base, resolve_model(arm.model or None, "reply"), arm=arm.label,
-                  api_key=resolve_api_key(arm.api_key or None) or "EMPTY",
-                  scrape_metrics=local)         # /metrics exists on vLLM, not on hosted APIs
+    # /metrics exists on vLLM (local or a GPU box like the GCP one), not on hosted APIs.
+    hosted = any(h in base for h in ("api.openai.com", "openai.azure.com", "api.anthropic.com"))
+    engine = Engine(base, resolve_model(arm.model or None, "reply"), arm=arm.label,
+                    api_key=resolve_api_key(arm.api_key or None) or "EMPTY",
+                    scrape_metrics=not hosted)
+    # The "before" snapshot rides alongside the request: no extra round trip in the TTFT on screen.
+    engine.snapshot_in_flight = True
+    return engine
 
 
 def _cartridge_provider(history: str, space: str):
@@ -1098,6 +1102,8 @@ def _cartridge_provider(history: str, space: str):
                     fn.last_usage = {
                         "prompt_tokens": val.prompt_tokens, "cached_tokens": val.cached_tokens,
                         "prefill_gpu_ms": val.prefill_gpu_ms,
+                        "cached_source": val.extra.get("cached_source"),
+                        "metrics_overlap": bool(val.extra.get("metrics_overlap")),
                         "cartridge_id": cart.id, "cartridge_tokens": cart.tokens,
                     }
             finally:
@@ -3390,6 +3396,37 @@ async def api_cartridge_refresh() -> dict:
         return {"space": ACTIVE_SPACE, "error": f"{type(e).__name__}: {e}"}
     return {"space": ACTIVE_SPACE, **cart.manifest(),
             "prefetch": await _prefetch_cartridges(ACTIVE_SPACE)}
+
+
+#: Where evaluation/cartridges/run_bench.py writes its runs.
+_BENCH_DIR = _ROOT / "results" / "cartridges"
+
+
+def _latest_bench() -> Path | None:
+    """The newest benchmark run with a summary. latest.json can point at a moved
+    checkout (it stores an absolute path), so fall back to the newest run dir."""
+    try:
+        run_dir = Path(json.loads((_BENCH_DIR / "latest.json").read_text())["run_dir"])
+        if (run_dir / "summary.json").is_file():
+            return run_dir
+    except (OSError, ValueError, KeyError):
+        pass
+    runs = sorted(p for p in _BENCH_DIR.glob("*/summary.json")) if _BENCH_DIR.is_dir() else []
+    return runs[-1].parent if runs else None
+
+
+@app.get("/api/bench")
+def api_bench() -> dict:
+    """The latest cartridge benchmark summary (the metrics a live turn cannot
+    measure: quality, GPU time, end of speech -> first audio). Passed through
+    as run_bench.py wrote it, ``simulated`` flag included."""
+    run_dir = _latest_bench()
+    if run_dir is None:
+        return {"available": False}
+    try:
+        return {"available": True, **json.loads((run_dir / "summary.json").read_text())}
+    except (OSError, ValueError) as e:
+        return {"available": False, "error": f"{type(e).__name__}: {e}"}
 
 
 def _warm_network() -> None:

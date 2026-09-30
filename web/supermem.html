@@ -14,7 +14,7 @@
   --bg-dark:#080808;
   --line:rgba(255,255,255,.09); --line-2:rgba(255,255,255,.17);
   --txt:#ececec; --txt-2:#a8a8a8; --txt-3:#7c7c7c;
-  --blue:#6ba7f0; --rose:#ef7bab; --mint:#79d7a2;
+  --blue:#6ba7f0; --rose:#ef7bab; --mint:#79d7a2; --amber:#e8b86b;
   --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",
          "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
   --radius:12px;
@@ -395,6 +395,27 @@ button{cursor:pointer;background:none;border:none}
 .turn-ctx[open]>summary::before{content:'▾'}
 .turn-ctx pre{margin:0;padding:0 10px 8px;font-size:11px;line-height:1.55;
   color:var(--txt-2);white-space:pre-wrap;max-height:20vh;overflow-y:auto}
+
+/* ── Tables inside a turn's Intelligence panel ───────────────────────────── */
+.mt-table{width:100%;border-collapse:collapse;font-size:12px}
+.mt-table th{font-weight:600;color:var(--txt-3);font-size:10.5px;letter-spacing:.05em;
+  text-transform:uppercase;text-align:right;padding:4px 8px;border-bottom:1px solid var(--line)}
+.mt-table td{padding:5px 8px;text-align:right;border-bottom:1px solid var(--line);color:var(--txt)}
+.mt-table th:first-child,.mt-table td:first-child{text-align:left}
+.mt-table tr:last-child td{border-bottom:0}
+.mt-table td.cart{color:var(--mint)}
+.mt-table td.gain{color:var(--mint);font-weight:600}
+.mt-table td.na{color:var(--txt-3);font-style:italic}
+.mt-table td[colspan]{text-align:center}
+.mt-table td.tgt{color:var(--txt-3)}
+.mt-table .sub{display:block;font-size:10.5px;color:var(--txt-3);font-style:normal;font-weight:400}
+.mt-table tr.mt-sec th{padding-top:12px;color:var(--txt-2)}
+.mt-table tr.mt-sec th:first-child{text-align:left;color:var(--mint);letter-spacing:.1em}
+.mt-table tr.mt-sec .sub{letter-spacing:0;text-transform:none;margin-top:2px}
+.intel{padding:0 10px 8px;overflow-x:auto}
+.intel-note{font-size:11px;color:var(--txt-3);padding:8px 8px 0;line-height:1.5}
+.intel-bench{margin-top:10px}
+.intel .mt-table td:first-child{color:var(--txt-2)}
 @media (max-width:1100px){ .turn-cols{grid-template-columns:1fr} }
 </style>
 </head>
@@ -658,7 +679,8 @@ const I18N = {
     cmpCtxNobody:'neither arm has memory on — this went into no prompt',
     cmpWith:'With Memory', cmpWithout:'Without Memory', cmpWithCart:'With Memory · KV cartridge',
     cmpCart:'KV cartridge', cmpCartTitle:'Carry the memory as a reusable KV cartridge (stable prompt prefix)', cmpKvReused:'KV reused',
-    cmpGearTitle:'model / endpoint / key',
+    cmpGearTitle:'model / endpoint / key', cmpIntel:'Intelligence',
+    mtNotMeasured:'not measured', mtFull:'Full prefill', mtNone:'No memory', mtCart:'Cartridge',
     talkStart:'Start talking', talkEnd:'End session', pause:'Pause', resume:'Resume',
     ended:'Session ended.',
     idle:'Idle', listening:'Listening', replying:'Replying', paused:'Paused',
@@ -1519,12 +1541,16 @@ function renderChat(){
     box.appendChild(e); restoreLiveChatDraft(s); return;
   }
   for(const turn of s.turns){
+    if(turn.role==='cmp'){ box.appendChild(buildCmpTurn(turn).wrap); continue; }
     const w=document.createElement('div');
     w.className='turn '+(turn.role==='user'?'user':'ai');
     const who=document.createElement('div'); who.className='who';
     who.textContent=turn.role==='user'?(turn.speaker||i18n('you')):'SuperMem';
     const said=document.createElement('div'); said.className='said'; said.textContent=turn.text;
     w.append(who,said); box.appendChild(w);
+  }
+  if(FEED && s.turns.includes(FEED.rec)){
+    for(const w of box.children) if(w.__rec===FEED.rec){ FEED=w.__feed; break; }
   }
   restoreLiveChatDraft(s);
   box.scrollTop=box.scrollHeight;
@@ -1723,15 +1749,34 @@ for(const u of ['A','B']){
    centred, the two arms side by side below, each with its TTFB. Older turns stay above; scroll up to see them. */
 let FEED=null;                     // DOM refs for the current turn
 
+/* A compare turn lives on the session as {role:'cmp', text, ctx, arms:{a,b}}, not only in the DOM.
+   renderChat() rebuilds #chatLog from s.turns -- and loadMemories() calls it after every ingest via
+   renderAll() -- so a turn kept only as DOM vanished the moment the next turn's memories landed. */
+function blankArm(){ return {memory:false,cartridge:false,model:'',text:'',ttfb:null,ms:null,usage:null,error:''}; }
+
 function feedNewTurn(said){
   const box=$('chatLog'); if(!box) return null;
+  const rec={role:'cmp', text:said||'', ctx:null, arms:{a:blankArm(), b:blankArm()}};
+  const s=currentSession();
+  if(s){
+    s.turns.push(rec);
+    const empty=box.querySelector('.empty'); if(empty) empty.remove();
+    renderSessions();
+  }
+  const f=buildCmpTurn(rec);
+  box.appendChild(f.wrap);
+  box.scrollTop=box.scrollHeight;
+  return f;
+}
+
+function buildCmpTurn(rec){
   const wrap=document.createElement('div'); wrap.className='turn';
 
   const line=document.createElement('div'); line.className='turn-said';
   const bub=document.createElement('span');
   const tag=document.createElement('b'); tag.textContent=i18n('you');
-  bub.append(tag, document.createTextNode(said||''));
-  bub.title=said||'';
+  bub.append(tag, document.createTextNode(rec.text));
+  bub.title=rec.text;
   line.appendChild(bub); wrap.appendChild(line);
 
   const cols=document.createElement('div'); cols.className='turn-cols';
@@ -1759,47 +1804,179 @@ function feedNewTurn(said){
   const pre=document.createElement('pre');
   det.append(sum,pre); wrap.appendChild(det);
 
-  box.appendChild(wrap);
-  box.scrollTop=box.scrollHeight;
-  return {wrap,cards,ctxCount:cnt,ctxPre:pre,ctxDet:det};
+  const intel=document.createElement('details'); intel.className='turn-ctx';
+  const isum=document.createElement('summary');
+  const ilbl=document.createElement('span'); ilbl.textContent=i18n('cmpIntel');
+  const ihead=document.createElement('span'); ihead.className='tot';
+  isum.append(ilbl,ihead);
+  const ibody=document.createElement('div'); ibody.className='intel';
+  intel.append(isum,ibody); wrap.appendChild(intel);
+
+  const f={rec,wrap,cards,ctxCount:cnt,ctxPre:pre,ctxDet:det,intelHead:ihead,intelBody:ibody};
+  wrap.__rec=rec; wrap.__feed=f;
+  // Rebuilt from the record (renderChat): paint whatever this turn already has.
+  if(rec.ctx!==null) paintCtx(f);
+  for(const panel of ['a','b']){
+    const arm=rec.arms[panel];
+    if(arm.started) paintArm(f.cards[panel],arm);
+  }
+  paintIntel(f);
+  return f;
+}
+
+function paintCtx(f){
+  const text=f.rec.ctx;
+  f.ctxPre.textContent=text||i18n('cmpCtxEmpty');
+  f.ctxCount.textContent=text?(text.length+' chars'):'';
+}
+
+function paintArm(c,arm){
+  // The title follows whether the server says this arm has memory, same reasoning as the two boxes in the centre column
+  c.who.textContent=cmpTitle(arm);
+  c.card.classList.toggle('mem',!!arm.memory);
+  c.text=arm.text;
+  if(arm.error){ c.body.className='tc-body err'; c.body.textContent=arm.error; }
+  else if(arm.text){ c.body.className='tc-body'; c.body.textContent=arm.text; }
+  else { c.body.className='tc-body idle'; c.body.textContent=i18n('cmpWaiting'); }
+  c.ttfb.textContent=arm.ttfb!=null ? arm.ttfb+'ms' : '';
+  c.tot.textContent=arm.ms!=null ? '· '+arm.ms+'ms total' : '';
+  c.kv.textContent=kvText(arm.usage);
+}
+
+/* Per-turn "Intelligence": everything this turn measured, per arm. Same rule as the scorecard:
+   a value the engine did not report says "not measured", never a guess. */
+function paintIntel(f){
+  const A=f.rec.arms.a, B=f.rec.arms.b, NA=i18n('mtNotMeasured');
+  const roleName=a=>i18n(a.memory ? (a.cartridge ? 'mtCart' : 'mtFull') : 'mtNone');
+  const u=a=>a.usage||{};
+  const tok=v=>v==null?null:v.toLocaleString()+' tok';
+  const rec=a=>{
+    const x=u(a); if(!x.prompt_tokens || x.cached_tokens==null) return null;
+    const r=x.prompt_tokens-x.cached_tokens;
+    return (100*r/x.prompt_tokens).toFixed(1)+'% · '+r.toLocaleString()+' tok';
+  };
+  const cart=a=>u(a).cartridge_id ? u(a).cartridge_id+' · '+(u(a).cartridge_tokens||0).toLocaleString()+' tok' : null;
+  const rows=[
+    ['Mode', roleName(A), roleName(B)],
+    ['Model', A.model||'server default', B.model||'server default'],
+    ['TTFT', A.ttfb!=null?A.ttfb+' ms':null, B.ttfb!=null?B.ttfb+' ms':null],
+    ['Total', A.ms!=null?A.ms+' ms':null, B.ms!=null?B.ms+' ms':null],
+    ['Prompt tokens', tok(u(A).prompt_tokens), tok(u(B).prompt_tokens)],
+    ['Reused from KV cache', tok(u(A).cached_tokens), tok(u(B).cached_tokens)],
+    ['Recomputed', rec(A), rec(B)],
+    ['Prefill GPU-ms', u(A).prefill_gpu_ms!=null?Math.round(u(A).prefill_gpu_ms)+' ms':null,
+                       u(B).prefill_gpu_ms!=null?Math.round(u(B).prefill_gpu_ms)+' ms':null],
+    ['Cartridge', cart(A), cart(B)],
+  ];
+  let html='<table class="mt-table"><thead><tr><th></th><th>'+cmpTitle(A)+'</th><th>'+cmpTitle(B)
+    +'</th></tr></thead><tbody>';
+  const cell=(v,cls)=>v==null ? '<td class="na">'+NA+'</td>' : '<td class="'+(cls||'')+'"></td>';
+  for(const [name,a,b] of rows) html+='<tr><td>'+name+'</td>'+cell(a,A.memory?'cart':'')+cell(b,B.memory?'cart':'')+'</tr>';
+  f.intelBody.innerHTML=html+'</tbody></table>'+intelNote(A,B)+benchHtml();
+  // Values go in as text: model names and ids come from the server / the panel inputs.
+  const trs=f.intelBody.querySelector('table').querySelectorAll('tbody tr');
+  rows.forEach(([,a,b],i)=>{
+    const tds=trs[i].querySelectorAll('td');
+    if(a!=null) tds[1].textContent=a;
+    if(b!=null) tds[2].textContent=b;
+  });
+  // Headline: which arm spoke first and by how much, once both have a first token.
+  let head='';
+  if(A.ttfb!=null && B.ttfb!=null && A.ttfb && B.ttfb){
+    const fast=A.ttfb<=B.ttfb?A:B, slow=fast===A?B:A;
+    head=cmpTitle(fast)+' '+(slow.ttfb/fast.ttfb).toFixed(2)+'× faster TTFT';
+  }
+  const pt=u(A).prompt_tokens||u(B).prompt_tokens;
+  if(pt) head+=(head?' · ':'')+pt.toLocaleString()+' tok';
+  f.intelHead.textContent=head;
+}
+
+/* Why a cartridge turn's GPU numbers can be missing: the engine's counters only pin a
+   value on this request when no other request prefilled in the same window. */
+function intelNote(A,B){
+  const ov=[A,B].some(a=>a.usage && a.usage.metrics_overlap);
+  return ov ? '<div class="intel-note">GPU counters skipped this turn: another request (for example the other panel on the same GPU) prefilled at the same time, so the numbers could not be pinned on this one.</div>' : '';
+}
+
+/* The benchmark block every Intelligence panel carries: full prefill vs the run's showcase arm. */
+function benchHtml(){
+  const B=BENCH;
+  if(!B || !B.available) return '<div class="intel-note">Benchmark: no run yet (python evaluation/cartridges/run_bench.py).</div>';
+  if(B.simulated) return '<div class="intel-note">Benchmark: latest run is SIMULATED, not shown.</div>';
+  const arms=Object.fromEntries((B.arms||[]).map(a=>[a.arm,a]));
+  const bf=arms.full, bc=arms[B.showcase_arm]||arms.cartridge;
+  if(!bf||!bc) return '';
+  const esc=t=>String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const NA=i18n('mtNotMeasured');
+  const ms=v=>v==null?null:Math.round(v).toLocaleString()+' ms';
+  const pc=v=>v==null?null:(100*v).toFixed(1)+'%';
+  const gain=(b,c)=>(b!=null&&c)?(b/c).toFixed(2)+'× faster':null;
+  const lower=(b,c)=>(b!=null&&c!=null&&b)?Math.round(100*(1-c/b))+'% lower':null;
+  const dq=(bf.accuracy!=null&&bc.accuracy!=null)
+    ? (bc.accuracy>=bf.accuracy?'+':'')+((bc.accuracy-bf.accuracy)*100).toFixed(1)+' pp' : null;
+  const rows=[
+    ['TTFT p50', ms(bf.ttft_p50), ms(bc.ttft_p50), gain(bf.ttft_p50,bc.ttft_p50)],
+    ['TTFT p95', ms(bf.ttft_p95), ms(bc.ttft_p95), gain(bf.ttft_p95,bc.ttft_p95)],
+    ['Context recomputed', pc(bf.recomputed_frac), pc(bc.recomputed_frac), null],
+    ['Prefill GPU-ms / turn', ms(bf.prefill_gpu_ms), ms(bc.prefill_gpu_ms), lower(bf.prefill_gpu_ms,bc.prefill_gpu_ms)],
+    ['Quality (answer accuracy)', pc(bf.accuracy), pc(bc.accuracy), dq],
+    ['End of speech → first audio p50', ms(bf.e2e_p50), ms(bc.e2e_p50), lower(bf.e2e_p50,bc.e2e_p50)],
+  ];
+  const cell=(v,cls)=>v==null?'<td class="na">'+NA+'</td>':'<td class="'+(cls||'')+'">'+esc(v)+'</td>';
+  const cond=Object.values(B.conditions||{}).filter(Boolean).join(' · ');
+  let h='<table class="mt-table intel-bench"><thead><tr class="mt-sec"><th>Benchmark<span class="sub">'
+    +esc(B.run_id+' · '+cond)+'</span></th><th>'+esc(i18n('mtFull'))+'</th><th>'+esc(i18n('mtCart'))
+    +'</th><th>Improvement</th></tr></thead><tbody>';
+  for(const [n,b,c,g] of rows) h+='<tr><td>'+n+'</td>'+cell(b)+cell(c,'cart')+cell(g,'gain')+'</tr>';
+  return h+'</tbody></table>';
 }
 
 function feedCtx(text){
   if(!FEED) return;
-  FEED.ctxPre.textContent=text||i18n('cmpCtxEmpty');
-  FEED.ctxCount.textContent=text?(text.length+' chars'):'';
+  FEED.rec.ctx=text||'';
+  paintCtx(FEED);
 }
 
-function feedStart(panel,memory,cartridge){
+function feedStart(panel,memory,cartridge,model){
   if(!FEED||!FEED.cards[panel]) return;
-  const c=FEED.cards[panel];
-  c.text=''; c.body.className='tc-body idle'; c.body.textContent=i18n('cmpWaiting');
-  c.ttfb.textContent=''; c.tot.textContent=''; c.kv.textContent='';
-  // The title follows whether the server says this arm has memory, same reasoning as the two boxes in the centre column
-  c.who.textContent=cmpTitle({memory,cartridge});
-  c.card.classList.toggle('mem',!!memory);
+  const arm=Object.assign(blankArm(),{memory:!!memory,cartridge:!!cartridge,model:model||'',started:true});
+  FEED.rec.arms[panel]=arm;
+  paintArm(FEED.cards[panel],arm);
+  paintIntel(FEED);
 }
 
 function feedDelta(panel,text,ttfb){
   if(!FEED||!FEED.cards[panel]) return;
-  const c=FEED.cards[panel], box=$('chatLog');
+  const c=FEED.cards[panel], arm=FEED.rec.arms[panel], box=$('chatLog');
   const atBottom = box && (box.scrollHeight-box.scrollTop-box.clientHeight < 60);
-  c.text+=(text||'');
-  c.body.className='tc-body'; c.body.textContent=c.text;
-  if(ttfb!==undefined && ttfb!==null) c.ttfb.textContent=ttfb+'ms';
+  arm.text+=(text||''); c.text=arm.text;
+  c.body.className='tc-body'; c.body.textContent=arm.text;
+  if(ttfb!==undefined && ttfb!==null){ arm.ttfb=ttfb; c.ttfb.textContent=ttfb+'ms'; }
   // Only follow-scroll if it was already stuck to the bottom. Yanking the user back while they scroll through old turns is the most annoying thing.
   if(atBottom && box) box.scrollTop=box.scrollHeight;
 }
 
 function feedDone(panel,m){
   if(!FEED||!FEED.cards[panel]) return;
-  const c=FEED.cards[panel];
-  if(m.error){ c.body.className='tc-body err'; c.body.textContent=m.error; }
-  else if(m.text){ c.body.className='tc-body'; c.body.textContent=m.text; c.text=m.text; }
-  if(m.ttfb!==undefined && m.ttfb!==null) c.ttfb.textContent=m.ttfb+'ms';
-  if(m.ms!==undefined) c.tot.textContent='· '+m.ms+'ms total';
-  c.kv.textContent=kvText(m.usage);
+  const arm=FEED.rec.arms[panel];
+  if(m.error) arm.error=m.error;
+  else if(m.text) arm.text=m.text;
+  if(m.ttfb!==undefined && m.ttfb!==null) arm.ttfb=m.ttfb;
+  if(m.ms!==undefined) arm.ms=m.ms;
+  arm.usage=m.usage||null;
+  paintArm(FEED.cards[panel],arm);
+  paintIntel(FEED);
 }
+
+/* Latest evaluation/cartridges/run_bench.py summary (GET /api/bench). A live turn cannot measure
+   quality or end of speech -> first audio, so each turn's Intelligence panel shows the benchmark
+   for those, labelled as such. A simulated run is never shown as numbers. */
+let BENCH=null;
+async function loadBench(){
+  try{ const r=await fetch('/api/bench'); BENCH=r.ok ? await r.json() : null; }catch(e){ BENCH=null; }
+  renderChat();
+}
+loadBench();
 
 function renderAll(){
   renderSpaces(); renderSessions(); renderChat();
@@ -1837,7 +2014,10 @@ $('dlBtn').addEventListener('click',async()=>{
     const s=currentSession();
     if(!s||!s.turns.length){ toast(i18n('emptyChat')); return; }
     const md='# '+s.title+'\n\n> Memory Space: '+sp.name+'\n\n'+
-      s.turns.map(t=>(t.role==='user'?('**'+(t.speaker||i18n('you'))+'**\n\n'):'**SuperMem**\n\n')+t.text)
+      s.turns.map(t=>t.role==='cmp'
+        ? '**'+i18n('you')+'**\n\n'+t.text+['a','b'].map(k=>'\n\n**'+cmpTitle(t.arms[k])+'**'
+            +(t.arms[k].ttfb!=null?' ('+t.arms[k].ttfb+'ms)':'')+'\n\n'+(t.arms[k].error||t.arms[k].text)).join('')
+        : (t.role==='user'?('**'+(t.speaker||i18n('you'))+'**\n\n'):'**SuperMem**\n\n')+t.text)
         .join('\n\n---\n\n');
     saveFile(md,'supermem-'+sp.id+'-chat-'+stamp()+'.md','text/markdown');
     toast(i18n('downloadedChat')); return;
@@ -2527,7 +2707,7 @@ function handle(m){
     case 'cmp_start': {
       const st=CMP[m.panel];
       if(st){ st.text=''; st.err=''; st.ms=0; st.memory=!!m.memory;
-              st.cartridge=!!m.cartridge; st.usage=null; }
+              st.cartridge=!!m.cartridge; st.usage=null; st.model=m.model||''; }
       // The server says whether this arm actually got memory — it is the source of truth. Previously the title and the "injected into"
       // badge were computed from the local checkbox, and the checkbox can drift from the server (someone else
       // POSTed /api/compare, or this page was left open without refreshing). The result: the server gave the memory
@@ -2535,7 +2715,7 @@ function handle(m){
       // and the whole point of this demo is to make people trust those two columns on screen.
       if($('cmpMem'+m.panel.toUpperCase()))
         $('cmpMem'+m.panel.toUpperCase()).checked=!!m.memory;
-      renderCmp(); feedStart(m.panel,!!m.memory,!!m.cartridge); break;
+      renderCmp(); feedStart(m.panel,!!m.memory,!!m.cartridge,m.model); break;
     }
 
     case 'cmp_delta': {

@@ -9,10 +9,16 @@ it can observe and leaves the rest as ``None`` rather than guessing:
   ``--enable-prompt-tokens-details`` for ``cached_tokens``).
 * prefill GPU time: delta of vLLM's ``vllm:request_prefill_time_seconds``
   histogram sum around the request. Only exact when requests run one at a
-  time, which is how the benchmark runs them.
+  time, which is how the benchmark runs them -- so the histogram count must
+  have moved by exactly one; any other delta means another request overlapped
+  and the value is left ``None`` (``extra["metrics_overlap"]``).
+* cached tokens without ``--enable-prompt-tokens-details``: delta of
+  ``vllm:prefix_cache_hits_total`` over the same single-request window
+  (``extra["cached_source"] == "engine_counters"``).
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
@@ -79,6 +85,10 @@ class Engine:
         self.api_key = api_key
         self.timeout = timeout
         self.scrape_metrics = scrape_metrics
+        #: Take the "before" snapshot alongside the request instead of ahead of it, so it
+        #: adds no round trip to the TTFT a live viewer sees. Still exact: prefill counters
+        #: only move when a prefill finishes, and the count delta must be exactly one.
+        self.snapshot_in_flight = False
         self._transport = transport          # tests pass an ASGI transport here
         root = re.sub(r"/v1$", "", self.base_url)
         self.metrics_url = f"{root}/metrics"
@@ -97,16 +107,21 @@ class Engine:
             await self._client.aclose()
             self._client = None
 
-    async def _prefill_seconds(self) -> float | None:
+    async def _counters(self) -> dict | None:
+        """One /metrics snapshot of the counters a turn is measured from."""
         if not self.scrape_metrics:
             return None
         try:
             r = await self.client.get(self.metrics_url, timeout=5.0)
             if r.status_code != 200:
                 return None
-            return _metric_sum(r.text, "vllm:request_prefill_time_seconds_sum")
         except httpx.HTTPError:
             return None
+        snap = {k: _metric_sum(r.text, name) for k, name in (
+            ("prefill_s", "vllm:request_prefill_time_seconds_sum"),
+            ("prefill_n", "vllm:request_prefill_time_seconds_count"),
+            ("cache_hits", "vllm:prefix_cache_hits_total"))}
+        return snap if snap["prefill_s"] is not None else None
 
     async def version(self) -> str | None:
         try:
@@ -130,7 +145,8 @@ class Engine:
                      cache_salt: str | None = None) -> AsyncIterator[tuple[str, object]]:
         """Yields ("delta", str) while generating, then exactly one ("done", TurnResult)."""
         res = TurnResult(arm=self.arm)
-        before = await self._prefill_seconds()
+        before_task = asyncio.ensure_future(self._counters()) if self.snapshot_in_flight else None
+        before = None if before_task else await self._counters()
         t0 = time.perf_counter()
         try:
             async with self.client.stream(
@@ -170,10 +186,26 @@ class Engine:
         res.total_ms = (time.perf_counter() - t0) * 1000
         if res.ttfs_ms is None and res.text:
             res.ttfs_ms = res.total_ms
-        after = await self._prefill_seconds()
+        if before_task is not None:
+            before = await before_task
+        after = await self._counters()
         if before is not None and after is not None:
-            res.prefill_gpu_ms = (after - before) * 1000
+            self._apply_counters(res, before, after)
         yield "done", res
+
+    @staticmethod
+    def _apply_counters(res: TurnResult, before: dict, after: dict) -> None:
+        n0, n1 = before["prefill_n"], after["prefill_n"]
+        # Without the count we cannot tell whether the window held only this request:
+        # keep the old behaviour (sum delta) for engines that expose just the sum.
+        if n0 is not None and n1 is not None and n1 - n0 != 1:
+            res.extra["metrics_overlap"] = True
+            return
+        res.prefill_gpu_ms = (after["prefill_s"] - before["prefill_s"]) * 1000
+        h0, h1 = before["cache_hits"], after["cache_hits"]
+        if res.cached_tokens is None and n0 is not None and h0 is not None and h1 is not None:
+            res.cached_tokens = int(h1 - h0)
+            res.extra["cached_source"] = "engine_counters"
 
     async def complete(self, messages: list[dict], max_tokens: int = 96,
                        cache_salt: str | None = None) -> TurnResult:

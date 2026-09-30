@@ -8,6 +8,7 @@ estimate mode). Run directly::
 """
 import asyncio
 import sys
+import time
 import unittest
 from pathlib import Path
 
@@ -197,6 +198,69 @@ class EngineEndToEndTest(unittest.TestCase):
             await e.close()
             return r
         self.assertEqual(asyncio.run(go()).cached_tokens, 0)
+
+
+class EngineCountersTest(unittest.TestCase):
+    """/metrics deltas around one request: only trusted when that request was the only one."""
+
+    def test_in_flight_snapshot_measures_the_same_window(self):
+        # Live demo: the "before" snapshot must not delay the request (it would add a
+        # round trip to the TTFT the viewer sees), so it runs alongside it.
+        async def go():
+            e = self._engine(after_count=11, metrics_delay=0.2, post_delay=0.2)
+            e.snapshot_in_flight = True
+            t0 = time.perf_counter()
+            r = await e.complete([{"role": "user", "content": "q"}])
+            took = time.perf_counter() - t0
+            await e.close()
+            return r, took
+        r, took = asyncio.run(go())
+        self.assertAlmostEqual(r.prefill_gpu_ms, 250.0)
+        self.assertEqual(r.cached_tokens, 900)
+        self.assertLess(took, 0.55)          # sequential: scrape + request + scrape >= 0.6 s
+
+    @staticmethod
+    def _engine(after_count, metrics_delay=0.0, post_delay=0.0):
+        # Counter snapshots the engine sees: before the request, then after it.
+        snaps = iter([(10, 1.0, 100, 50), (after_count, 1.25, 1100, 950)])
+
+        async def handler(req):
+            if req.url.path == "/metrics":
+                await asyncio.sleep(metrics_delay)
+                n, s, q, h = next(snaps)
+                return httpx.Response(200, text=(
+                    f'vllm:request_prefill_time_seconds_count{{m="x"}} {n}\n'
+                    f'vllm:request_prefill_time_seconds_sum{{m="x"}} {s}\n'
+                    f'vllm:prefix_cache_queries_total{{m="x"}} {q}\n'
+                    f'vllm:prefix_cache_hits_total{{m="x"}} {h}\n'))
+            await asyncio.sleep(post_delay)
+            # usage without prompt_tokens_details: vLLM without --enable-prompt-tokens-details
+            body = ('data: {"choices":[{"delta":{"content":"ok."}}]}\n\n'
+                    'data: {"choices":[],"usage":{"prompt_tokens":1000,"completion_tokens":1}}\n\n'
+                    'data: [DONE]\n\n')
+            return httpx.Response(200, text=body)
+        return Engine("http://gpu/v1", "m", arm="t", transport=httpx.MockTransport(handler))
+
+    def _run(self, after_count):
+        async def go():
+            e = self._engine(after_count)
+            r = await e.complete([{"role": "user", "content": "q"}])
+            await e.close()
+            return r
+        return asyncio.run(go())
+
+    def test_single_request_window_is_measured(self):
+        r = self._run(after_count=11)
+        self.assertAlmostEqual(r.prefill_gpu_ms, 250.0)
+        self.assertEqual(r.cached_tokens, 900)
+        self.assertEqual(r.extra.get("cached_source"), "engine_counters")
+        self.assertAlmostEqual(r.recomputed_frac, 0.1)
+
+    def test_overlapping_requests_are_not_measured(self):
+        r = self._run(after_count=12)      # someone else's request finished prefill too
+        self.assertIsNone(r.prefill_gpu_ms)
+        self.assertIsNone(r.cached_tokens)
+        self.assertTrue(r.extra.get("metrics_overlap"))
 
 
 if __name__ == "__main__":
