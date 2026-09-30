@@ -25,6 +25,7 @@ MAX_DOCX_XML = 20 * 1024 * 1024          # word/document.xml, uncompressed (zip-
 MAX_DOCX_UNZIPPED = 200 * 1024 * 1024
 TEXT_EXTS = {"", ".txt", ".md", ".markdown", ".json"}
 ASSISTANT_NAMES = {"assistant", "agent", "ai", "bot"}
+SELF_NAMES = {"me", "i", "myself", "user"}
 SKIP_ROLES = {"system", "developer", "tool", "function"}   # instructions and tool output, not people
 
 # An optional chat-export timestamp ("[10:31]", "10/03/2024, 10:31 -") before "Name: text".
@@ -198,7 +199,9 @@ def split_transcript(text: str, owner: str = "") -> list[Chunk]:
     if owner_key and owner_key not in {p.lower() for p in people}:
         raise ValueError(f"Speaker {owner!r} is not in the transcript. "
                          f"Speakers: {', '.join(people) or 'none'}.")
-    owner_key = owner_key or (people[0].lower() if people else "")
+    # A "Me:" / "User:" label names the owner outright; otherwise the first person to speak.
+    self_label = next((p for p in people if p.lower() in SELF_NAMES), "")
+    owner_key = owner_key or (self_label or (people[0] if people else "")).lower()
     chunks: list[Chunk] = []
     for who, said, is_assistant in turns:
         if is_assistant:

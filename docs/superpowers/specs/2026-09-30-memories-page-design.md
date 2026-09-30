@@ -297,3 +297,43 @@ network (see `tests/test_compare.py`).
    does. If not, ship substring search only.
 3. Confirm removing a space directory is safe while its SQLite files were
    opened by a now-dropped instance.
+
+The three open items were resolved by a code investigation before implementation.
+The answers, and the design changes they forced, are the "Amendments" section of
+`docs/superpowers/plans/2026-09-30-memories-page.md`.
+
+## Round two: adversarial review
+
+Six review lenses (core, lifecycle, safety, ingest/API, frontend, regressions)
+reported 34 findings. Two independent skeptics per finding confirmed 33 of them,
+mostly at medium or low severity. What changed as a result:
+
+- **A cleared or deleted brain is retired, not just dropped.** `_wipe_space`
+  takes the brain's write lock and calls `Orchestrator.retire()`. Any later
+  write through the old instance fails with "This brain was cleared or
+  deleted." That covers queued voice `async_facts` threads, a remember task
+  that still holds the old instance, an ingest whose upload was planned before
+  the wipe, and an edit queued behind the clear. Before this, those writes
+  recreated the directory or leaked rows into the new, empty brain.
+- **Clearing the live brain refuses new voice sessions while it runs** (the
+  `_CLEARING` set; the websocket is closed with 1013).
+- **Uploads:** the body is read with a running 10 MB cap (413) after the brain
+  is resolved; DOCX zip entries are size-checked before parsing (zip-bomb
+  guard); cross-origin writes get 403 from a small ASGI middleware (Origin vs
+  Host, not auth).
+- **Detection and splitting:** `Key: value` notes, email headers and action
+  lists stay prose unless an assistant speaks or the voices alternate;
+  chat-export timestamps are allowed before `Name:`; JSON system, developer,
+  tool and function turns are skipped; a `Me:`/`User:` speaker is the default
+  owner; text before the first turn is an owner turn.
+- **Edit keeps the old entity links when the annotator LLM fails.**
+- **The page:** no double submit; a finishing load no longer destroys an open
+  edit; empty states and totals follow the filters; loading states after Clear
+  and on brain switch; IME-safe Enter; focus kept after row actions; row
+  actions reachable at 375 px; drops outside the zone ignored; the demo's
+  "Memories →" link opens a new tab so it does not end the voice session.
+
+Left as is: a compare-mode turn that arrives during a live-brain clear can
+block the event loop briefly while it opens its brain, and opening a brain that
+is not yet open waits behind a slow clear. Both need compare-mode changes
+outside this work.

@@ -165,6 +165,11 @@ class TranscriptTest(unittest.TestCase):
         chunks = split_transcript("Bot: hello\nAlice: hi\nBob: hey\nAlice: I am vegetarian")
         self.assertEqual([c.speaker for c in chunks], ["user", "Bob", "user"])
 
+    def test_self_label_beats_first_speaker(self):
+        # "Me:" is the owner even when someone else speaks first; Tom keeps his name.
+        chunks = split_transcript("Tom: Flights are booked.\nMe: Great.\nTom: I will handle the hotel.")
+        self.assertEqual([c.speaker for c in chunks], ["Tom", "user", "Tom"])
+
     def test_named_owner_case_insensitive(self):
         chunks = split_transcript("Alice: hi\nBob: I live in Pune", owner="bob")
         self.assertEqual(chunks, [Chunk("hi", "Alice"), Chunk("I live in Pune", "user")])

@@ -61,10 +61,27 @@ def _confirm(space: str, body: Confirm) -> None:
         raise HTTPException(400, "Type the brain's name exactly to confirm.")
 
 
-def _cross_origin(req: Request) -> bool:
-    """A browser request from another site. curl and same-origin fetches pass."""
-    origin = req.headers.get("origin")
-    return bool(origin) and urlsplit(origin).netloc != req.headers.get("host")
+class _SameOriginWrites:
+    """Refuse cross-site writes app-wide; curl and same-origin fetches pass.
+
+    Plain ASGI rather than @app.middleware("http"): that wraps every demo response in
+    Starlette's BaseHTTPMiddleware, which logs "Task was destroyed" when a client drops a request.
+    ponytail: Origin vs Host only; add real auth before exposing the demo beyond a LAN.
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] == "http" and scope["method"] not in ("GET", "HEAD", "OPTIONS"):
+            headers = dict(scope["headers"])
+            origin = headers.get(b"origin", b"").decode("latin-1")
+            host = headers.get(b"host", b"").decode("latin-1")
+            if origin and urlsplit(origin).netloc != host:
+                refused = JSONResponse({"detail": "Cross-origin request refused."}, status_code=403)
+                await refused(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
 
 
 async def _read_capped(req: Request) -> bytes:
@@ -89,12 +106,7 @@ def register_routes(app, *, resolve, delete_space, clear_space, facts, profile, 
     another site could POST text into a brain with a no-preflight "simple" request.
     """
 
-    @app.middleware("http")
-    async def refuse_cross_origin(req: Request, call_next):
-        # ponytail: Origin vs Host only; add real auth before exposing the demo beyond a LAN.
-        if req.method not in ("GET", "HEAD", "OPTIONS") and _cross_origin(req):
-            return JSONResponse({"detail": "Cross-origin request refused."}, status_code=403)
-        return await call_next(req)
+    app.add_middleware(_SameOriginWrites)
 
     def mem_of(space: str) -> Any:
         return _call(resolve, space)
