@@ -1,0 +1,48 @@
+graph TB
+  subgraph S0["1 · INGEST + COMPILE + PUSH  (background: post-call, doc upload)"]
+    M["SuperMem memory<br/>facts · traits · account"]
+    D["Org documents<br/>policy · FAQ · SOPs"]
+    C["Context Compiler<br/>canonical · versioned · token-aligned"]
+    CS[("Cartridge Store<br/>scope → current id · text · tokens<br/>(tier, chain_key) → populated_at · hit")]
+    ZI[("Chunk Index<br/>zvec in-process · tenant/org filter")]
+    PR["kv_producer engine<br/>background vLLM · same model/TP/dtype<br/>prefills cartridge chains"]
+    M --> C
+    D --> C
+    C -->|"org-core · user · rel · chunk[i]"| CS
+    C -->|"chunk[i] 512 tok + embedding"| ZI
+    CS -->|"Tier.populate(chain)"| PR
+  end
+
+  subgraph S1["2 · CALL  (Context Runtime, per turn)"]
+    R0["ring"]
+    A1["ASR partial"]
+    E["end of speech"]
+    W["store.warm(plan, tier)<br/>prefix tier: whole chain · blend: per segment<br/>idempotent, skipped when hit observed"]
+    SEL["select(prev ∪ new, k)<br/>append-only order within a call"]
+    P["prompt<br/>[sys][org-core][user][rel] ‖ chunk_i ‖ chunk_j + turn"]
+    R0 -->|"whole cartridges"| W
+    A1 -->|"query(org, partial, k) → chunk ids"| W
+    E --> SEL
+    SEL --> P
+  end
+
+  subgraph S2["3 · INFERENCE  (pluggable KV tier, shared by producer + fleet)"]
+    F["vLLM · SGLang · Dynamo frontend"]
+    CN["KV connector<br/>phase 1: stock LMCache / OpenLake / KVBM<br/>phase 2: SuperMemConnector = Tier + blend.py"]
+    T[("shared KV tier<br/>LMCache · OpenLake · Dynamo KVBM<br/>CPU → NVMe → S3 · keyed by prefix chain<br/>HBM holds only active + hot KV")]
+    G["GPU: prefill the turn<br/>+ ~15% HKVD recompute (blend) · decode"]
+    TTS["TTS → caller"]
+    MT["metrics → bench / UI<br/>cached_tokens · prefill ms · gpu cache % · tier hit"]
+    F --> CN
+    CN -->|"get / put by chain key"| T
+    CN -->|"load only chunks in this prompt"| G
+    G -->|"stream"| TTS
+    G -.->|"usage · /metrics"| MT
+  end
+
+  PR -->|"push KV chains"| T
+  ZI -.->|"ids"| A1
+  CS -.->|"text · chain keys · hit state"| W
+  W -->|"warm request (hidden behind ring / speech)"| F
+  P -->|"cache_salt=tenant · kv_transfer_params.cartridges=[ids]"| F
+  TTS -.->|"memory write → version bump → new id"| M

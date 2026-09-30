@@ -1,0 +1,41 @@
+sequenceDiagram
+  autonumber
+  participant Ph as Phone / ASR
+  participant RT as Context Runtime
+  participant IX as Chunk Index (zvec)
+  participant ST as Cartridge Store
+  participant PR as kv_producer (background vLLM)
+  participant EN as serving vLLM / Dynamo
+  participant KV as shared KV tier
+  participant MEM as SuperMem memory
+
+  Note over MEM,PR: Before the call: memory + docs → Compiler → cartridges → Store · Index
+  ST->>PR: Tier.populate(chain [sys][org-core][user][rel])
+  PR->>KV: push KV under chain keys (same model/TP as the fleet)
+
+  Ph->>RT: ring (caller id known)
+  RT->>ST: warm(plan=[org-core, user, rel], tier)
+  ST-->>RT: hit observed for this chain: skip
+  Note right of ST: cold path: one prefill of the chain via serving engine, hidden behind the ring
+
+  Ph->>RT: ASR partial "my knee pain is..."
+  RT->>IX: query(org, partial, k)
+  IX-->>RT: chunk ids [c12, c40]
+  RT->>ST: warm(plan + [c12, c40], tier)
+  ST->>EN: prefix tier: chain + c12 + c40 · blend: c12, c40 alone
+  EN->>KV: put under chain keys
+  Note right of ST: hidden behind speech
+
+  Ph->>RT: end of speech (final text)
+  RT->>IX: query(org, final, k)
+  IX-->>RT: [c12, c40, c07]
+  RT->>RT: select → [c12, c40, c07] (append-only: c07 extends the chain)
+  RT->>EN: chat: [sys][org-core][user][rel] ‖ c12 ‖ c40 ‖ c07 + turn<br/>cache_salt=tenant · kv_transfer_params.cartridges=[ids]
+  EN->>KV: get only these chain keys
+  KV-->>EN: KV blocks (c07 cold on a prefix tier → recomputed · warm on blend)
+  Note over EN: prefill the turn · blend: recompute ~15% HKVD · HBM holds this request only
+  EN-->>RT: stream tokens (TTFT) + usage.cached_tokens
+  RT-->>Ph: TTS first sentence
+
+  Ph->>MEM: after reply: memory write (new facts)
+  MEM-->>ST: version bump → new id → producer pushes the new chain before the next call
