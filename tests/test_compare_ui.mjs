@@ -25,7 +25,7 @@ const src = slice('const CMP={ on:false', 'async function cmpLoad(');
 
 // ── stub DOM ──────────────────────────────────────────────────────────────────
 const EN = { cmpWith: 'With SuperMem', cmpWithout: 'Without SuperMem',
-             cmpWithCart: 'With SuperMem · KV cartridge', cmpKvReused: 'KV reused',
+             cmpWithCart: 'With SuperMem · KV cartridge',
              cmpWaiting: 'waiting for this turn…', cmpCtxEmpty: 'Nothing retrieved',
              cmpCtxNobody: 'neither arm has memory on' };
 const nodes = {};
@@ -59,8 +59,8 @@ ctx.window = ctx;
 
 // eval the real code in that context
 const fn = new Function('$', 'i18n', 'toast', 'fetch', 'document',
-                        src + '\nreturn {CMP, renderCmp, cmpReset, cmpApply, kvText};');
-const { CMP, renderCmp, cmpReset, cmpApply, kvText } =
+                        src + '\nreturn {CMP, renderCmp, cmpReset, cmpApply, kvGrid, kvPer, latBar};');
+const { CMP, renderCmp, cmpReset, cmpApply, kvGrid, kvPer, latBar } =
   fn(ctx.$, ctx.i18n, ctx.toast, ctx.fetch, ctx.document);
 
 const labelOf = (u) => nodes['cmpCol' + u]._lab.textContent;
@@ -158,10 +158,43 @@ t('a cartridge arm is titled as one, but only while it has memory', () => {
   assert.strictEqual(nodes.cmpCartA.checked, true);
 });
 
-t('KV reuse is shown only from what the engine reported', () => {
-  assert.strictEqual(kvText({ prompt_tokens: 2000, cached_tokens: 1500 }), 'KV reused 75% · 1,500/2,000 tok');
-  assert.strictEqual(kvText({ prompt_tokens: 2000, cached_tokens: null }), '', 'no cached_tokens -> say nothing');
-  assert.strictEqual(kvText(null), '');
+t('KV grid: one cell per block, reused prefix blue, unknown reuse outlined', () => {
+  const cls = (h) => [...h.matchAll(/<i class="([^"]*)"/g)].map(m => m[1]);
+  const txt = (h) => h.replace(/<[^>]+>/g, '');
+  // The screenshot turn: 1,920 prompt, 1,024 reused, 16 tok per cell -> 64 hit + 56 prefilled.
+  const g = kvGrid({ prompt_tokens: 1920, cached_tokens: 1024 }, 16);
+  const c = cls(g);
+  assert.strictEqual(c.length, 120);
+  assert.strictEqual(c.filter(x => x === 'hit').length, 64);
+  assert.strictEqual(c.filter(x => x === '').length, 56);
+  assert.ok(txt(g).endsWith('1,024 / 1,920 reused · 896 prefilled (46.7%)'));
+  assert.ok(g.includes('1 cell = 16 tok'), 'scale is on the grid tooltip');
+  // A block only partly served from cache is its own shade, not rounded either way.
+  assert.deepStrictEqual(cls(kvGrid({ prompt_tokens: 40, cached_tokens: 24 }, 16)), ['hit', 'part', '']);
+  const u = kvGrid({ prompt_tokens: 40, cached_tokens: null }, 16);
+  assert.deepStrictEqual(cls(u), ['unk', 'unk', 'unk'], 'unreported reuse is unknown, not zero');
+  assert.ok(u.includes('reuse not reported'));
+  assert.strictEqual(kvGrid({ prompt_tokens: 0, cached_tokens: 0 }, 16), null);
+  assert.strictEqual(kvGrid(null, 16), null);
+});
+
+t('KV grid scale: 16-token blocks, coarser only when the prompt would overflow', () => {
+  assert.strictEqual(kvPer(0), 16);
+  assert.strictEqual(kvPer(1920), 16);
+  assert.strictEqual(kvPer(15280), 96);
+  assert.ok(Math.ceil(15280 / kvPer(15280)) <= 168);
+});
+
+t('latency bars share one scale; a missing first token is not drawn as instant', () => {
+  const w = (h) => [...h.matchAll(/width:([\d.]+)%/g)].map(m => +m[1]);
+  const max = 1674;
+  assert.deepStrictEqual(w(latBar({ ttfb: 1189, ms: 1674 }, max)), [71.0, 29.0]);
+  const b = latBar({ ttfb: 924, ms: 1040 }, max);
+  assert.deepStrictEqual(w(b), [55.2, 6.9]);
+  assert.ok(b.includes('<b>924 ms</b> first token · 1040 ms total'));
+  assert.deepStrictEqual(w(latBar({ ttfb: 924, ms: null }, max)), [55.2, 0], 'mid-stream: TTFT only');
+  assert.ok(latBar({ ttfb: null, ms: 800 }, max).includes('no first token · 800 ms total'));
+  assert.strictEqual(latBar({ ttfb: null, ms: null }, max), null);
 });
 
 console.log(`\n${pass} passed`);

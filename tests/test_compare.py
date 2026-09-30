@@ -434,5 +434,57 @@ class CartridgeArmTest(unittest.TestCase):
         self.assertFalse(start["b"]["cartridge"])
 
 
+class PlainArmUsageTest(unittest.TestCase):
+    """The plain (non-cartridge) provider reports prompt / cached tokens too, so the
+    Intelligence panel can draw both arms' KV grids."""
+
+    def _run(self, usage):
+        from types import SimpleNamespace as NS
+        from unittest import mock
+
+        from supermem.reply import openai_reply
+
+        def chunk(content=None, usage=None):
+            choices = [NS(delta=NS(content=content))] if content is not None else []
+            return NS(choices=choices, usage=usage)
+
+        async def stream():
+            for c in (chunk("hel"), chunk("lo"), chunk(usage=usage)):
+                yield c
+
+        class FakeClient:
+            def __init__(self, **_):
+                self.chat = NS(completions=NS(create=self.create))
+
+            async def create(self, **kw):
+                self.kw = kw
+                return stream()
+
+        fn = openai_reply(model="m", api_key="k", base_url="http://x/v1")
+        with mock.patch("openai.AsyncOpenAI", FakeClient):
+            text = asyncio.run(self._join(fn))
+        return fn, text
+
+    @staticmethod
+    async def _join(fn):
+        return "".join([d async for d in fn("hi")])
+
+    def test_usage_chunk_without_choices_is_captured_not_crashed_on(self):
+        from types import SimpleNamespace as NS
+        fn, text = self._run(NS(prompt_tokens=412, prompt_tokens_details=NS(cached_tokens=384)))
+        self.assertEqual(text, "hello")
+        self.assertEqual(fn.last_usage, {"prompt_tokens": 412, "cached_tokens": 384})
+
+    def test_unreported_cached_tokens_stay_none_not_zero(self):
+        from types import SimpleNamespace as NS
+        fn, _ = self._run(NS(prompt_tokens=412, prompt_tokens_details=None))
+        self.assertEqual(fn.last_usage, {"prompt_tokens": 412, "cached_tokens": None})
+
+    def test_no_usage_reported_leaves_none(self):
+        fn, text = self._run(None)
+        self.assertEqual(text, "hello")
+        self.assertIsNone(fn.last_usage)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

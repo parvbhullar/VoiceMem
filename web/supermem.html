@@ -31,12 +31,12 @@ button{cursor:pointer;background:none;border:none}
 ::-webkit-scrollbar-track{background:transparent}
 :focus-visible{outline:2px solid #8ab4f8;outline-offset:2px;border-radius:6px}
 
-/* Collapsing the sidebar keeps the centre column width; the brain map is sized by height — the whole screen just shifts sideways, no reflow.
-   Only when the window really cannot fit do the two columns shrink to their minmax floor. */
+/* Top bar across the full width; below it the stage (brain map + controls) on the left and a
+   full-height chat panel on the right. */
 #app{
-  position:fixed;inset:0;display:grid;
-  grid-template-columns:minmax(340px,420px) minmax(560px,1fr);
-  transition:grid-template-columns .3s cubic-bezier(.2,.8,.2,1);
+  position:fixed;inset:0;display:grid;gap:12px;padding:0 12px 12px;
+  grid-template-columns:minmax(0,1fr) clamp(380px,36vw,620px);
+  grid-template-rows:auto minmax(0,1fr);
 }
 
 /* ── Sidebar ─────────────────────────────────────────────────────── */
@@ -75,17 +75,21 @@ button{cursor:pointer;background:none;border:none}
 .side-foot{padding:10px 14px;border-top:1px solid var(--line);font-size:11.5px;
   letter-spacing:.14em;color:var(--txt-3)}
 
-/* ── Centre column ─────────────────────────────────────────────────── */
-.center{display:flex;flex-direction:column;gap:10px;min-width:0;min-height:0;padding:14px}
-#orb{display:block;flex:0 1 26%;height:26%;min-height:0;width:auto;aspect-ratio:1/1;
-  margin:0 auto;opacity:.75;pointer-events:none;border-radius:50%}
+/* ── Left stage: brain map + controls ─────────────────────────────── */
+.stage{display:flex;flex-direction:column;gap:12px;min-width:0;min-height:0}
+.controls{flex:0 0 clamp(236px,36%,330px);min-height:0;display:grid;gap:12px;
+  grid-template-columns:auto minmax(0,1fr) minmax(0,1fr) minmax(0,1.3fr);
+  grid-template-rows:minmax(0,1fr);grid-template-areas:"orb in rc out"}
+.controls>.panel{min-height:0;overflow-y:auto}
+.p-in{grid-area:in} .p-recall{grid-area:rc} .p-out{grid-area:out}
+#orb{grid-area:orb;align-self:center;width:132px;height:132px;
+  opacity:.75;pointer-events:none;border-radius:50%}
 .panel{border:1px solid var(--line);border-radius:var(--radius);background:var(--bg-panel);
   padding:12px 14px;display:flex;flex-direction:column;min-height:0}
 .panel-h{flex:0 0 auto;display:flex;align-items:center;gap:8px;margin-bottom:9px;
   font-size:11px;letter-spacing:.13em;text-transform:uppercase;color:var(--txt-3)}
 .panel-h::after{content:"";flex:1;height:1px;background:var(--line)}
 
-.p-in{flex:0 0 auto}
 .spk{display:flex;align-items:center;gap:8px;margin-bottom:9px}
 .spk .av{width:22px;height:22px;flex:0 0 22px;border-radius:50%;display:flex;
   align-items:center;justify-content:center;font-size:11px;color:#141414;background:var(--blue)}
@@ -109,7 +113,6 @@ button{cursor:pointer;background:none;border:none}
 .tag.ent:not(.off){border-color:rgba(107,167,240,.42);color:#a5cbf7}
 .tag.sch:not(.off){border-color:rgba(121,215,162,.42);color:#a2e3bf}
 
-.p-recall{flex:0 1 auto;max-height:32%}
 .recall-cols{flex:1;min-height:0;display:grid;grid-template-columns:1fr 1fr;gap:14px}
 .rc{display:flex;flex-direction:column;min-height:0}
 .rc-h{flex:0 0 auto;font-size:10.5px;letter-spacing:.1em;margin-bottom:6px;color:var(--txt-3)}
@@ -121,7 +124,6 @@ button{cursor:pointer;background:none;border:none}
 .rc .sc{flex:0 0 auto;color:var(--txt-3);font-variant-numeric:tabular-nums;font-size:11px}
 .rc .none{font-size:12.5px;color:var(--txt-3);padding:6px 0}
 
-.p-out{flex:1 1 auto;min-height:150px}
 .reply{flex:1;min-height:38px;overflow:auto;font-size:15px;line-height:1.6;
   color:var(--txt);white-space:pre-wrap}
 .reply.idle{color:var(--txt-3)}
@@ -367,7 +369,9 @@ a.btn{text-decoration:none}
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .turn-said b{color:var(--txt-3);font-weight:600;letter-spacing:.06em;
   font-size:10.5px;margin-right:7px;text-transform:uppercase}
-.turn-cols{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+/* Column flow: card A, its viz, card B, its viz. Two columns = cards on one row, vizzes aligned on the
+   next; one column = each viz stays under its own card. */
+.turn-cols{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:auto auto;grid-auto-flow:column;gap:12px}
 .tc{border:1px solid var(--line);border-radius:var(--radius);
   background:var(--bg-panel);overflow:hidden;min-width:0}
 .tc.mem{border-color:rgba(121,215,162,.45)}
@@ -381,8 +385,6 @@ a.btn{text-decoration:none}
 .tc-h .ttfb{font-size:11px;color:var(--txt);font-variant-numeric:tabular-nums}
 .tc.mem .tc-h .ttfb{color:var(--mint)}
 .tc-h .tot{font-size:10px;color:var(--txt-3);font-variant-numeric:tabular-nums}
-.tc-kv{padding:0 12px 8px;font-size:10.5px;color:var(--mint);font-variant-numeric:tabular-nums}
-.tc-kv:empty{display:none}
 .tc-body{padding:10px 12px;font-size:13px;line-height:1.62;white-space:pre-wrap;
   word-break:break-word;min-height:44px}
 .tc-body.idle{color:var(--txt-3)}
@@ -417,14 +419,71 @@ a.btn{text-decoration:none}
 .intel-note{font-size:11px;color:var(--txt-3);padding:8px 8px 0;line-height:1.5}
 .intel-bench{margin-top:10px}
 .intel .mt-table td:first-child{color:var(--txt-2)}
-@media (max-width:1100px){ .turn-cols{grid-template-columns:1fr} }
+/* Latency bar + KV prefill grid under each response card (paintViz). Reuse is blue in both arms:
+   a no-memory arm can hit the prefix cache too, and mint already means "the arm with memory". */
+.tc-viz{padding:0 2px;color:var(--txt-2);min-width:0}
+.tc-viz.mem{color:var(--mint)}
+.tc-viz .kvg{margin-top:10px}
+.kvg i,.key{border-radius:2px;background:rgba(255,255,255,.1)}
+.lat{display:flex;height:8px;border-radius:4px;background:rgba(255,255,255,.05);overflow:hidden}
+.lat i{display:block;height:100%}
+.lat-ft{background:var(--txt-2)} .lat-rest{background:var(--txt-2);opacity:.3}
+.tc-viz.mem .lat-ft,.tc-viz.mem .lat-rest{background:var(--mint)}
+.kvg{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,8px);grid-auto-columns:8px;gap:2px;width:max-content}
+.kvg i.hit,.key.hit{background:var(--blue)} .kvg i.part{background:var(--blue);opacity:.45}
+.kvg i.unk{background:none;box-shadow:inset 0 0 0 1px var(--line-2)}
+.key{display:inline-block;width:8px;height:8px;margin-right:4px;vertical-align:-1px}
+.viz-cap{font-size:11px;margin-top:5px;font-variant-numeric:tabular-nums}
+.viz-cap b{font-weight:600}
+.viz-cap.na{font-style:italic;color:var(--txt-3)}
+@media (max-width:1100px){ .turn-cols{grid-template-columns:1fr;grid-auto-flow:row} }
 </style>
 </head>
 <body>
 <div id="app">
 
-  <!-- (2) Live conversation -->
-  <section class="center">
+  <div class="topbar">
+    <div class="seg-gone brand">
+      <img src="./images/unpod-icon.png" alt="" class="brand-ic" />
+      <img src="./images/unpod-wordmark.png" alt="Unpod" class="brand-wm" />
+    </div>
+    <div class="export">
+      <a class="btn sm" href="/memories" target="_blank" rel="noopener" data-i18n="memoriesLink">Memories →</a>
+      <button class="btn sm" id="btnNew" data-i18n-title="newChat"
+              title="New chat" data-i18n="newChat">New chat</button>
+      <select class="sel" id="langSel" data-i18n-title="langTitle" title="Language">
+        <option value="en">EN</option>
+        <option value="hi">हिंदी</option>
+      </select>
+      <select class="sel" id="dlScope" data-i18n-title="dlScopeTitle" title="What to download">
+        <option value="all" data-i18n="dlAll">All memories in this space</option>
+        <option value="left" data-i18n="dlLeft">Left · Facts</option>
+        <option value="right" data-i18n="dlRight">Right · Profile</option>
+        <option value="chat" data-i18n="dlChat">This conversation</option>
+      </select>
+      <button class="btn sm" id="dlBtn" data-i18n="download">Download</button>
+    </div>
+  </div>
+
+  <!-- Left: brain map on top, live controls below -->
+  <section class="stage">
+    <div class="brainwrap" id="brainwrap">
+      <img id="brain" alt="" src="./images/background.webp" />
+      <canvas id="fx"></canvas>
+      <div class="core-title"><em data-i18n="coreTitleEm">Neural</em> <span data-i18n="coreTitleRest">Synthesis Core</span></div>
+      <div class="core-state" id="coreState"></div>
+      <div class="legend">
+        <span class="core-pill facts"><span class="arrow">→</span><span data-i18n="factsShort">Facts</span></span>
+        <span class="core-pill profile"><span data-i18n="profileShort">Profile</span><span class="arrow">→</span></span>
+      </div>
+      <div id="card" aria-hidden="true">
+        <div class="eb"><span class="sw" id="c-sw"></span><span class="kd" id="c-kd">entity</span><span class="id" id="c-id">#0000</span></div>
+        <div class="cbody" id="c-body">…</div>
+        <div class="ft"><span id="c-src">—</span></div>
+      </div>
+    </div>
+
+  <div class="controls">
     <canvas id="orb" width="264" height="264" aria-hidden="true"></canvas>
 
     <div class="panel p-in">
@@ -436,8 +495,6 @@ a.btn{text-decoration:none}
         <span class="lv" id="spkLv"><i></i><i></i><i></i><i></i><i></i></span>
       </div>
       <div class="live-text idle" id="liveInput" data-i18n="waitingYou">Waiting for you to speak…</div>
-      <input id="textIn" class="textin" data-i18n-ph="typeHint"
-             placeholder="Or just type and press Enter" />
       <div class="tags" id="tags"></div>
     </div>
 
@@ -520,63 +577,19 @@ a.btn{text-decoration:none}
         </div>
       </div>
     </div>
+  </div>
   </section>
 
-  <!-- ③ Chat / Memory Space -->
-  <section class="rightpane">
-    <div class="topbar">
-      <div class="seg-gone brand">
-        <img src="./images/unpod-icon.png" alt="" class="brand-ic" />
-        <img src="./images/unpod-wordmark.png" alt="Unpod" class="brand-wm" />
-      </div>
-      <div class="export">
-        <a class="btn sm" href="/memories" target="_blank" rel="noopener" data-i18n="memoriesLink">Memories →</a>
-        <button class="btn sm" id="btnNew" data-i18n-title="newChat"
-                title="New chat" data-i18n="newChat">New chat</button>
-        <select class="sel" id="langSel" data-i18n-title="langTitle" title="Language">
-          <option value="en">EN</option>
-          <option value="hi">हिंदी</option>
-        </select>
-        <select class="sel" id="dlScope" data-i18n-title="dlScopeTitle" title="What to download">
-          <option value="all" data-i18n="dlAll">All memories in this space</option>
-          <option value="left" data-i18n="dlLeft">Left · Facts</option>
-          <option value="right" data-i18n="dlRight">Right · Profile</option>
-          <option value="chat" data-i18n="dlChat">This conversation</option>
-        </select>
-        <button class="btn sm" id="dlBtn" data-i18n="download">Download</button>
-      </div>
+  <!-- Right: full-height chat. #chatLog is the per-turn compare feed; addTurn() appends into it,
+       so older turns stay above while the brain map on the left lights up. -->
+  <section class="chatpane">
+    <div class="chat-head">
+      <span class="ttl" id="chatTitle" data-i18n="newChat">New chat</span>
     </div>
-
-    <!-- Split top/bottom: brain map on top (fixed height), per-turn compare feed below. This used to be two
-         side-swiped screens (chat / brain), only one visible at a time; but this demo needs exactly "watch where the brain
-         lights up while scrolling back through earlier turns". #chatLog is that feed's container; addTurn()
-         appends into it, so older turns simply stay above. -->
-    <div class="viewport">
-      <div class="rsplit">
-        <div class="brainpart">
-          <div class="brainwrap" id="brainwrap">
-            <img id="brain" alt="" src="./images/background.webp" />
-            <canvas id="fx"></canvas>
-            <div class="core-title"><em data-i18n="coreTitleEm">Neural</em> <span data-i18n="coreTitleRest">Synthesis Core</span></div>
-            <div class="core-state" id="coreState"></div>
-            <div class="legend">
-              <span class="core-pill facts"><span class="arrow">→</span><span data-i18n="factsShort">Facts</span></span>
-              <span class="core-pill profile"><span data-i18n="profileShort">Profile</span><span class="arrow">→</span></span>
-            </div>
-            <div id="card" aria-hidden="true">
-              <div class="eb"><span class="sw" id="c-sw"></span><span class="kd" id="c-kd">entity</span><span class="id" id="c-id">#0000</span></div>
-              <div class="cbody" id="c-body">…</div>
-              <div class="ft"><span id="c-src">—</span></div>
-            </div>
-          </div>
-        </div>
-        <div class="feedpart">
-          <div class="chat-head">
-            <span class="ttl" id="chatTitle" data-i18n="newChat">New chat</span>
-          </div>
-          <div class="chat" id="chatLog"></div>
-        </div>
-      </div>
+    <div class="chat" id="chatLog"></div>
+    <div class="composer">
+      <input id="textIn" class="textin" data-i18n-ph="typeHint"
+             placeholder="Or just type and press Enter" />
     </div>
   </section>
 </div>
@@ -628,7 +641,7 @@ const I18N = {
     cmpKeyPh:'अपनी key (ज़रूरी नहीं)', cmpUrlPh:'अपना endpoint (ज़रूरी नहीं)',
     cmpCtxNobody:'किसी भी तरफ़ मेमोरी चालू नहीं — यह किसी prompt में नहीं गया',
     cmpWith:'मेमोरी के साथ', cmpWithout:'मेमोरी के बिना', cmpWithCart:'मेमोरी · KV कार्ट्रिज',
-    cmpCart:'KV कार्ट्रिज', cmpCartTitle:'मेमोरी को दोबारा इस्तेमाल होने वाले KV कार्ट्रिज की तरह भेजें', cmpKvReused:'KV दोबारा इस्तेमाल',
+    cmpCart:'KV कार्ट्रिज', cmpCartTitle:'मेमोरी को दोबारा इस्तेमाल होने वाले KV कार्ट्रिज की तरह भेजें',
     cmpGearTitle:'model / endpoint / key',
     talkStart:'बात शुरू करें', talkEnd:'बंद करें', pause:'रोकें', resume:'जारी रखें',
     ended:'सेशन ख़त्म।',
@@ -680,7 +693,7 @@ const I18N = {
     cmpKeyPh:'own key (optional)', cmpUrlPh:'own endpoint (optional)',
     cmpCtxNobody:'neither arm has memory on — this went into no prompt',
     cmpWith:'With Memory', cmpWithout:'Without Memory', cmpWithCart:'With Memory · KV cartridge',
-    cmpCart:'KV cartridge', cmpCartTitle:'Carry the memory as a reusable KV cartridge (stable prompt prefix)', cmpKvReused:'KV reused',
+    cmpCart:'KV cartridge', cmpCartTitle:'Carry the memory as a reusable KV cartridge (stable prompt prefix)',
     cmpGearTitle:'model / endpoint / key', cmpIntel:'Intelligence',
     mtNotMeasured:'not measured', mtFull:'Full prefill', mtNone:'No memory', mtCart:'Cartridge',
     talkStart:'Start talking', talkEnd:'End session', pause:'Pause', resume:'Resume',
@@ -1622,16 +1635,44 @@ function cmpTitle(st){
   return i18n(st.memory ? (st.cartridge ? 'cmpWithCart' : 'cmpWith') : 'cmpWithout');
 }
 
-/* "KV reused 93% · 14,210/15,280 tok": straight from the engine's usage.
-   Nothing when the engine did not report cached tokens -- no guessing. */
+/* Percent of the prompt served from KV cache, straight from the engine's usage.
+   Null when the engine did not report cached tokens -- no guessing. */
 function kvPct(u){
   if(!u || u.prompt_tokens==null || u.cached_tokens==null) return null;
   return u.prompt_tokens ? Math.round(100*u.cached_tokens/u.prompt_tokens) : 0;
 }
-function kvText(u){
-  const pct=kvPct(u); if(pct===null) return '';
-  return i18n('cmpKvReused')+' '+pct+'% · '+u.cached_tokens.toLocaleString()+'/'
-         +u.prompt_tokens.toLocaleString()+' tok';
+
+/* Tokens per KV-grid cell, shared by both arms so equal area means equal tokens:
+   a multiple of vLLM's 16-token block, sized so the longer prompt fits ~168 cells. */
+function kvPer(maxPrompt){ return Math.max(16,Math.ceil(maxPrompt/168/16)*16); }
+
+/* The prompt as KV cells, filled column by column like a contribution graph:
+   blue = served from KV cache, grey = prefilled this turn, pale blue = partly reused.
+   Reuse the engine did not report draws outlined cells -- unknown, not zero. */
+function kvGrid(u,per){
+  if(!u || !u.prompt_tokens) return null;
+  const pt=u.prompt_tokens, hit=u.cached_tokens;
+  let cells='';
+  for(let i=0;i<Math.ceil(pt/per);i++){
+    const f=(hit-i*per)/per;
+    cells+='<i class="'+(hit==null ? 'unk' : f>=1 ? 'hit' : f>0 ? 'part' : '')+'"></i>';
+  }
+  const cap=hit==null ? pt.toLocaleString()+' tok · reuse not reported'
+    : '<span class="key hit"></span>'+hit.toLocaleString()+' / '+pt.toLocaleString()+' reused · '
+      +'<span class="key"></span>'+(pt-hit).toLocaleString()+' prefilled ('+(100*(pt-hit)/pt).toFixed(1)+'%)';
+  return '<div class="kvg" title="KV prefill · 1 cell = '+per+' tok">'+cells+'</div><div class="viz-cap">'+cap+'</div>';
+}
+
+/* One arm's latency on a scale shared with the other arm (max = the slower total):
+   solid = waiting for the first token, faint = the rest of the reply. */
+function latBar(a,max){
+  if(a.ttfb==null && a.ms==null) return null;
+  const w=v=>(100*v/max).toFixed(1)+'%', first=a.ttfb!=null ? a.ttfb : 0;
+  const rest=a.ms!=null ? Math.max(0,a.ms-first) : 0;
+  const cap=(a.ttfb!=null ? '<b>'+a.ttfb+' ms</b> first token' : 'no first token')
+    +(a.ms!=null ? ' · '+a.ms+' ms total' : '');
+  return '<div class="lat"><i class="lat-ft" style="width:'+w(first)+'"></i>'
+    +'<i class="lat-rest" style="width:'+w(rest)+'"></i></div><div class="viz-cap">'+cap+'</div>';
 }
 
 function cmpArms(){
@@ -1672,9 +1713,6 @@ function cmpApply(d){
   }
   $('cmpTg').classList.toggle('on',CMP.on);
   $('cmp').hidden=!CMP.on;
-  // By default the centre column is "height split by viewport, no scrolling". With compare on that height cannot fit both arms, so only
-  // in this mode does the centre column scroll and this panel get a usable minimum.
-  document.querySelector('.center').classList.toggle('cmp-on',CMP.on);
   document.querySelector('.p-out').classList.toggle('cmp-on',CMP.on);
   // A compare turn sends no answer_*, so the single-arm box would sit on "No reply yet" forever; keeping it only misleads.
   $('reply').hidden=CMP.on;
@@ -1791,11 +1829,13 @@ function buildCmpTurn(rec){
     const ttfb=document.createElement('span'); ttfb.className='ttfb';
     const tot=document.createElement('span'); tot.className='tot';
     h.append(who,ttfb,tot);
-    const kv=document.createElement('div'); kv.className='tc-kv';
     const body=document.createElement('div');
     body.className='tc-body idle'; body.textContent=i18n('cmpWaiting');
-    card.append(h,body,kv); cols.appendChild(card);
-    cards[panel]={card,who,ttfb,tot,kv,body,text:''};
+    card.append(h,body);
+    // Latency + KV prefill sit right under their own card (column-flow grid, see .turn-cols).
+    const viz=document.createElement('div'); viz.className='tc-viz';
+    cols.append(card,viz);
+    cards[panel]={card,who,ttfb,tot,viz,body,text:''};
   }
   wrap.appendChild(cols);
 
@@ -1823,6 +1863,7 @@ function buildCmpTurn(rec){
     const arm=rec.arms[panel];
     if(arm.started) paintArm(f.cards[panel],arm);
   }
+  paintViz(f);
   paintIntel(f);
   return f;
 }
@@ -1843,7 +1884,21 @@ function paintArm(c,arm){
   else { c.body.className='tc-body idle'; c.body.textContent=i18n('cmpWaiting'); }
   c.ttfb.textContent=arm.ttfb!=null ? arm.ttfb+'ms' : '';
   c.tot.textContent=arm.ms!=null ? '· '+arm.ms+'ms total' : '';
-  c.kv.textContent=kvText(arm.usage);
+}
+
+/* Under each response card: its latency bar and KV prefill grid. The two arms share one
+   time scale and one token scale, so length and area compare across the columns.
+   Latency shows from the first token; the grid once the engine's usage lands. */
+function paintViz(f){
+  const A=f.rec.arms.a, B=f.rec.arms.b, u=a=>a.usage||{};
+  const maxMs=Math.max(A.ms||A.ttfb||0, B.ms||B.ttfb||0)||1;
+  const per=kvPer(Math.max(u(A).prompt_tokens||0, u(B).prompt_tokens||0));
+  for(const [p,arm] of [['a',A],['b',B]]){
+    const kv=arm.ms==null ? '' : kvGrid(arm.usage,per)
+      || '<div class="viz-cap na">KV prefill: '+i18n('mtNotMeasured')+'</div>';
+    f.cards[p].viz.classList.toggle('mem',!!arm.memory);
+    f.cards[p].viz.innerHTML=(latBar(arm,maxMs)||'')+kv;
+  }
 }
 
 /* Per-turn "Intelligence": everything this turn measured, per arm. Same rule as the scorecard:
@@ -1852,21 +1907,11 @@ function paintIntel(f){
   const A=f.rec.arms.a, B=f.rec.arms.b, NA=i18n('mtNotMeasured');
   const roleName=a=>i18n(a.memory ? (a.cartridge ? 'mtCart' : 'mtFull') : 'mtNone');
   const u=a=>a.usage||{};
-  const tok=v=>v==null?null:v.toLocaleString()+' tok';
-  const rec=a=>{
-    const x=u(a); if(!x.prompt_tokens || x.cached_tokens==null) return null;
-    const r=x.prompt_tokens-x.cached_tokens;
-    return (100*r/x.prompt_tokens).toFixed(1)+'% · '+r.toLocaleString()+' tok';
-  };
   const cart=a=>u(a).cartridge_id ? u(a).cartridge_id+' · '+(u(a).cartridge_tokens||0).toLocaleString()+' tok' : null;
+  // Latency and KV prefill are drawn under the response cards (paintViz), not here.
   const rows=[
     ['Mode', roleName(A), roleName(B)],
     ['Model', A.model||'server default', B.model||'server default'],
-    ['TTFT', A.ttfb!=null?A.ttfb+' ms':null, B.ttfb!=null?B.ttfb+' ms':null],
-    ['Total', A.ms!=null?A.ms+' ms':null, B.ms!=null?B.ms+' ms':null],
-    ['Prompt tokens', tok(u(A).prompt_tokens), tok(u(B).prompt_tokens)],
-    ['Reused from KV cache', tok(u(A).cached_tokens), tok(u(B).cached_tokens)],
-    ['Recomputed', rec(A), rec(B)],
     ['Prefill GPU-ms', u(A).prefill_gpu_ms!=null?Math.round(u(A).prefill_gpu_ms)+' ms':null,
                        u(B).prefill_gpu_ms!=null?Math.round(u(B).prefill_gpu_ms)+' ms':null],
     ['Cartridge', cart(A), cart(B)],
@@ -1889,8 +1934,8 @@ function paintIntel(f){
     const fast=A.ttfb<=B.ttfb?A:B, slow=fast===A?B:A;
     head=cmpTitle(fast)+' '+(slow.ttfb/fast.ttfb).toFixed(2)+'× faster TTFT';
   }
-  const pt=u(A).prompt_tokens||u(B).prompt_tokens;
-  if(pt) head+=(head?' · ':'')+pt.toLocaleString()+' tok';
+  const pa=u(A).prompt_tokens, pb=u(B).prompt_tokens;
+  if(pa && pb) head+=(head?' · ':'')+pa.toLocaleString()+' vs '+pb.toLocaleString()+' prompt tok';
   f.intelHead.textContent=head;
 }
 
@@ -1945,6 +1990,7 @@ function feedStart(panel,memory,cartridge,model){
   const arm=Object.assign(blankArm(),{memory:!!memory,cartridge:!!cartridge,model:model||'',started:true});
   FEED.rec.arms[panel]=arm;
   paintArm(FEED.cards[panel],arm);
+  paintViz(FEED);
   paintIntel(FEED);
 }
 
@@ -1954,7 +2000,7 @@ function feedDelta(panel,text,ttfb){
   const atBottom = box && (box.scrollHeight-box.scrollTop-box.clientHeight < 60);
   arm.text+=(text||''); c.text=arm.text;
   c.body.className='tc-body'; c.body.textContent=arm.text;
-  if(ttfb!==undefined && ttfb!==null){ arm.ttfb=ttfb; c.ttfb.textContent=ttfb+'ms'; }
+  if(ttfb!==undefined && ttfb!==null){ arm.ttfb=ttfb; c.ttfb.textContent=ttfb+'ms'; paintViz(FEED); }
   // Only follow-scroll if it was already stuck to the bottom. Yanking the user back while they scroll through old turns is the most annoying thing.
   if(atBottom && box) box.scrollTop=box.scrollHeight;
 }
@@ -1968,6 +2014,7 @@ function feedDone(panel,m){
   if(m.ms!==undefined) arm.ms=m.ms;
   arm.usage=m.usage||null;
   paintArm(FEED.cards[panel],arm);
+  paintViz(FEED);
   paintIntel(FEED);
 }
 

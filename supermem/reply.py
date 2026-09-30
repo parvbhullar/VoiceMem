@@ -64,18 +64,36 @@ def openai_reply(model: str | None = None, api_key: str | None = None,
                 api_key=resolve_api_key(api_key),
                 base_url=resolve_base_url(base_url),
             )
+        fn.last_usage = None
         stream = await client.chat.completions.create(
             model=resolve_model(model, "reply"),
             stream=True,
+            stream_options={"include_usage": True},
             messages=[{"role": "system", "content": compose_system(memory_context, system)},
                       {"role": "user", "content": text}],
         )
         async for chunk in stream:
+            if chunk.usage:
+                fn.last_usage = usage_dict(chunk.usage)
+            if not chunk.choices:        # the usage chunk carries no choices
+                continue
             delta = chunk.choices[0].delta.content
             if delta:
                 yield delta
 
+    # The engine's own accounting, same shape the cartridge provider leaves, so the
+    # compare panel can show prompt / cached tokens for plain arms too.
+    fn.last_usage = None
     return fn
+
+
+def usage_dict(usage) -> dict:
+    """Prompt and cached tokens from an OpenAI ``usage`` object. ``cached_tokens``
+    stays None when the engine did not report it (vLLM needs
+    ``--enable-prompt-tokens-details``): unknown, not zero."""
+    details = getattr(usage, "prompt_tokens_details", None)
+    return {"prompt_tokens": usage.prompt_tokens,
+            "cached_tokens": getattr(details, "cached_tokens", None)}
 
 
 def normalize(fn: Callable) -> Callable:
