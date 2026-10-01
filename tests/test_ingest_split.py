@@ -74,7 +74,7 @@ class ExtractTest(unittest.TestCase):
     def test_unsupported_type_names_allowed(self):
         with self.assertRaises(ValueError) as cm:
             extract_text("setup.exe", b"MZ")
-        for ext in (".txt", ".md", ".json", ".pdf", ".docx"):
+        for ext in (".txt", ".md", ".json", ".yaml", ".pdf", ".docx"):
             self.assertIn(ext, str(cm.exception))
 
     def test_pdf_text_layer(self):
@@ -327,6 +327,49 @@ class ReviewFixesTest(unittest.TestCase):
                 extract_text("big.docx", data)
         finally:
             ingest.MAX_TEXT = old
+
+
+PLAYBOOK = b"""
+name: Loan desk
+greeting: Namaste, this is Riya from the loan desk.
+rules:
+  - Never quote an interest rate before the CIBIL check.
+  - Speak in Hindi if the caller does.
+intents:
+  - name: emi_query
+    response: The EMI is due on the 5th of every month.
+  - name: closure
+    response: Foreclosure is free after 12 EMIs.
+"""
+
+
+class YamlTest(unittest.TestCase):
+    def test_nested_sections_keep_their_path(self):
+        text = extract_text("playbook.yaml", PLAYBOOK)
+        self.assertIn("name: Loan desk", text)
+        self.assertIn("# rules\n- Never quote an interest rate before the CIBIL check.", text)
+        self.assertIn("# intents / emi_query\nname: emi_query\nresponse: The EMI is due", text)
+
+    def test_yml_extension_and_prose_even_with_repeated_keys(self):
+        # "name:" / "response:" alternate like two speakers; a YAML file is never a transcript.
+        kind, chunks = plan_chunks("playbook.yml", PLAYBOOK)
+        self.assertEqual(kind, "prose")
+        self.assertTrue(any("Foreclosure is free" in c.text and "closure" in c.text for c in chunks))
+
+    def test_invalid_yaml_rejected(self):
+        with self.assertRaisesRegex(ValueError, "YAML"):
+            extract_text("bad.yaml", b"a: [unclosed")
+
+    def test_alias_bomb_is_capped(self):
+        bomb = ["a: &a [x, x, x, x, x, x, x, x, x, x]"]
+        for i in range(1, 9):
+            bomb.append(f"{chr(97 + i)}: &{chr(97 + i)} [" + ", ".join([f"*{chr(96 + i)}"] * 10) + "]")
+        with self.assertRaisesRegex(ValueError, "Split it"):
+            extract_text("bomb.yaml", "\n".join(bomb).encode())
+
+    def test_self_referencing_alias_is_value_error(self):
+        with self.assertRaises(ValueError):
+            extract_text("loop.yaml", b"a: &a [*a]")
 
 
 if __name__ == "__main__":

@@ -1128,6 +1128,7 @@ def _cartridge_provider(history: str, space: str):
                     fn.last_usage = {
                         "prompt_tokens": val.prompt_tokens, "cached_tokens": val.cached_tokens,
                         "prefill_gpu_ms": val.prefill_gpu_ms,
+                        "engine_ttft_ms": val.ttft_ms,
                         "cached_source": val.extra.get("cached_source"),
                         "metrics_overlap": bool(val.extra.get("metrics_overlap")),
                         "cartridge_id": cart.id, "cartridge_tokens": cart.tokens,
@@ -3680,7 +3681,8 @@ async def api_cartridge_refresh() -> dict:
 #: two panels are two answers). For a spoken turn the page reads both panels
 #: out itself, left then right, through this endpoint; the key never leaves
 #: the server. Replays hit the cache, not ElevenLabs.
-ELEVEN_MODEL = os.environ.get("ELEVENLABS_MODEL", "eleven_v3")
+# flash: ~1.0 s to first audio vs ~1.9 s for eleven_v3 (measured, same text and voice).
+ELEVEN_MODEL = os.environ.get("ELEVENLABS_MODEL", "eleven_flash_v2_5")
 ELEVEN_VOICE = os.environ.get("ELEVENLABS_VOICE_ID", "MmQVkVZnQ0dUbfWzcW6f")
 _TTS_CACHE: "collections.OrderedDict[str, bytes]" = collections.OrderedDict()
 _TTS_CACHE_MAX = 64

@@ -77,6 +77,7 @@ dependencies = [
     "pywebrtc-audio",     # echo cancellation (lets you barge in over a loudspeaker)
     "pypdf",              # /memories page: text from uploaded PDFs
     "python-docx",        # /memories page: text from uploaded DOCX
+    "pyyaml",             # /memories page: text from uploaded YAML (playbooks)
 ]
 
 [project.optional-dependencies]

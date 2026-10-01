@@ -2040,6 +2040,7 @@ function feedDelta(panel,text,ttfb){
   if(ttfb!==undefined && ttfb!==null){ arm.ttfb=ttfb; c.ttfb.textContent=ttfb+'ms'; paintViz(FEED); }
   // Only follow-scroll if it was already stuck to the bottom. Yanking the user back while they scroll through old turns is the most annoying thing.
   if(atBottom && box) box.scrollTop=box.scrollHeight;
+  pumpSpeech(FEED.rec);
 }
 
 function feedDone(panel,m){
@@ -2057,12 +2058,15 @@ function feedDone(panel,m){
 }
 
 /* ── Compare-mode speech (ElevenLabs via /api/tts) ─────────────────────
-   A spoken compare turn is read out left panel first, then right, each as soon as
-   it has finished generating. Typed turns stay silent. Every card has a replay
+   A spoken compare turn is read out left panel first, then right. Each panel is read
+   sentence by sentence while it is still generating: waiting for the whole answer put
+   the full generation time (~2 s) in front of the first word. Only one clip is fetched
+   ahead of the one playing, so the next sentence is ready without a burst of
+   requests to ElevenLabs. Typed turns stay silent. Every card has a replay
    button; the server caches the audio so a replay does not synthesise again.
    The mic is muted while this plays (like a memory replay): the browser's AEC does
    not fully cancel speaker output, and the echo would open a turn by itself. */
-const SPEECH={audio:null, rec:null, panel:null, auto:null};
+const SPEECH={audio:null, rec:null, panel:null, auto:null, queue:[]};
 let cmpSpeaking=false;
 function armSettled(arm){ return !!arm && (arm.ms!=null || !!arm.error); }
 function armSpeakable(arm){ return !!arm && !arm.error && !!(arm.text||'').trim(); }
@@ -2078,13 +2082,19 @@ function paintPlayButtons(){ document.querySelectorAll('#chatLog .tc-play').forE
 function stopSpeech(){
   const a=SPEECH.audio;
   if(a){ a.onended=a.onerror=null; a.pause(); a.removeAttribute('src'); a.load(); }
+  for(const q of SPEECH.queue) if(q.audio){ q.audio.removeAttribute('src'); q.audio.load(); }
+  SPEECH.queue=[];
   SPEECH.audio=null; SPEECH.rec=null; SPEECH.panel=null; cmpSpeaking=false;
   paintPlayButtons();
 }
+function ttsAudio(text){
+  const a=new Audio('/api/tts?text='+encodeURIComponent(text.trim().slice(0,2500)));
+  a.preload='auto';
+  return a;
+}
 function playArm(rec,panel){
-  const text=(rec.arms[panel].text||'').trim().slice(0,2500);
   return new Promise(res=>{
-    const a=new Audio('/api/tts?text='+encodeURIComponent(text));
+    const a=ttsAudio(rec.arms[panel].text||'');
     SPEECH.audio=a; SPEECH.rec=rec; SPEECH.panel=panel; cmpSpeaking=true; paintPlayButtons();
     const done=ok=>{
       if(SPEECH.audio===a){ SPEECH.audio=null; SPEECH.rec=null; SPEECH.panel=null; cmpSpeaking=false; paintPlayButtons(); }
@@ -2095,19 +2105,66 @@ function playArm(rec,panel){
     a.play().catch(()=>done(false));
   });
 }
-/* Auto read-out: next unspoken panel in a-then-b order, once it has settled. */
+/* Next clip of a streaming answer from char `from`: up to the first sentence end that
+   leaves at least SEG_MIN chars (so "Haan।" rides with the next sentence), or the whole
+   rest once the arm has settled. null = nothing ready yet. */
+const SEG_MIN=12;
+function nextSegment(arm,from){
+  const text=arm.text||'';
+  if(armSettled(arm)){
+    const rest=text.slice(from).trim();
+    return rest ? {text:rest, end:text.length} : null;
+  }
+  const re=/[.!?।]+["')\]]*\s+/g;
+  re.lastIndex=from;
+  let m;
+  while((m=re.exec(text))){
+    const end=m.index+m[0].length;
+    if(text.slice(from,end).trim().length>=SEG_MIN) return {text:text.slice(from,end).trim(), end};
+  }
+  return null;
+}
+/* Play the head of SPEECH.queue; fetch the clip after it while it plays. */
+function playQueue(){
+  if(SPEECH.audio) return;
+  const q=SPEECH.queue.shift();
+  if(!q){ cmpSpeaking=false; paintPlayButtons(); return; }
+  const a=q.audio||ttsAudio(q.text);
+  SPEECH.audio=a; SPEECH.rec=q.rec; SPEECH.panel=q.panel; cmpSpeaking=true;
+  if(SPEECH.queue[0] && !SPEECH.queue[0].audio) SPEECH.queue[0].audio=ttsAudio(SPEECH.queue[0].text);
+  paintPlayButtons();
+  const next=()=>{
+    if(SPEECH.audio!==a) return;
+    SPEECH.audio=null; SPEECH.rec=null; SPEECH.panel=null;
+    playQueue();
+  };
+  a.onended=next;
+  a.onerror=()=>{ toast('TTS failed (ElevenLabs)'); next(); };
+  a.play().catch(next);
+}
+/* Auto read-out: called on every delta and done. Cuts the finished sentences of the
+   current panel (a, then b once a has settled) into the queue. */
 function pumpSpeech(rec){
-  if(!rec || SPEECH.auto!==rec || SPEECH.audio) return;
-  rec.heard=rec.heard||{};
+  if(!rec || SPEECH.auto!==rec) return;
+  rec.heard=rec.heard||{}; rec.cut=rec.cut||{a:0, b:0};
   for(const p of ['a','b']){
     if(rec.heard[p]) continue;
     const arm=rec.arms[p];
-    if(!arm.started || !armSettled(arm)) return;          // left must finish before right may speak
+    if(!arm || !arm.started) break;
+    if(!arm.error){
+      let seg;
+      while((seg=nextSegment(arm,rec.cut[p]))){
+        rec.cut[p]=seg.end;
+        SPEECH.queue.push({rec, panel:p, text:seg.text, audio:null});
+        cmpSpeaking=true;                                   // mic stays muted between sentences
+      }
+    }
+    if(!armSettled(arm)) break;                             // left must finish before right may speak
     rec.heard[p]=true;
-    if(!armSpeakable(arm)) continue;
-    playArm(rec,p).then(()=>pumpSpeech(rec));
-    return;
   }
+  if(SPEECH.queue[0] && SPEECH.audio && !SPEECH.queue[0].audio)
+    SPEECH.queue[0].audio=ttsAudio(SPEECH.queue[0].text);
+  playQueue();
 }
 function replayArm(rec,panel){
   const wasThis=SPEECH.rec===rec && SPEECH.panel===panel;

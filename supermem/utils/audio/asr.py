@@ -8,9 +8,13 @@ selected by the ``asr`` factory in ``utils/defaults.py`` according to ``SUPERMEM
 """
 from __future__ import annotations
 
+import base64
+import json
 import os
+import queue
 import re
 import threading
+import time
 
 import numpy as np
 
@@ -403,3 +407,215 @@ class ElevenLabsScribeASR(OpenAIStreamingASR):
         j = r.json()
         self.last_language = j.get("language_code") or ""
         return (j.get("text") or "").strip()
+
+
+class ElevenLabsRealtimeASR:
+    """ElevenLabs Scribe v2 realtime over one long-lived WebSocket. Enabled by
+    ``SUPERMEM_ASR=elevenlabs_realtime``.
+
+    Why: the batch Scribe path uploads the whole turn again at the end, and that
+    final request was the slowest part of a voice turn (flush 1.5-1.7 s, measured).
+    Here every frame is streamed as it is captured, partials come back while the
+    user talks, and ``flush()`` only sends a manual commit for audio the server
+    already holds -- the committed text is back in a few hundred ms.
+
+    Threads: one sends (``_out`` queue), one receives. The socket is reopened
+    after a drop; audio sent while it was down is lost, and ``flush()`` then falls
+    back to the last partial rather than hang.
+    """
+
+    URL = "wss://api.elevenlabs.io/v1/speech-to-text/realtime"
+    SEND_EVERY_S = 0.1          # batch frames: ~10 messages a second instead of ~30
+    IDLE_COMMIT_S = 20.0        # the mic streams between turns too; drop silence the server holds
+
+    def __init__(self, language: str = "", api_key: str = "", keyterms=None,
+                 connect=None, commit_timeout_s: float | None = None) -> None:
+        lang = (language or os.environ.get("SUPERMEM_ASR_LANGUAGE", "") or "auto").lower()
+        self.language = "" if lang in ("", "auto") else lang
+        self.api_key = api_key or os.environ.get("ELEVENLABS_API_KEY", "")
+        if keyterms is None:
+            keyterms = [k.strip() for k in os.environ.get("SUPERMEM_ASR_KEYTERMS", "").split(",")
+                        if k.strip()]
+        self.keyterms = list(keyterms)
+        self.commit_timeout_s = (commit_timeout_s if commit_timeout_s is not None
+                                 else float(os.environ.get("SUPERMEM_ASR_COMMIT_TIMEOUT_S", "3")))
+        self.last_language = ""
+        self._connect = connect or self._ws_connect
+        self._cond = threading.Condition()
+        self._out: "queue.Queue[str | None]" = queue.Queue()
+        self._thread = None
+        self._closed = False
+        self._ready = threading.Event()   # set once the server said session_started
+        self._skip = 0                    # results still owed for turns already reset
+        self._waiting = 0                 # commits of this turn not answered yet
+        self.reset()
+
+    # ── socket ───────────────────────────────────────────────────────────────
+    def url(self) -> str:
+        from urllib.parse import urlencode
+        q = [("model_id", "scribe_v2_realtime"), ("audio_format", f"pcm_{SAMPLE_RATE}"),
+             ("commit_strategy", "manual")]
+        if self.language:
+            q.append(("language_code", self.language))
+        q += [("keyterms", k) for k in self.keyterms]
+        return f"{self.URL}?{urlencode(q)}"
+
+    def _ws_connect(self, url, headers):
+        from websockets.sync.client import connect
+        return connect(url, additional_headers=headers, open_timeout=10, max_size=None)
+
+    def _ensure(self) -> None:
+        if self._thread is None or not self._thread.is_alive():
+            self._closed = False
+            self._thread = threading.Thread(target=self._run, name="scribe-realtime", daemon=True)
+            self._thread.start()
+
+    def _run(self) -> None:
+        backoff = 0.2
+        while not self._closed:
+            try:
+                ws = self._connect(self.url(), {"xi-api-key": self.api_key})
+            except Exception as e:  # noqa: BLE001
+                print(f"[asr] realtime connect failed: {type(e).__name__}: {e}", flush=True)
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 5.0)
+                continue
+            opened = time.monotonic()
+            reader = threading.Thread(target=self._read, args=(ws,), daemon=True)
+            reader.start()
+            try:
+                while not self._closed and reader.is_alive():
+                    try:
+                        msg = self._out.get(timeout=0.5)
+                    except queue.Empty:
+                        continue
+                    if msg is None:
+                        continue                 # wake-up: re-check closed / reader
+                    ws.send(msg)
+            except Exception as e:  # noqa: BLE001
+                print(f"[asr] realtime send failed: {type(e).__name__}: {e}", flush=True)
+            finally:
+                try:
+                    ws.close()
+                except Exception:  # noqa: BLE001
+                    pass
+                reader.join(timeout=1.0)
+                self._ready.clear()
+                with self._cond:                 # a new session owes nothing for the old one
+                    self._skip = self._waiting = 0
+                    self._cond.notify_all()
+            # A session the server drops at once (bad key, quota) must not become a hot loop.
+            if time.monotonic() - opened < 2.0:
+                time.sleep(backoff)
+                backoff = min(backoff * 2, 5.0)
+            else:
+                backoff = 0.2
+
+    def _read(self, ws) -> None:
+        try:
+            while True:
+                self._on_message(json.loads(ws.recv()))
+        except Exception as e:  # noqa: BLE001
+            if not self._closed:
+                print(f"[asr] realtime socket closed: {type(e).__name__}: {e}", flush=True)
+        finally:
+            self._out.put(None)                  # wake the sender so it reconnects
+
+    def _on_message(self, m: dict) -> None:
+        kind = m.get("message_type", "")
+        with self._cond:
+            if kind == "session_started":
+                self._ready.set()
+            elif kind == "partial_transcript":
+                if not self._skip:               # while a reset turn is still owed, partials are its
+                    self._partial = (m.get("text") or "").strip()
+            elif kind.startswith("committed_transcript"):
+                if kind != "committed_transcript":
+                    return                       # the _with_timestamps twin of the same commit
+                if self._skip:
+                    self._skip -= 1
+                    return
+                text = (m.get("text") or "").strip()
+                if text:
+                    self._committed.append(text)
+                self._partial = ""
+                self._waiting = max(0, self._waiting - 1)
+                self._cond.notify_all()
+            elif "error" in m or kind.endswith("error"):
+                print(f"[asr] realtime {kind}: {m.get('error') or m}", flush=True)
+                if self._skip:
+                    self._skip -= 1              # the stale commit got this error instead
+                elif self._waiting:
+                    self._waiting -= 1           # e.g. insufficient_audio_activity for our commit
+                    self._cond.notify_all()
+
+    def _send_audio(self, commit: bool = False) -> None:
+        pcm = b""
+        if self._pending:
+            audio = np.concatenate(self._pending)
+            pcm = (np.clip(audio, -1.0, 1.0) * 32767).astype(np.int16).tobytes()
+            self._pending, self._pending_n = [], 0
+        if not pcm and not commit:
+            return
+        self._out.put(json.dumps({"message_type": "input_audio_chunk",
+                                  "audio_base_64": base64.b64encode(pcm).decode(),
+                                  "commit": commit, "sample_rate": SAMPLE_RATE}))
+
+    def _text(self) -> str:
+        return " ".join(self._committed + ([self._partial] if self._partial else []))
+
+    # ── streaming interface (same shape as the other ASRs) ───────────────────
+    def feed(self, samples) -> str:
+        self._ensure()
+        samples = np.asarray(samples, dtype=np.float32)
+        with self._cond:
+            self._pending.append(samples)
+            self._pending_n += len(samples)
+            self._fed += len(samples)
+            if self._pending_n >= self.SEND_EVERY_S * SAMPLE_RATE:
+                self._send_audio()
+            if (self._fed >= self.IDLE_COMMIT_S * SAMPLE_RATE and not self._committed
+                    and not self._partial and not self._waiting):
+                # Nobody has said anything for a while: commit and discard, so the
+                # server never holds minutes of silence for the next turn.
+                self._send_audio(commit=True)
+                self._skip += 1
+                self._fed = 0
+            return self._text()
+
+    def flush(self) -> str:
+        """Commit what the server holds and wait for its text. The one blocking call."""
+        with self._cond:
+            if not self._fed:
+                return self._text()
+            self._send_audio(commit=True)
+            self._fed = 0
+            self._waiting += 1
+            done = self._cond.wait_for(lambda: self._waiting == 0, timeout=self.commit_timeout_s)
+            if not done:
+                print(f"[asr] realtime commit not answered in {self.commit_timeout_s:.1f}s, "
+                      "using the partial", flush=True)
+                self._skip += self._waiting
+                self._waiting = 0
+            return self._text()
+
+    def warmup(self) -> None:
+        """Open the socket at startup, so the first turn does not pay for TLS + session."""
+        self._ensure()
+        if not self._ready.wait(timeout=10):
+            print("[asr] realtime warmup: no session_started within 10s (ignored)", flush=True)
+        self.reset()
+
+    def reset(self) -> None:
+        with self._cond:
+            self._skip += self._waiting       # their answers still come; they belong to this turn
+            self._waiting = 0
+            self._committed: list = []
+            self._partial = ""
+            self._pending: list = []
+            self._pending_n = 0
+            self._fed = 0
+
+    def close(self) -> None:
+        self._closed = True
+        self._out.put(None)

@@ -51,6 +51,11 @@ def default_utils(base_url, memory_root):
         if _pick == "openai":
             from supermem.utils.audio.asr import OpenAIStreamingASR
             return OpenAIStreamingASR()
+        if _pick == "elevenlabs_realtime":
+            # Scribe v2 realtime: frames stream over a WebSocket, so the end of a turn is
+            # a commit (~0.3 s), not a re-upload of the whole turn (~1.5 s).
+            from supermem.utils.audio.asr import ElevenLabsRealtimeASR
+            return ElevenLabsRealtimeASR()
         if _pick == "elevenlabs":
             # ElevenLabs Scribe: keeps the spoken language (Hindi stays Hindi), see ElevenLabsScribeASR.
             from supermem.utils.audio.asr import ElevenLabsScribeASR

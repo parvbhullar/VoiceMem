@@ -209,8 +209,10 @@ async def _run_arm(arm: Arm, text: str, memory_context: str, send, provider) -> 
     started = time.monotonic()
     reply, error, ttfb = "", "", None
     fn = None
+    built_ms = None
     try:
         fn = provider(arm)
+        built_ms = int((time.monotonic() - started) * 1000)
         async for delta in fn(text, ctx):
             msg = {"type": "cmp_delta", "panel": arm.label, "text": delta}
             if ttfb is None:
@@ -241,11 +243,33 @@ async def _run_arm(arm: Arm, text: str, memory_context: str, send, provider) -> 
     usage = getattr(fn, "last_usage", None)
     if usage:
         done["usage"] = usage
+    # Where the first-token wait goes: building the provider, the engine's own wait
+    # from request sent to first token (cartridge arms only), and the rest (loop, client setup).
+    engine = (usage or {}).get("engine_ttft_ms")
+    print(f"[lat] cmp {arm.label}: first token {ttfb}ms (build {built_ms}ms"
+          + (f", engine {engine:.0f}ms" if engine is not None else "")
+          + f") total {ms}ms", flush=True)
     if error:
         done["error"] = error
     await send(done)
     return {"label": arm.label, "text": reply, "ms": ms, "ttfb": ttfb, "error": error,
             "usage": usage}
+
+
+_LAG = {"worst_ms": 0.0}
+
+
+async def _loop_lag(tick: float = 0.02) -> None:
+    """Worst event-loop stall while the arms stream: anything blocking the loop
+    (CPU work, a sync call) delays every token by that much. Logged per turn."""
+    _LAG["worst_ms"] = 0.0
+    try:
+        while True:
+            t = time.monotonic()
+            await asyncio.sleep(tick)
+            _LAG["worst_ms"] = max(_LAG["worst_ms"], (time.monotonic() - t - tick) * 1000)
+    finally:
+        print(f"[lat] cmp loop stall worst {_LAG['worst_ms']:.0f}ms", flush=True)
 
 
 async def fan_out(text: str, memory_context: str, arms: tuple[Arm, Arm], send,
@@ -264,9 +288,17 @@ async def fan_out(text: str, memory_context: str, arms: tuple[Arm, Arm], send,
     # return_exceptions so one arm's disconnect does not cancel the other
     # mid-await; the disconnect is then re-raised below, after both have
     # settled, so the ws handler sees it as the normal end of the connection.
-    settled = await asyncio.gather(
-        *(_run_arm(arm, text, memory_context, send, provider) for arm in arms),
-        return_exceptions=True)
+    lag = asyncio.ensure_future(_loop_lag())
+    try:
+        settled = await asyncio.gather(
+            *(_run_arm(arm, text, memory_context, send, provider) for arm in arms),
+            return_exceptions=True)
+    finally:
+        lag.cancel()
+        try:
+            await lag
+        except asyncio.CancelledError:
+            pass
     for o in settled:
         if isinstance(o, BaseException):
             raise o

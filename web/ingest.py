@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import queue
 import re
 import threading
@@ -18,12 +19,15 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 MAX_BYTES = 10 * 1024 * 1024
-MAX_CHUNKS = 500          # ~5-20 s each: 500 is already over an hour of LLM calls
+# ~5-20 s each: 2000 is several hours of LLM calls. A full playbook YAML (~250 KB) is ~550.
+MAX_CHUNKS = int(os.environ.get("SUPERMEM_INGEST_MAX_CHUNKS", "2000"))
 CHUNK_CHARS = 800
 MAX_TEXT = MAX_CHUNKS * CHUNK_CHARS      # more text than this cannot fit in MAX_CHUNKS chunks
 MAX_DOCX_XML = 20 * 1024 * 1024          # word/document.xml, uncompressed (zip-bomb guard)
 MAX_DOCX_UNZIPPED = 200 * 1024 * 1024
 TEXT_EXTS = {"", ".txt", ".md", ".markdown", ".json"}
+YAML_EXTS = {".yaml", ".yml"}
+MAX_YAML_NODES = 200_000                 # aliases can make a tiny file a huge tree
 ASSISTANT_NAMES = {"assistant", "agent", "ai", "bot"}
 SELF_NAMES = {"me", "i", "myself", "user"}
 SKIP_ROLES = {"system", "developer", "tool", "function"}   # instructions and tool output, not people
@@ -50,7 +54,12 @@ def plan_chunks(filename: str, data: bytes, fmt: str = "auto",
     text = extract_text(filename, data)
     if Path(filename or "").suffix.lower() == ".json" and _json_turns(text) is None:
         raise ValueError("A .json file must be a list of {speaker or role, text or content} objects.")
-    kind = detect_format(text) if fmt in ("", "auto") else fmt
+    if fmt in ("", "auto"):
+        # A YAML file's "name: / response:" lines alternate like two speakers; it is never a transcript.
+        is_yaml = Path(filename or "").suffix.lower() in YAML_EXTS
+        kind = "prose" if is_yaml else detect_format(text)
+    else:
+        kind = fmt
     if kind == "transcript":
         chunks = split_transcript(text, owner)
     elif kind == "prose":
@@ -72,8 +81,10 @@ def extract_text(filename: str, data: bytes) -> str:
         return _pdf_text(data)
     if ext == ".docx":
         return _docx_text(data)
+    if ext in YAML_EXTS:
+        return _yaml_text(data)
     if ext not in TEXT_EXTS:
-        raise ValueError(f"Unsupported file type {ext}. Use .txt, .md, .json, .pdf or .docx.")
+        raise ValueError(f"Unsupported file type {ext}. Use .txt, .md, .json, .yaml, .pdf or .docx.")
     try:
         return data.decode("utf-8-sig")
     except UnicodeDecodeError:
@@ -128,6 +139,67 @@ def _docx_text(data: bytes) -> str:
             raise ValueError(f"The DOCX has more text than {MAX_CHUNKS} chunks. "
                              "Split it and add it in parts.")
     return "\n\n".join(out)
+
+
+def _yaml_text(data: bytes) -> str:
+    """A YAML document (e.g. a playbook) as headed prose: each mapping or list becomes a
+    "# a / b" section of its scalar "key: value" and "- item" lines, so split_prose keeps
+    the path with every fact. A list item is named by its name/id/title, else its number."""
+    import yaml
+    try:
+        doc = yaml.safe_load(data.decode("utf-8-sig"))
+    except UnicodeDecodeError:
+        raise ValueError("The file is not UTF-8 text.") from None
+    except yaml.YAMLError as e:
+        raise ValueError(f"Could not read the YAML: {e}") from None
+    if not isinstance(doc, (dict, list)):
+        return "" if doc is None else str(doc)
+
+    sections: list[str] = []
+    size = nodes = 0
+
+    def scalar(v) -> str:
+        if v is None:
+            return ""
+        if isinstance(v, bool):
+            return "true" if v else "false"
+        return str(v).strip()
+
+    def label(k, v) -> str:
+        if isinstance(k, int) and isinstance(v, dict):
+            for key in ("name", "id", "title"):
+                if isinstance(v.get(key), (str, int)):
+                    return str(v[key])
+        return str(k + 1) if isinstance(k, int) else str(k)
+
+    def walk(node, path: list[str]) -> None:
+        nonlocal size, nodes
+        lines, nested = [], []
+        for k, v in (node.items() if isinstance(node, dict) else enumerate(node)):
+            nodes += 1
+            if nodes > MAX_YAML_NODES:
+                raise ValueError("The YAML is too large once expanded. Split it and add it in parts.")
+            if isinstance(v, (dict, list)) and v:
+                nested.append((v, path + [label(k, v)]))
+            elif isinstance(node, dict):
+                lines.append(f"{k}: {scalar(v)}")
+            else:
+                lines.append(f"- {scalar(v)}")
+        if lines:
+            body = "\n".join(lines)
+            sections.append(f"# {' / '.join(path)}\n{body}" if path else body)
+            size += len(sections[-1]) + 2
+            if size > MAX_TEXT:
+                raise ValueError(f"The YAML has more text than {MAX_CHUNKS} chunks. "
+                                 "Split it and add it in parts.")
+        for v, p in nested:
+            walk(v, p)
+
+    try:
+        walk(doc, [])
+    except RecursionError:                   # deep nesting, or an alias that contains itself
+        raise ValueError("The YAML is nested too deeply.") from None
+    return "\n\n".join(sections)
 
 
 def detect_format(text: str) -> str:
